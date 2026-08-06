@@ -18,18 +18,24 @@ func _initialize() -> void:
 	assert(not public_record.has("peer_id"))
 	assert(not public_record.has("address"))
 
+	# Nuclear Rush is 4v4: the roster caps each team at MAX_TEAM_SIZE and a
+	# full 4v4 fills to 8, with a request beyond the cap rejected outright.
+	assert(RiftlineRoster.MAX_TEAM_SIZE == 4)
 	var full := RiftlineRoster.new()
-	assert(full.configure(5, true, false))
-	for peer_id in range(1, 11):
+	assert(full.configure(4, true, false))
+	for peer_id in range(1, 9):
 		assert(not full.assign_peer(peer_id).is_empty())
 	var records := full.records()
-	assert(records.size() == 10)
-	assert(_count_team(records, Duelist.Team.RED) == 5)
-	assert(_count_team(records, Duelist.Team.BLUE) == 5)
-	assert(full.assign_peer(11).is_empty())
-	assert(full.records().size() == 10)
+	assert(records.size() == 8)
+	assert(_count_team(records, Duelist.Team.RED) == 4)
+	assert(_count_team(records, Duelist.Team.BLUE) == 4)
+	assert(full.assign_peer(9).is_empty())
+	assert(full.records().size() == 8)
 	assert(_unique_actor_ids(records))
 	assert(full.is_ready())
+
+	var oversized := RiftlineRoster.new()
+	assert(not oversized.configure(5, false, false))
 
 	var dedicated_tie := RiftlineRoster.new()
 	assert(dedicated_tie.configure(1, true, false))

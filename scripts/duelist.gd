@@ -48,7 +48,9 @@ static func first_person_kunai_rotation() -> Vector3:
 
 const GRAVITY := 26.0
 const JUMP_SPEED := 9.3
-const CARRY_SPEED_MULTIPLIER := 0.88
+# Carrying the nuclear core is the mode's central risk: slow enough that a
+# carrier needs escorts, not so slow that reaching your own base is hopeless.
+const CORE_CARRY_SPEED_MULTIPLIER := 0.82
 # The first deliberate carbine shot is exact.  Follow-up hip shots open into a
 # small deterministic cone that is useful at Concourse range, while the short
 # reset window makes releasing fire restore the current single-shot feel.
@@ -61,7 +63,7 @@ var team: Team = Team.RED
 var actor_id := ""
 var health := HEALTH
 var eliminated := false
-var carrying_seed := false
+var carrying_core := false
 var stance: Stance = Stance.STAND
 var weapon: Weapon = Weapon.PULSE
 var horizontal_fov := DEFAULT_HORIZONTAL_FOV
@@ -207,14 +209,14 @@ func set_friendly_presenter(friendly: bool) -> void:
 	_friendly_pennant.layers = 1
 	add_child(_friendly_pennant)
 
-func set_carrying_seed(carrying: bool) -> void:
-	carrying_seed = carrying and not eliminated
+func set_carrying_core(carrying: bool) -> void:
+	carrying_core = carrying and not eliminated
 
-func is_carrying_seed() -> bool:
-	return carrying_seed and not eliminated
+func is_carrying_core() -> bool:
+	return carrying_core and not eliminated
 
 func movement_speed_multiplier() -> float:
-	return CARRY_SPEED_MULTIPLIER if is_carrying_seed() else 1.0
+	return CORE_CARRY_SPEED_MULTIPLIER if is_carrying_core() else 1.0
 
 func _process(delta: float) -> void:
 	if not _render_visuals:
@@ -313,7 +315,7 @@ func _process(delta: float) -> void:
 		_body_visual_root.position.x = lerpf(_body_visual_root.position.x, 0.0 if powered_down else strafe * STRAFE_BODY_OFFSET, clampf(delta * 9.0, 0.0, 1.0))
 		_body_visual_root.position.y = lerpf(_body_visual_root.position.y, -0.24 if powered_down else 0.0, clampf(delta * (7.0 if powered_down else 9.0), 0.0, 1.0))
 	if _carrier_signal_root != null:
-		_carrier_signal_root.visible = is_carrying_seed()
+		_carrier_signal_root.visible = is_carrying_core()
 		_carrier_signal_root.rotation.y += delta * 1.8
 		_carrier_signal_root.scale = Vector3.ONE * (1.0 + sin(Time.get_ticks_msec() * 0.006) * 0.06)
 
@@ -420,7 +422,7 @@ func authoritative_state(server_tick: int, last_input_sequence: int) -> Dictiona
 		"stance": int(stance),
 		"weapon": int(weapon),
 		"eliminated": eliminated,
-		"carrying_seed": is_carrying_seed(),
+		"carrying_core": is_carrying_core(),
 	}
 
 func apply_input_frame(frame: Dictionary, delta: float, simulate_combat: bool) -> void:
@@ -485,7 +487,7 @@ func apply_presentation_state(state: Dictionary) -> void:
 	if weapon != next_weapon:
 		set_weapon_presentation(next_weapon as Weapon)
 	eliminated = bool(state.get("eliminated", eliminated))
-	set_carrying_seed(bool(state.get("carrying_seed", carrying_seed)))
+	set_carrying_core(bool(state.get("carrying_core", carrying_core)))
 	visible = _render_visuals
 	collision_layer = 0 if eliminated or not _authoritative_collision else 2
 
@@ -671,7 +673,7 @@ func take_damage(amount: float, attacker: Duelist) -> void:
 	damaged.emit(amount, health, attacker.actor_id if attacker != null else "", attacker.global_position if attacker != null else Vector3.ZERO, int(attacker.team) if attacker != null else -1)
 	if health <= 0.0:
 		eliminated = true
-		carrying_seed = false
+		carrying_core = false
 		_recoil_remaining = 0.0
 		_recoil_kick = 0.0
 		_recoil_lateral = 0.0
@@ -687,7 +689,7 @@ func respawn_at(point: Vector3) -> void:
 	velocity = Vector3.ZERO
 	health = HEALTH
 	eliminated = false
-	carrying_seed = false
+	carrying_core = false
 	visible = true
 	collision_layer = 2
 	_aiming = false

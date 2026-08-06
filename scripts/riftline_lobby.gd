@@ -12,8 +12,7 @@ signal state_changed(state: Dictionary)
 enum Phase { STAGING, ARMING, LIVE, REMATCH, ABANDONED }
 
 var roster: RiftlineRoster
-var team_size := 1
-var arena_id: RiftlineMap.Id = RiftlineMap.Id.DUEL_YARD
+var team_size := 4
 var dedicated := false
 
 var _phase: Phase = Phase.STAGING
@@ -23,24 +22,20 @@ var _ready_by_actor: Dictionary = {}
 var _rematch_ready_by_actor: Dictionary = {}
 var _configured := false
 
-func configure(next_team_size: int, next_arena_id: RiftlineMap.Id, is_dedicated: bool) -> bool:
+func configure(next_team_size: int, is_dedicated_session: bool) -> void:
 	if next_team_size < RiftlineRoster.MIN_TEAM_SIZE or next_team_size > RiftlineRoster.MAX_TEAM_SIZE:
-		return false
-	if next_arena_id not in [RiftlineMap.Id.DUEL_YARD, RiftlineMap.Id.CONCOURSE]:
-		return false
+		return
 	team_size = next_team_size
-	arena_id = next_arena_id
-	dedicated = is_dedicated
+	dedicated = is_dedicated_session
 	roster = RiftlineRoster.new()
 	if not roster.configure(team_size, dedicated, false):
-		return false
+		return
 	_phase = Phase.STAGING
 	_revision = 0
 	_launch_generation = 0
 	_ready_by_actor.clear()
 	_rematch_ready_by_actor.clear()
 	_configured = true
-	return true
 
 func add_host() -> Dictionary:
 	if not _configured or dedicated or _phase != Phase.STAGING:
@@ -197,8 +192,6 @@ func public_state() -> Dictionary:
 	var result := {
 		"phase": int(_phase),
 		"phase_name": Phase.keys()[int(_phase)].to_upper(),
-		"arena_id": int(arena_id),
-		"arena_name": _arena_name(),
 		"team_size": team_size,
 		"records": entries,
 		"revision": _revision,
@@ -246,9 +239,6 @@ func _has_human_peer(peer_id: int) -> bool:
 
 func _actor_id_for_peer(peer_id: int) -> String:
 	return str(roster.actor_for_peer(peer_id).get("actor_id", ""))
-
-func _arena_name() -> String:
-	return "concourse" if arena_id == RiftlineMap.Id.CONCOURSE else "duel-yard"
 
 func _emit_state(reason: String = "") -> void:
 	var state := public_state()

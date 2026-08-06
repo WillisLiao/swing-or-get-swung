@@ -1,10 +1,10 @@
 class_name RiftlineArena
 extends Node3D
 
-const PULP_LIT := preload("res://shaders/pulp_lit.gdshader")
 const SNAPSHOT_BUFFER := preload("res://scripts/riftline_snapshot_buffer.gd")
 const PRACTICE_PANEL := preload("res://scripts/riftline_practice_panel.gd")
 const OPENING_HOLD_SECONDS := 2.5
+const DEFAULT_OFFLINE_SQUAD_SIZE := 4
 
 var ballistics: RiftBallistics
 var hud: DuelHud
@@ -14,7 +14,6 @@ var network: RiftlineNetwork
 var arena_map: RiftlineMap
 var rift_link: RiftLinkPanel
 var practice_panel: Control
-var _game_mode: RiftlineMatch.GameMode = RiftlineMatch.GameMode.DEATHMATCH
 var _mouse_captured := false
 var _lan_active := false
 var _lan_host := false
@@ -52,7 +51,7 @@ var _capture_hud_layout := false
 var _capture_character := false
 var _capture_overview := false
 var _capture_rift_link := false
-var _offline_squad_size := 0
+var _offline_squad_size := DEFAULT_OFFLINE_SQUAD_SIZE
 var _squad_preview := ""
 var _tactics_preview := ""
 var _practice_preview := ""
@@ -89,10 +88,10 @@ var _reload_was_active := false
 var _reload_stage_played := false
 var _knife_event_sequence := 0
 var _projectile_presentation_pool: Node3D
-var _bomb_presentation_root: Node3D
-var _bomb_model: Node3D
-var _bomb_blink_light: OmniLight3D
-var _bomb_site_markers: Array[Node3D] = []
+var _nuke_core_root: Node3D
+var _pad_nodes: Dictionary = {}
+var _pad_ring_materials: Dictionary = {}
+var _pad_base_colors: Dictionary = {}
 var _tracer_pool: Array[MeshInstance3D] = []
 var _impact_pool: Array[Node3D] = []
 var _projectile_tracers: Dictionary = {}
@@ -229,35 +228,58 @@ func _unhandled_input(event: InputEvent) -> void:
 		_local_duelist.apply_look(event.relative)
 
 func _build_environment() -> void:
+	# Realistic look: sky-sourced ambient and reflection (so the NuclearMaterials
+	# metal-roughness response reads as metal), ACES tonemapping, soft shadows,
+	# and bloom.  Mobile renderer only, so no SSAO/SSIL/SDFGI/SSR/volumetrics.
+	var sky_material := ProceduralSkyMaterial.new()
+	sky_material.sky_top_color = Color("335678")
+	sky_material.sky_horizon_color = Color("8ba2b8")
+	sky_material.sky_curve = 0.14
+	sky_material.ground_bottom_color = Color("23262b")
+	sky_material.ground_horizon_color = Color("6b6f74")
+	sky_material.sun_angle_max = 2.0
+	sky_material.sun_curve = 0.15
+	var sky := Sky.new()
+	sky.sky_material = sky_material
+
 	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("0d1b30")
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("8ea5b3")
-	environment.ambient_light_energy = 0.56
-	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	environment.background_mode = Environment.BG_SKY
+	environment.sky = sky
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	environment.ambient_light_energy = 1.0
+	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
+	environment.tonemap_mode = Environment.TONE_MAPPER_ACES
+	environment.tonemap_exposure = 1.05
+	environment.tonemap_white = 6.0
+	environment.glow_enabled = true
+	environment.glow_hdr_threshold = 1.0
+	environment.glow_intensity = 0.85
+	environment.glow_bloom = 0.12
+	environment.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
+	environment.fog_enabled = true
+	environment.fog_light_color = Color("8ba2b8")
+	environment.fog_density = 0.006
+	environment.fog_depth_begin = 20.0
+	environment.adjustment_enabled = true
+	environment.adjustment_contrast = 1.06
+	environment.adjustment_saturation = 1.03
 	var world_environment := WorldEnvironment.new()
 	world_environment.environment = environment
 	add_child(world_environment)
 
 	var key := DirectionalLight3D.new()
 	key.rotation_degrees = Vector3(-56, -28, 0)
-	key.light_color = Color("ffe0bd")
-	key.light_energy = 1.18
+	key.light_color = Color("fff3e0")
+	key.light_energy = 1.4
 	key.shadow_enabled = true
+	key.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	key.light_angular_distance = 0.6
 	add_child(key)
-
-	var rim := OmniLight3D.new()
-	rim.position = Vector3(10, 5, -4)
-	rim.light_color = Color("c8795e")
-	rim.light_energy = 1.25
-	rim.omni_range = 22.0
-	add_child(rim)
 
 	var fill := OmniLight3D.new()
 	fill.position = Vector3(-10, 5, 4)
 	fill.light_color = Color("78a9c7")
-	fill.light_energy = 1.15
+	fill.light_energy = 0.4
 	fill.omni_range = 24.0
 	add_child(fill)
 
@@ -265,19 +287,17 @@ func _build_arena() -> void:
 	arena_map = RiftlineMap.new()
 	arena_map.name = "RiftlineMap"
 	add_child(arena_map)
-	var selected_map := RiftlineMap.Id.CONCOURSE if _offline_squad_size > 1 else RiftlineMap.Id.DUEL_YARD
-	if network != null and (_offline_squad_size <= 1 or network.arena_override_set):
-		selected_map = network.arena_id as RiftlineMap.Id
-	arena_map.configure(selected_map, _presentation_enabled)
+	arena_map.configure(RiftlineMap.Id.CONCOURSE, _presentation_enabled)
 	if _presentation_enabled:
 		_presentation_effects = Node3D.new()
 		_presentation_effects.name = "PresentationEffects"
 		add_child(_presentation_effects)
+		_build_nuke_core_presentation()
 
 func _build_match() -> void:
 	director = RiftlineMatch.new()
 	add_child(director)
-	director.configure(_bomb_site_points(), _presentation_enabled, _game_mode)
+	director.configure(arena_map.launch_pad_positions(), arena_map.core_spawn_position(), _presentation_enabled)
 	_add_spawn_points()
 	var offline_roster := RiftlineRoster.new()
 	offline_roster.configure(maxi(1, _offline_squad_size), false, _offline_squad_size > 1)
@@ -304,15 +324,6 @@ func _build_match() -> void:
 	director.objective_changed.connect(_on_objective_changed)
 	director.objective_event.connect(_on_objective_event)
 	_build_combat_feedback()
-
-func _bomb_site_points() -> Array:
-	var gates: Dictionary = arena_map.gate_positions()
-	var sites: Array = []
-	for key in gates.keys():
-		sites.append(gates[key] as Vector3)
-	if sites.is_empty():
-		sites.append(arena_map.seed_position())
-	return sites
 
 func _add_spawn_points() -> void:
 	var points := arena_map.spawn_points(Duelist.Team.RED)
@@ -561,7 +572,6 @@ func _build_practice_panel() -> void:
 	layer.add_child(practice_panel)
 	practice_panel.drill_requested.connect(_on_practice_drill_requested)
 	practice_panel.local_rift_requested.connect(_on_practice_local_rift_requested)
-	practice_panel.mode_requested.connect(_on_practice_mode_requested)
 
 func _should_show_practice_panel() -> bool:
 	if not _practice_preview.is_empty():
@@ -587,23 +597,24 @@ func _save_practice_drill(drill: String) -> void:
 func _on_practice_drill_requested(drill: String) -> void:
 	_start_practice_drill(drill)
 
-func _on_practice_mode_requested(mode: String) -> void:
-	_game_mode = RiftlineMatch.GameMode.BOMB if mode == "bomb" else RiftlineMatch.GameMode.DEATHMATCH
-	if not _lan_active and director != null:
-		_clear_match_nodes()
-		_build_match()
-
 func _on_practice_local_rift_requested() -> void:
 	if hud != null:
 		hud.set_connection_flow_active(true)
 	if rift_link != null:
 		rift_link.open_menu()
 
+## Single funnel for offline team size so no caller can ask the roster for more
+## players than it will accept. Nuclear Rush is 4v4, so 4 is the ceiling.
+func _set_offline_squad_size(value: int) -> void:
+	_offline_squad_size = clampi(value, RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE)
+
 func _start_practice_drill(drill: String) -> void:
 	if drill not in ["solo", "wing", "full"]:
 		drill = "solo"
 	_practice_drill = drill
-	_offline_squad_size = {"solo": 1, "wing": 3, "full": 5}.get(drill, 1)
+	# "full" is the real 4v4. Never exceed RiftlineRoster.MAX_TEAM_SIZE, or
+	# roster.configure() rejects the size and the match never builds a roster.
+	_set_offline_squad_size(int({"solo": 1, "wing": 3, "full": 4}.get(drill, 1)))
 	_save_practice_drill(drill)
 	_practice_panel_active = false
 	if practice_panel != null:
@@ -657,39 +668,59 @@ func _on_objective_changed(state: Dictionary) -> void:
 	if hud != null:
 		hud.set_objective_state(state)
 	_update_use_control(state)
+	_push_bot_objective_context(state)
 
 func _on_objective_event(event_type: String, state: Dictionary) -> void:
 	if hud != null:
 		hud.show_objective_event(event_type, state)
 	if combat_feedback != null:
-		var local_event := str(state.get("bomb_carrier_id", "")) == _local_actor_id
+		var local_event := str(state.get("core_carrier_id", "")) == _local_actor_id
 		combat_feedback.objective_event(event_type, state, local_event)
 	if _lan_host:
 		network.publish_event({"type": event_type, "state": state})
 
-# The context use button (plant/defuse) is available only when it would do something.
+# The interact button (install/cancel) is available only when it would do something:
+# the carrier standing on their own pad, or a living defender standing on the
+# enemy's installed pad.
 func _update_use_control(state: Dictionary) -> void:
-	if hud == null or _local_duelist == null or director == null:
+	if hud == null:
 		return
-	if int(state.get("mode", 0)) != int(RiftlineMatch.GameMode.BOMB):
-		hud.set_seed_relay_available(false)
-		return
-	var bomb_state := int(state.get("bomb_state", -1))
-	var local_id := _local_duelist.actor_id
-	var usable := false
-	if bomb_state == int(RiftlineMatch.BombState.CARRIED) and str(state.get("bomb_carrier_id", "")) == local_id:
-		usable = _near_site(_local_duelist.global_position)
-	elif bomb_state == int(RiftlineMatch.BombState.PLANTED) and int(state.get("bomb_team", -1)) != int(_local_duelist.team):
-		usable = (_local_duelist.global_position - (state.get("bomb_position", Vector3.ZERO) as Vector3)).length() <= 2.2
-	hud.set_seed_relay_available(usable)
+	hud.set_interact_available(_can_interact(state))
 
-func _near_site(point: Vector3) -> bool:
-	if director == null:
+func _can_interact(state: Dictionary) -> bool:
+	if _local_duelist == null or arena_map == null or _local_duelist.eliminated:
 		return false
-	for site in director.bomb_sites:
-		if (point - (site as Vector3)).length() <= 2.6:
-			return true
+	var pads: Dictionary = arena_map.launch_pad_positions()
+	var core_state := int(state.get("core_state", int(RiftlineMatch.CoreState.AT_CENTER)))
+	if core_state == int(RiftlineMatch.CoreState.CARRIED) and str(state.get("core_carrier_id", "")) == _local_duelist.actor_id:
+		var own_pad: Vector3 = pads.get(_local_duelist.team, Vector3.ZERO)
+		return _local_duelist.global_position.distance_to(own_pad) <= RiftlineMatch.CORE_INSTALL_RADIUS
+	if core_state == int(RiftlineMatch.CoreState.INSTALLED):
+		var installed_team := int(state.get("installed_team", -1))
+		if installed_team != int(_local_duelist.team):
+			var enemy_pad: Vector3 = pads.get(installed_team, Vector3.ZERO)
+			return _local_duelist.global_position.distance_to(enemy_pad) <= RiftlineMatch.LAUNCH_CANCEL_RADIUS
 	return false
+
+# Objective awareness for bots: Nuclear Rush rules live only in RiftlineMatch,
+# this just forwards the replicated state so bot_duelist.gd can react.
+func _push_bot_objective_context(state: Dictionary) -> void:
+	if arena_map == null:
+		return
+	var pads: Dictionary = arena_map.launch_pad_positions()
+	for duelist in _all_authority_actors():
+		if not (duelist is BotDuelist):
+			continue
+		var enemy_team := Duelist.Team.BLUE if duelist.team == Duelist.Team.RED else Duelist.Team.RED
+		(duelist as BotDuelist).set_objective_context({
+			"core_state": int(state.get("core_state", int(RiftlineMatch.CoreState.AT_CENTER))),
+			"core_position": state.get("core_position", Vector3.ZERO) as Vector3,
+			"core_carrier_id": str(state.get("core_carrier_id", "")),
+			"core_carrier_team": int(state.get("core_carrier_team", int(Duelist.Team.RED))),
+			"installed_team": int(state.get("installed_team", int(Duelist.Team.RED))),
+			"own_pad": pads.get(duelist.team, Vector3.ZERO) as Vector3,
+			"enemy_pad": pads.get(enemy_team, Vector3.ZERO) as Vector3,
+		})
 
 func _on_match_finished(winner: Duelist.Team) -> void:
 	_clear_ballistics()
@@ -998,7 +1029,7 @@ func _on_network_event(event: Dictionary, sender_id: int) -> void:
 		return
 	match event_type:
 		"session":
-			_on_session_descriptor({"map_id": int(event.get("map_id", int(RiftlineMap.Id.DUEL_YARD))), "team_size": int(event.get("team_size", 1))})
+			_on_session_descriptor({"team_size": int(event.get("team_size", 1))})
 		"phase":
 			_apply_client_phase(int(event.get("phase", int(RiftlineMatch.Phase.OPENING))))
 		"score":
@@ -1029,7 +1060,7 @@ func _on_network_event(event: Dictionary, sender_id: int) -> void:
 			_apply_client_spawn(str(event.get("actor_id", "")), event.get("position", null), float(event.get("yaw", 0.0)))
 		"roster":
 			_sync_roster_records(event.get("records", []))
-		"objective_claimed", "objective_dropped", "objective_returned", "objective_delivered", "objective_relay_launched", "objective_relay_caught", "objective_relay_disrupted", "bomb_planted", "bomb_dropped", "round_won":
+		"core_picked_up", "core_dropped", "core_returned", "core_installed", "launch_cancelled", "launch_complete":
 			var objective_event_state: Dictionary = event.get("state", {})
 			_on_objective_event(str(event.get("type", "")), objective_event_state)
 
@@ -1072,17 +1103,12 @@ func _enter_lan_runtime(host: bool, from_player_flow: bool) -> void:
 func _on_session_descriptor(descriptor: Dictionary) -> void:
 	if descriptor.is_empty() or not _lan_active or _lan_host or _dedicated_server:
 		return
+	# There is exactly one map and one mode, so a partial or stale descriptor
+	# never needs to disagree about either - only team_size is negotiated.
 	_session_ready_for_snapshots = false
-	var descriptor_map := int(descriptor.get("map_id", int(RiftlineMap.Id.DUEL_YARD))) as RiftlineMap.Id
 	if network != null:
-		network.arena_id = descriptor_map
 		network.team_size = clampi(int(descriptor.get("team_size", network.team_size)), RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE)
-		network.game_mode = clampi(int(descriptor.get("game_mode", int(_game_mode))), 0, 1)
-	_game_mode = clampi(int(network.game_mode), 0, 1) as RiftlineMatch.GameMode
-	if arena_map == null or arena_map.map_id() != descriptor_map:
-		_clear_match_nodes()
-		_rebuild_map(descriptor_map)
-		_replace_match_for_lan(false)
+	_replace_match_for_lan(false)
 	_session_ready_for_snapshots = true
 
 func _replace_match_for_lan(host: bool) -> void:
@@ -1094,9 +1120,9 @@ func _replace_match_for_lan(host: bool) -> void:
 		ballistics = null
 	director = RiftlineMatch.new()
 	add_child(director)
-	if arena_map == null or arena_map.map_id() != network.arena_id:
-		_rebuild_map(network.arena_id as RiftlineMap.Id)
-	director.configure(_bomb_site_points(), _presentation_enabled, _game_mode)
+	if arena_map == null:
+		_build_arena()
+	director.configure(arena_map.launch_pad_positions(), arena_map.core_spawn_position(), _presentation_enabled)
 	var team_points := arena_map.spawn_points(Duelist.Team.RED)
 	if network.team_size <= 1:
 		team_points = [team_points[0]]
@@ -1488,15 +1514,6 @@ func _restore_offline_training(message: String) -> void:
 	director.begin()
 	hud.show_connection_message(message)
 
-func _rebuild_map(next_map_id: RiftlineMap.Id) -> void:
-	if arena_map != null:
-		arena_map.queue_free()
-		arena_map = null
-	arena_map = RiftlineMap.new()
-	arena_map.name = "RiftlineMap"
-	add_child(arena_map)
-	arena_map.configure(next_map_id, _presentation_enabled)
-
 func _sync_objective_presentation() -> void:
 	if director == null or not _objective_preview.is_empty():
 		return
@@ -1504,166 +1521,134 @@ func _sync_objective_presentation() -> void:
 	if hud != null:
 		hud.set_objective_state(state)
 		_update_use_control(state)
-	_sync_bomb_presentation()
-	_sync_bomb_site_markers()
-	_sync_interact_progress()
+	_sync_nuke_core_presentation(state)
+	_sync_launch_pad_presentation(state)
+	_sync_interact_progress(state)
 
-func _sync_bomb_presentation() -> void:
-	if not _presentation_enabled or director == null:
+# The visible core node tracks only replicated objective state, never local
+# authority guesses, so it stays correct on a client with no authority.
+func _sync_nuke_core_presentation(state: Dictionary) -> void:
+	if not _presentation_enabled or _nuke_core_root == null:
 		return
-	var bomb_state := int(director.bomb_state)
-	var is_bomb_mode := int(director.mode) == int(RiftlineMatch.GameMode.BOMB)
-	var show_bomb := is_bomb_mode and (bomb_state == int(RiftlineMatch.BombState.PLANTED) or bomb_state == int(RiftlineMatch.BombState.PLANTING))
-	if show_bomb:
-		if _bomb_presentation_root == null:
-			_build_bomb_presentation()
-		if _bomb_presentation_root != null:
-			_bomb_presentation_root.visible = true
-			_bomb_presentation_root.global_position = director.bomb_position
-			if _bomb_blink_light != null:
-				var blink := (sin(Time.get_ticks_msec() * 0.006) * 0.5 + 0.5)
-				_bomb_blink_light.light_energy = 0.4 + blink * 1.8
-	elif _bomb_presentation_root != null:
-		_bomb_presentation_root.visible = false
+	var core_state := int(state.get("core_state", int(RiftlineMatch.CoreState.AT_CENTER)))
+	if core_state == int(RiftlineMatch.CoreState.RESPAWNING):
+		_nuke_core_root.visible = false
+		return
+	_nuke_core_root.visible = true
+	_nuke_core_root.global_position = state.get("core_position", Vector3.ZERO) as Vector3
 
-func _sync_bomb_site_markers() -> void:
-	if not _presentation_enabled or director == null:
+func _sync_launch_pad_presentation(state: Dictionary) -> void:
+	if not _presentation_enabled or arena_map == null:
 		return
-	var is_bomb_mode := int(director.mode) == int(RiftlineMatch.GameMode.BOMB)
-	if is_bomb_mode and _bomb_site_markers.is_empty() and not director.bomb_sites.is_empty():
-		_build_bomb_site_markers()
-	if _bomb_site_markers.is_empty():
-		return
-	for marker in _bomb_site_markers:
-		if is_instance_valid(marker):
-			marker.visible = is_bomb_mode
+	var core_state := int(state.get("core_state", int(RiftlineMatch.CoreState.AT_CENTER)))
+	var installed_team := int(state.get("installed_team", -1))
+	var launch_remaining := float(state.get("launch_remaining", 0.0))
+	var cancel_progress := float(state.get("cancel_progress", 0.0))
+	for team in [Duelist.Team.RED, Duelist.Team.BLUE]:
+		var pad_node := _launch_pad_node(team)
+		if pad_node == null:
+			continue
+		var material := _pad_ring_material(pad_node)
+		if material == null:
+			continue
+		var base_color: Color = _pad_base_colors.get(pad_node, Color.WHITE)
+		var active := core_state == int(RiftlineMatch.CoreState.INSTALLED) and installed_team == int(team)
+		_apply_pad_material_state(material, base_color, active, launch_remaining, cancel_progress)
 
-func _sync_interact_progress() -> void:
-	if director == null or _local_duelist == null:
+func _apply_pad_material_state(material: ShaderMaterial, base_color: Color, active: bool, launch_remaining: float, cancel_progress: float) -> void:
+	var base_energy := 3.6
+	if not active:
+		material.set_shader_parameter("emission_color", base_color)
+		material.set_shader_parameter("emission_energy", base_energy)
 		return
-	if int(director.mode) != int(RiftlineMatch.GameMode.BOMB):
-		_local_duelist.set_interact_progress(0.0)
+	var progress := clampf(1.0 - launch_remaining / RiftlineMatch.LAUNCH_COUNTDOWN_SECONDS, 0.0, 1.0)
+	if cancel_progress > 0.0:
+		# A fast alarm flash that whitens toward the accent color as the
+		# cancel hold nears completion, so a defender's progress is legible.
+		var pulse := sin(Time.get_ticks_msec() * 0.001 * TAU * 6.0) * 0.5 + 0.5
+		material.set_shader_parameter("emission_color", base_color.lerp(Color.WHITE, cancel_progress))
+		material.set_shader_parameter("emission_energy", lerpf(2.0, 10.0, pulse))
 		return
-	var bomb_state := int(director.bomb_state)
+	var pulse_hz := lerpf(0.6, 3.2, progress)
+	var pulse := sin(Time.get_ticks_msec() * 0.001 * TAU * pulse_hz) * 0.5 + 0.5
+	material.set_shader_parameter("emission_color", base_color)
+	material.set_shader_parameter("emission_energy", lerpf(base_energy, 9.0, pulse))
+
+func _launch_pad_node(team: Duelist.Team) -> Node3D:
+	if _pad_nodes.has(team) and is_instance_valid(_pad_nodes[team]):
+		return _pad_nodes[team]
+	if arena_map == null:
+		return null
+	var node_name := "RedLaunchPad" if team == Duelist.Team.RED else "BlueLaunchPad"
+	var node := arena_map.get_node_or_null(node_name)
+	if node == null:
+		return null
+	_pad_nodes[team] = node
+	return node
+
+func _pad_ring_material(pad_node: Node3D) -> ShaderMaterial:
+	if _pad_ring_materials.has(pad_node):
+		return _pad_ring_materials[pad_node]
+	if pad_node.get_child_count() < 3:
+		return null
+	var ring := pad_node.get_child(2)
+	if not (ring is MeshInstance3D) or not ((ring as MeshInstance3D).material_override is ShaderMaterial):
+		return null
+	var mesh_instance := ring as MeshInstance3D
+	var material := (mesh_instance.material_override as ShaderMaterial).duplicate() as ShaderMaterial
+	mesh_instance.material_override = material
+	_pad_ring_materials[pad_node] = material
+	_pad_base_colors[pad_node] = material.get_shader_parameter("emission_color")
+	return material
+
+func _sync_interact_progress(state: Dictionary) -> void:
+	if _local_duelist == null:
+		return
+	var core_state := int(state.get("core_state", int(RiftlineMatch.CoreState.AT_CENTER)))
 	var progress := 0.0
-	if bomb_state == int(RiftlineMatch.BombState.PLANTING):
-		progress = float(director.bomb_plant_progress)
-	elif bomb_state == int(RiftlineMatch.BombState.DEFUSING):
-		progress = float(director.bomb_defuse_progress)
+	if core_state == int(RiftlineMatch.CoreState.CARRIED) and str(state.get("core_carrier_id", "")) == _local_duelist.actor_id:
+		progress = float(state.get("install_progress", 0.0))
+	elif core_state == int(RiftlineMatch.CoreState.INSTALLED) and int(state.get("installed_team", -1)) != int(_local_duelist.team):
+		progress = float(state.get("cancel_progress", 0.0))
 	_local_duelist.set_interact_progress(progress)
 
-func _build_bomb_presentation() -> void:
-	if _bomb_presentation_root != null:
+# The warhead body plus emissive core, parented under the arena root rather
+# than the carrier, so it reads identically for the host and for replica
+# clients: neither ever positions it from anything but core_position.
+func _build_nuke_core_presentation() -> void:
+	if _nuke_core_root != null:
 		return
-	_bomb_presentation_root = Node3D.new()
-	_bomb_presentation_root.name = "BombPresentation"
-	add_child(_bomb_presentation_root)
-	# Bomb body: small dark box.
-	var bomb_body := MeshInstance3D.new()
-	var body_mesh := BoxMesh.new()
-	body_mesh.size = Vector3(0.32, 0.18, 0.24)
-	bomb_body.mesh = body_mesh
-	var body_mat := StandardMaterial3D.new()
-	body_mat.albedo_color = Color("1a1a2e")
-	body_mat.roughness = 0.9
-	bomb_body.material_override = body_mat
-	bomb_body.position.y = 0.09
-	_bomb_presentation_root.add_child(bomb_body)
-	# Bomb top detail: small cylinder.
-	var bomb_cap := MeshInstance3D.new()
-	var cap_mesh := CylinderMesh.new()
-	cap_mesh.top_radius = 0.04
-	cap_mesh.bottom_radius = 0.06
-	cap_mesh.height = 0.08
-	bomb_cap.mesh = cap_mesh
-	var cap_mat := StandardMaterial3D.new()
-	cap_mat.albedo_color = Color("2a2a3e")
-	cap_mat.roughness = 0.7
-	bomb_cap.material_override = cap_mat
-	bomb_cap.position.y = 0.22
-	_bomb_presentation_root.add_child(bomb_cap)
-	# Blinking emissive indicator light.
-	var bomb_indicator := MeshInstance3D.new()
-	var indicator_mesh := SphereMesh.new()
-	indicator_mesh.radius = 0.03
-	indicator_mesh.height = 0.06
-	bomb_indicator.mesh = indicator_mesh
-	var indicator_mat := StandardMaterial3D.new()
-	indicator_mat.albedo_color = Color("ff3030")
-	indicator_mat.emission_enabled = true
-	indicator_mat.emission = Color("ff2020")
-	indicator_mat.emission_energy_multiplier = 3.0
-	bomb_indicator.material_override = indicator_mat
-	bomb_indicator.position = Vector3(0.08, 0.2, 0.0)
-	_bomb_presentation_root.add_child(bomb_indicator)
-	# OmniLight for the blink effect.
-	_bomb_blink_light = OmniLight3D.new()
-	_bomb_blink_light.light_color = Color("ff3030")
-	_bomb_blink_light.omni_range = 2.5
-	_bomb_blink_light.light_energy = 1.0
-	_bomb_blink_light.position = Vector3(0.0, 0.3, 0.0)
-	_bomb_presentation_root.add_child(_bomb_blink_light)
-
-func _build_bomb_site_markers() -> void:
-	if director == null or director.bomb_sites.is_empty():
-		return
-	var site_colors: Array[Color] = [Color("ff8c20"), Color("3090ff")]
-	var site_labels: Array[String] = ["A", "B"]
-	for index in range(mini(2, director.bomb_sites.size())):
-		var site_pos: Vector3 = director.bomb_sites[index] as Vector3
-		var marker_root := Node3D.new()
-		marker_root.name = "BombSite_%s" % site_labels[index]
-		marker_root.global_position = site_pos
-		add_child(marker_root)
-		var accent: Color = site_colors[index] if index < site_colors.size() else Color("ffffff")
-		# Glowing pillar.
-		var pillar := MeshInstance3D.new()
-		var pillar_mesh := CylinderMesh.new()
-		pillar_mesh.top_radius = 0.15
-		pillar_mesh.bottom_radius = 0.25
-		pillar_mesh.height = 3.2
-		pillar.mesh = pillar_mesh
-		var pillar_mat := StandardMaterial3D.new()
-		pillar_mat.albedo_color = accent.lerp(Color("0d1b30"), 0.5)
-		pillar_mat.emission_enabled = true
-		pillar_mat.emission = accent
-		pillar_mat.emission_energy_multiplier = 0.8
-		pillar_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		pillar_mat.albedo_color.a = 0.35
-		pillar.material_override = pillar_mat
-		pillar.position.y = 1.6
-		marker_root.add_child(pillar)
-		# Colored label box at the top.
-		var label := MeshInstance3D.new()
-		var label_mesh := BoxMesh.new()
-		label_mesh.size = Vector3(0.5, 0.25, 0.08)
-		label.mesh = label_mesh
-		var label_mat := StandardMaterial3D.new()
-		label_mat.albedo_color = accent
-		label_mat.emission_enabled = true
-		label_mat.emission = accent
-		label_mat.emission_energy_multiplier = 1.5
-		label.material_override = label_mat
-		label.position.y = 3.4
-		marker_root.add_child(label)
-		# Site base ring.
-		var base := MeshInstance3D.new()
-		var base_mesh := CylinderMesh.new()
-		base_mesh.top_radius = 1.2
-		base_mesh.bottom_radius = 1.2
-		base_mesh.height = 0.05
-		base.mesh = base_mesh
-		var base_mat := StandardMaterial3D.new()
-		base_mat.albedo_color = accent
-		base_mat.emission_enabled = true
-		base_mat.emission = accent
-		base_mat.emission_energy_multiplier = 0.5
-		base_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		base_mat.albedo_color.a = 0.25
-		base.material_override = base_mat
-		base.position.y = 0.025
-		marker_root.add_child(base)
-		_bomb_site_markers.append(marker_root)
+	_nuke_core_root = Node3D.new()
+	_nuke_core_root.name = "NukeCore"
+	add_child(_nuke_core_root)
+	var body := MeshInstance3D.new()
+	var body_mesh := CapsuleMesh.new()
+	body_mesh.radius = 0.32
+	body_mesh.height = 1.0
+	body.mesh = body_mesh
+	body.rotation.x = PI * 0.5
+	body.position.y = 0.5
+	body.material_override = NuclearMaterials.metal(Color("54585d"), 0.28)
+	_nuke_core_root.add_child(body)
+	var fin_material := NuclearMaterials.painted_metal(Color("c23b2e"))
+	for angle_degrees in [0.0, 90.0, 180.0, 270.0]:
+		var fin := MeshInstance3D.new()
+		var fin_mesh := BoxMesh.new()
+		fin_mesh.size = Vector3(0.05, 0.34, 0.22)
+		fin.mesh = fin_mesh
+		fin.material_override = fin_material
+		fin.position = Vector3(0.0, 0.22, 0.0)
+		fin.rotation.y = deg_to_rad(angle_degrees)
+		fin.translate_object_local(Vector3(0.32, 0.0, 0.0))
+		_nuke_core_root.add_child(fin)
+	var glow := MeshInstance3D.new()
+	var glow_mesh := SphereMesh.new()
+	glow_mesh.radius = 0.2
+	glow_mesh.height = 0.4
+	glow.mesh = glow_mesh
+	glow.position.y = 0.5
+	glow.material_override = NuclearMaterials.emissive(Color("ffcf5e"), 5.0)
+	_nuke_core_root.add_child(glow)
 
 func _tick_perf_sample(delta: float) -> void:
 	if (not _arena_perf_sample and not _feedback_perf_sample) or _perf_logged:
@@ -1754,7 +1739,7 @@ func _build_projectile_presentation_pool() -> void:
 		var tracer_mesh := BoxMesh.new()
 		tracer_mesh.size = Vector3(0.032, 0.032, 1.2)
 		tracer.mesh = tracer_mesh
-		tracer.material_override = _pulp_material(Color("fff0b0"), 6.0)
+		tracer.material_override = NuclearMaterials.emissive(Color("fff0b0"), 6.0).duplicate()
 		tracer.visible = false
 		_projectile_presentation_pool.add_child(tracer)
 		_tracer_pool.append(tracer)
@@ -1766,13 +1751,13 @@ func _build_projectile_presentation_pool() -> void:
 		var vertical_mesh := BoxMesh.new()
 		vertical_mesh.size = Vector3(0.055, 0.48, 0.025)
 		vertical.mesh = vertical_mesh
-		vertical.material_override = _pulp_material(Color("fff0b0"), 5.0)
+		vertical.material_override = NuclearMaterials.emissive(Color("fff0b0"), 5.0).duplicate()
 		impact.add_child(vertical)
 		var horizontal := MeshInstance3D.new()
 		var horizontal_mesh := BoxMesh.new()
 		horizontal_mesh.size = Vector3(0.48, 0.055, 0.025)
 		horizontal.mesh = horizontal_mesh
-		horizontal.material_override = _pulp_material(Color("fff0b0"), 5.0)
+		horizontal.material_override = NuclearMaterials.emissive(Color("fff0b0"), 5.0).duplicate()
 		impact.add_child(horizontal)
 		var ring := MeshInstance3D.new()
 		var ring_mesh := TorusMesh.new()
@@ -1782,7 +1767,7 @@ func _build_projectile_presentation_pool() -> void:
 		ring_mesh.ring_segments = 8
 		ring.mesh = ring_mesh
 		ring.rotation.x = PI * 0.5
-		ring.material_override = _pulp_material(Color("fff0b0"), 4.0)
+		ring.material_override = NuclearMaterials.emissive(Color("fff0b0"), 4.0).duplicate()
 		impact.add_child(ring)
 		_projectile_presentation_pool.add_child(impact)
 		_impact_pool.append(impact)
@@ -1869,9 +1854,9 @@ func _set_projectile_color(instance: MeshInstance3D, color: Color, glow: float) 
 	if instance == null or not (instance.material_override is ShaderMaterial):
 		return
 	var material := instance.material_override as ShaderMaterial
-	material.set_shader_parameter("base_tint", color)
-	material.set_shader_parameter("rim_tint", color)
-	material.set_shader_parameter("glow_strength", glow)
+	material.set_shader_parameter("albedo", color)
+	material.set_shader_parameter("emission_color", color)
+	material.set_shader_parameter("emission_energy", glow)
 
 func _spawn_beam(origin: Vector3, end: Vector3, color: Color, radius: float, lifetime: float) -> void:
 	if _presentation_effects == null or origin.distance_squared_to(end) < 0.0001:
@@ -1882,7 +1867,7 @@ func _spawn_beam(origin: Vector3, end: Vector3, color: Color, radius: float, lif
 	mesh.bottom_radius = radius
 	mesh.height = origin.distance_to(end)
 	beam.mesh = mesh
-	beam.material_override = _pulp_material(color, 5.5)
+	beam.material_override = NuclearMaterials.emissive(color, 5.5)
 	beam.position = origin.lerp(end, 0.5)
 	_presentation_effects.add_child(beam)
 	beam.look_at(end, Vector3.UP)
@@ -1897,7 +1882,7 @@ func _spawn_impact(point: Vector3, color: Color, radius: float, lifetime: float)
 	mesh.radius = radius
 	mesh.height = radius * 2.0
 	impact.mesh = mesh
-	impact.material_override = _pulp_material(color, 5.0)
+	impact.material_override = NuclearMaterials.emissive(color, 5.0)
 	impact.position = point
 	impact.scale = Vector3(1.0, 1.0, 0.42)
 	_presentation_effects.add_child(impact)
@@ -1914,14 +1899,14 @@ func _spawn_delivery_pulse(gate_position: Vector3, color: Color) -> void:
 	pulse_mesh.ring_segments = 10
 	pulse.mesh = pulse_mesh
 	pulse.position = gate_position + Vector3.UP * 1.35
-	pulse.material_override = _pulp_material(color, 4.2)
+	pulse.material_override = NuclearMaterials.emissive(color, 4.2).duplicate()
 	_presentation_effects.add_child(pulse)
 	_animate_delivery_pulse(pulse)
 	for side in [-1.0, 1.0]:
 		var flare := MeshInstance3D.new()
 		flare.mesh = _box_mesh(Vector3(0.08, 2.8, 0.08))
 		flare.position = gate_position + Vector3(side * 0.72, 1.4, 0.0)
-		flare.material_override = _pulp_material(color, 4.0)
+		flare.material_override = NuclearMaterials.emissive(color, 4.0)
 		_presentation_effects.add_child(flare)
 		_remove_presentation_node(flare, 0.24)
 
@@ -1934,7 +1919,7 @@ func _animate_delivery_pulse(pulse: MeshInstance3D) -> void:
 		var progress := clampf(elapsed / 0.42, 0.0, 1.0)
 		pulse.scale = Vector3.ONE * (1.0 + progress * 2.4)
 		if pulse.material_override is ShaderMaterial:
-			(pulse.material_override as ShaderMaterial).set_shader_parameter("glow_strength", 4.2 * (1.0 - progress))
+			(pulse.material_override as ShaderMaterial).set_shader_parameter("emission_energy", 4.2 * (1.0 - progress))
 	if is_instance_valid(pulse):
 		pulse.queue_free()
 
@@ -1948,15 +1933,6 @@ func _clear_presentation_effects() -> void:
 		return
 	for child in _presentation_effects.get_children():
 		child.queue_free()
-	if _bomb_presentation_root != null and is_instance_valid(_bomb_presentation_root):
-		_bomb_presentation_root.queue_free()
-		_bomb_presentation_root = null
-		_bomb_model = null
-		_bomb_blink_light = null
-	for marker in _bomb_site_markers:
-		if is_instance_valid(marker):
-			marker.queue_free()
-	_bomb_site_markers.clear()
 
 func _box_mesh(dimensions: Vector3) -> BoxMesh:
 	var mesh := BoxMesh.new()
@@ -1969,17 +1945,6 @@ func _cylinder_mesh(top_radius: float, bottom_radius: float, height: float) -> C
 	mesh.bottom_radius = bottom_radius
 	mesh.height = height
 	return mesh
-
-func _pulp_material(color: Color, glow: float) -> ShaderMaterial:
-	var material := ShaderMaterial.new()
-	material.shader = PULP_LIT
-	material.set_shader_parameter("base_tint", color)
-	material.set_shader_parameter("shadow_tint", Color("10213d").lerp(color, 0.2))
-	material.set_shader_parameter("rim_tint", Color("dce9ef") if glow <= 0.0 else color)
-	material.set_shader_parameter("rim_strength", 0.14 if glow <= 0.0 else 0.28)
-	material.set_shader_parameter("glow_strength", glow)
-	material.set_shader_parameter("brush_scale", 1.3)
-	return material
 
 func _read_capture_arguments() -> void:
 	for argument in OS.get_cmdline_user_args():
@@ -1999,38 +1964,32 @@ func _read_capture_arguments() -> void:
 			_capture_rift_link = true
 		elif argument.begins_with("--offline-squad="):
 			var requested_size := argument.trim_prefix("--offline-squad=")
-			if requested_size.is_valid_int() and requested_size.to_int() in [3, 5]:
-				_offline_squad_size = requested_size.to_int()
-		elif argument.begins_with("--mode="):
-			var requested_mode := argument.trim_prefix("--mode=").to_lower()
-			if requested_mode == "bomb":
-				_game_mode = RiftlineMatch.GameMode.BOMB
-			elif requested_mode == "deathmatch":
-				_game_mode = RiftlineMatch.GameMode.DEATHMATCH
+			if requested_size.is_valid_int():
+				_set_offline_squad_size(requested_size.to_int())
 		elif argument.begins_with("--squad-preview="):
 			_squad_preview = argument.trim_prefix("--squad-preview=")
 			if _squad_preview == "three-versus-three":
-				_offline_squad_size = 3
+				_set_offline_squad_size(3)
 		elif argument.begins_with("--practice-preview="):
 			_practice_preview = argument.trim_prefix("--practice-preview=")
 		elif argument.begins_with("--tactics-preview="):
 			_tactics_preview = argument.trim_prefix("--tactics-preview=")
-			_offline_squad_size = 5
+			_set_offline_squad_size(4)
 			_squad_preview = "tactics"
 		elif argument.begins_with("--arena-preview="):
 			_arena_preview = argument.trim_prefix("--arena-preview=")
 			if _arena_preview in ["red-dock", "relay-basin", "windwalk", "service-run", "blue-dock", "carrier-gate", "first-person", "overview", "red-bay", "blue-bay"] and _offline_squad_size < 3:
-				_offline_squad_size = 3
+				_set_offline_squad_size(3)
 		elif argument.begins_with("--feedback-preview="):
 			_feedback_preview = argument.trim_prefix("--feedback-preview=")
 			if _feedback_preview == "squad-motion":
-				_offline_squad_size = 3
+				_set_offline_squad_size(3)
 		elif argument == "--arena-perf-sample":
 			_arena_perf_sample = true
-			_offline_squad_size = 5
+			_set_offline_squad_size(4)
 		elif argument == "--feedback-perf-sample":
 			_feedback_perf_sample = true
-			_offline_squad_size = 5
+			_set_offline_squad_size(4)
 		elif argument.begins_with("--objective-preview="):
 			_objective_preview = argument.trim_prefix("--objective-preview=")
 		elif argument.begins_with("--weapon-preview="):
@@ -2049,14 +2008,14 @@ func _read_capture_arguments() -> void:
 		elif argument.begins_with("--motion-preview="):
 			_motion_preview = argument.trim_prefix("--motion-preview=")
 			if _motion_preview in ["world-locomotion", "relay-machinery"]:
-				_offline_squad_size = 3
+				_set_offline_squad_size(3)
 		elif argument.begins_with("--touch-preview="):
 			_touch_preview = argument.trim_prefix("--touch-preview=")
 		elif argument.begins_with("--rift-link-preview="):
 			_rift_link_preview = argument.trim_prefix("--rift-link-preview=")
 		elif argument.begins_with("--relay-preview="):
 			_relay_preview = argument.trim_prefix("--relay-preview=")
-			_offline_squad_size = 5 if _relay_preview in ["bot-relay", "full-crew"] else 3
+			_set_offline_squad_size(4 if _relay_preview in ["bot-relay", "full-crew"] else 3)
 	if _capture_settings and hud != null:
 		hud.open_settings()
 	if _capture_hud_layout and hud != null:
@@ -2262,7 +2221,7 @@ func _spawn_ballistics_preview_solid(position: Vector3, dimensions: Vector3, col
 	body.add_child(collision)
 	var mesh := MeshInstance3D.new()
 	mesh.mesh = _box_mesh(dimensions)
-	mesh.material_override = _pulp_material(color, 0.18)
+	mesh.material_override = NuclearMaterials.painted_metal(color)
 	body.add_child(mesh)
 	add_child(body)
 	_preview_ballistics_bodies.append(body)

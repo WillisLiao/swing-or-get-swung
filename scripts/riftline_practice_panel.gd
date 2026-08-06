@@ -3,7 +3,6 @@ extends Control
 
 signal drill_requested(drill: String)
 signal local_rift_requested
-signal mode_requested(mode: String)
 
 const INK := Color("071126")
 const PANEL := Color("0e1d38")
@@ -15,7 +14,6 @@ const RESPONSIVE := preload("res://scripts/riftline_responsive_layout.gd")
 
 var _board := false
 var _selected := "solo"
-var _mode := "deathmatch"
 var _button_rects: Dictionary = {}
 var _font: Font
 
@@ -91,14 +89,6 @@ func _accept(key: String) -> void:
 			_selected = key
 			visible = false
 			drill_requested.emit(key)
-		"mode_deathmatch":
-			_mode = "deathmatch"
-			mode_requested.emit(_mode)
-			queue_redraw()
-		"mode_bomb":
-			_mode = "bomb"
-			mode_requested.emit(_mode)
-			queue_redraw()
 
 func _draw() -> void:
 	if not visible:
@@ -117,19 +107,12 @@ func _draw_entry() -> void:
 	var left := safe.position.x + 22.0
 	var top := maxf(safe.position.y + 74.0, safe.size.y * 0.18)
 	draw_string(_font, Vector2(left, top), "STEP INTO THE STORM", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 34, PAPER)
-	draw_string(_font, Vector2(left, top + 34.0), "Pick a mode. Deathmatch respawns you away from pressure; bomb is plant and defuse.", HORIZONTAL_ALIGNMENT_LEFT, minf(safe.size.x - 44.0, 720.0), 15, MUTED)
-	var mode_y := top + 78.0
-	_register_button("mode_deathmatch", Rect2(left, mode_y, 190.0, 46.0))
-	draw_rect(_button_rects["mode_deathmatch"], RED if _mode == "deathmatch" else PANEL, true)
-	draw_string(_font, _button_rects["mode_deathmatch"].get_center() + Vector2(-58.0, 6.0), "DEATHMATCH", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, INK if _mode == "deathmatch" else PAPER)
-	_register_button("mode_bomb", Rect2(left + 206.0, mode_y, 150.0, 46.0))
-	draw_rect(_button_rects["mode_bomb"], BLUE if _mode == "bomb" else PANEL, true)
-	draw_string(_font, _button_rects["mode_bomb"].get_center() + Vector2(-38.0, 6.0), "BOMB", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, INK if _mode == "bomb" else PAPER)
+	draw_string(_font, Vector2(left, top + 34.0), "Nuclear Rush drills. Practice carrying, installing, and defending the core.", HORIZONTAL_ALIGNMENT_LEFT, minf(safe.size.x - 44.0, 720.0), 15, MUTED)
 	var diagram_center := Vector2(safe.end.x - minf(220.0, safe.size.x * 0.24), top + 28.0)
 	_draw_formation(diagram_center, _selected, 1.0)
 	var label := _drill_label(_selected)
-	draw_string(_font, Vector2(left, top + 115.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, RED)
-	draw_string(_font, Vector2(left, top + 145.0), _drill_description(_selected), HORIZONTAL_ALIGNMENT_LEFT, minf(safe.size.x - 44.0, 620.0), 15, PAPER)
+	draw_string(_font, Vector2(left, top + 78.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, RED)
+	draw_string(_font, Vector2(left, top + 108.0), _drill_description(_selected), HORIZONTAL_ALIGNMENT_LEFT, minf(safe.size.x - 44.0, 620.0), 15, PAPER)
 	var action_y := safe.end.y - 106.0
 	_register_button("enter", Rect2(left, action_y, 250.0, 58.0))
 	draw_rect(_button_rects["enter"], RED, true)

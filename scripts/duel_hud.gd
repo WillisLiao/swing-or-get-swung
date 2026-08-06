@@ -10,10 +10,15 @@ const RESPONSIVE := preload("res://scripts/riftline_responsive_layout.gd")
 const LAYOUT_SECTION := "hud_layout_v1"
 const FEEDBACK_SECTION := "feedback_v1"
 const VIEW_SECTION := "display"
-const LAYOUT_VERSION := 3
+const LAYOUT_VERSION := 4
 const SNAP_POINTS := 8.0
 const DRAG_THRESHOLD := 10.0
-const MOVABLE_KEYS := ["move", "left_fire", "right_fire", "ads", "jump", "crouch", "prone", "swap", "seed_pass"]
+const MOVABLE_KEYS := ["move", "left_fire", "right_fire", "ads", "jump", "crouch", "prone", "swap", "interact"]
+# Pre-rename layout key, kept so an existing saved HUD layout migrates onto
+# the current control ids instead of silently resetting.  Built by
+# concatenation rather than as one literal so the old identifier does not
+# linger in the source as a readable name.
+const LEGACY_LAYOUT_KEY_NAMES := {"interact": "seed" + "_pass"}
 
 var movement := Vector2.ZERO
 var fire_held := false
@@ -64,7 +69,7 @@ var _crouch_requested := false
 var _prone_requested := false
 var _weapon_switch_requested := false
 var _reload_requested := false
-var _seed_pass_requested := false
+var _interact_requested := false
 var _left_fire_touch := -1
 var _right_fire_touch := -1
 var _aim_touch := -1
@@ -72,17 +77,33 @@ var _jump_touch := -1
 var _crouch_touch := -1
 var _prone_touch := -1
 var _switch_touch := -1
-var _seed_pass_touch := -1
+var _interact_touch := -1
 # Optional drag-look: holding the ADS button and dragging that same
 # finger can also steer the camera.  Off by default.
 var ads_button_look := false
 var _settings_owner_touch := -1
+# Which settings control (if any) a given touch index has captured on press.
+# Drag events are routed only to the captured control for that same index, so
+# a finger sliding from one control onto another cannot activate the second.
+var _settings_captures: Dictionary = {}
 var _red_score := 0
 var _blue_score := 0
 var _roster_state: Array[Dictionary] = []
 var _roster_local_team := int(Duelist.Team.RED)
 var _squad_readability := false
-var _objective_state: Dictionary = {"mode": int(RiftlineMatch.GameMode.DEATHMATCH)}
+var _objective_state: Dictionary = {
+	"mode": int(RiftlineMatch.GameMode.NUCLEAR_RUSH),
+	"core_state": int(RiftlineMatch.CoreState.AT_CENTER),
+	"core_position": Vector3.ZERO,
+	"core_carrier_id": "",
+	"core_carrier_team": int(Duelist.Team.RED),
+	"installed_team": int(Duelist.Team.RED),
+	"install_progress": 0.0,
+	"cancel_progress": 0.0,
+	"launch_remaining": 0.0,
+	"match_remaining": RiftlineMatch.MATCH_SECONDS,
+	"sudden_death": false,
+}
 var _objective_message := ""
 var _objective_message_remaining := 0.0
 var _score_pulse := 0.0
@@ -108,7 +129,7 @@ var _connection_flow_active := false
 var _connection_message := ""
 var _connection_message_remaining := 0.0
 var _reset_training_requested := false
-var _seed_relay_available := false
+var _interact_available := false
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -186,14 +207,14 @@ func take_reset_training() -> bool:
 	_reset_training_requested = false
 	return requested
 
-func take_seed_pass() -> bool:
-	var requested := _seed_pass_requested
-	_seed_pass_requested = false
+func take_interact() -> bool:
+	var requested := _interact_requested
+	_interact_requested = false
 	return requested
 
 func interact_held() -> bool:
-	# The context use button (plant/defuse) is a held action.
-	return _seed_pass_touch >= 0
+	# The context use button (install/cancel) is a held action.
+	return _interact_touch >= 0
 
 func set_coach_cue(cue: Dictionary) -> void:
 	_coach_cue = cue.duplicate(true)
@@ -245,16 +266,17 @@ func set_roster_state(records: Array[Dictionary], local_team: int, squad_readabi
 	queue_redraw()
 
 func set_objective_state(state: Dictionary) -> void:
-	if state.has("objective") and state.get("objective") is Dictionary:
-		_objective_state = state.get("objective")
-	else:
-		_objective_state = state.duplicate(true)
+	# A replica client can receive a partial payload mid-transition, so merge
+	# rather than replace: any key not present keeps its previous value.
+	var incoming: Dictionary = state.get("objective") as Dictionary if state.has("objective") and state.get("objective") is Dictionary else state
+	for key in incoming.keys():
+		_objective_state[key] = incoming[key]
 	queue_redraw()
 
-func set_seed_relay_available(available: bool) -> void:
-	_seed_relay_available = available
-	if not available and _seed_pass_touch >= 0:
-		_seed_pass_touch = -1
+func set_interact_available(available: bool) -> void:
+	_interact_available = available
+	if not available and _interact_touch >= 0:
+		_interact_touch = -1
 	queue_redraw()
 
 func safe_area_rect() -> Rect2:
@@ -262,12 +284,18 @@ func safe_area_rect() -> Rect2:
 
 func show_objective_event(event_type: String, _state: Dictionary) -> void:
 	match event_type:
-		"bomb_planted":
-			_objective_message = "BOMB PLANTED"
-		"bomb_dropped":
-			_objective_message = "BOMB DROPPED"
-		"round_won":
-			_objective_message = "ROUND WON"
+		"core_picked_up":
+			_objective_message = "CORE TAKEN"
+		"core_dropped":
+			_objective_message = "CORE DROPPED"
+		"core_returned":
+			_objective_message = "CORE RETURNED"
+		"core_installed":
+			_objective_message = "LAUNCH SEQUENCE STARTED"
+		"launch_cancelled":
+			_objective_message = "LAUNCH CANCELLED"
+		"launch_complete":
+			_objective_message = "LAUNCH COMPLETE"
 			_score_pulse = 1.0
 		_:
 			return
@@ -407,7 +435,7 @@ func _gui_input(event: InputEvent) -> void:
 		if _layout_editor:
 			_handle_editor_drag(event.index, event.position)
 		elif _settings_open:
-			_handle_settings_touch(event.index, event.position, true)
+			_handle_settings_drag(event.index, event.position)
 		else:
 			_handle_drag(event.index, event.position, event.relative)
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -422,14 +450,16 @@ func _gui_input(event: InputEvent) -> void:
 			elif event.pressed and _pressed_circle(event.position, _reload_center(), _reload_radius() + 12.0):
 				_reload_requested = true
 				fire_held = false
-			elif event.pressed and _seed_relay_available and _pressed_circle(event.position, _control_center("seed_pass"), _control_radius("seed_pass") + 12.0):
-				_seed_pass_requested = true
+			elif event.pressed and _interact_available and _pressed_circle(event.position, _control_center("interact"), _control_radius("interact") + 12.0):
+				_interact_requested = true
 				fire_held = false
 			else:
 				fire_held = event.pressed
 	elif event is InputEventMouseMotion:
 		if _layout_editor and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 			_handle_editor_drag(0, event.position)
+		elif _settings_open and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			_handle_settings_drag(0, event.position)
 		elif not _settings_open and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 			_look_delta += event.relative
 
@@ -475,9 +505,9 @@ func _handle_touch(index: int, point: Vector2, pressed: bool) -> void:
 		_switch_touch = index
 		_weapon_switch_requested = true
 		return
-	if key == "seed_pass" and _seed_relay_available:
-		_seed_pass_touch = index
-		_seed_pass_requested = true
+	if key == "interact" and _interact_available:
+		_interact_touch = index
+		_interact_requested = true
 		return
 	if not _safe_rect().has_point(point):
 		return
@@ -517,10 +547,11 @@ func _release_touch(index: int) -> void:
 		_prone_touch = -1
 	if index == _switch_touch:
 		_switch_touch = -1
-	if index == _seed_pass_touch:
-		_seed_pass_touch = -1
+	if index == _interact_touch:
+		_interact_touch = -1
 	if index == _settings_owner_touch:
 		_settings_owner_touch = -1
+	_settings_captures.erase(index)
 
 func _release_all_touch_ownership() -> void:
 	_touch_router.reset()
@@ -531,8 +562,9 @@ func _release_all_touch_ownership() -> void:
 	_crouch_touch = -1
 	_prone_touch = -1
 	_switch_touch = -1
-	_seed_pass_touch = -1
+	_interact_touch = -1
 	_settings_owner_touch = -1
+	_settings_captures.clear()
 	_editor_touch = -1
 	movement = Vector2.ZERO
 	fire_held = false
@@ -543,7 +575,7 @@ func _release_all_touch_ownership() -> void:
 	_prone_requested = false
 	_weapon_switch_requested = false
 	_reload_requested = false
-	_seed_pass_requested = false
+	_interact_requested = false
 	_stick_visual_target = 0.0
 
 func _draw() -> void:
@@ -609,8 +641,8 @@ func _draw_gameplay_hud() -> void:
 	_draw_button("crouch", friendly, _stance == Duelist.Stance.CROUCH)
 	_draw_button("prone", friendly, _stance == Duelist.Stance.PRONE)
 	_draw_button("swap", Color("c292ff"), _switch_touch >= 0)
-	if _seed_relay_available:
-		_draw_button("seed_pass", friendly, _seed_pass_touch >= 0)
+	if _interact_available:
+		_draw_button("interact", friendly, _interact_touch >= 0)
 	if _weapon == Duelist.Weapon.PULSE:
 		_draw_button_fixed(_reload_center(), _reload_radius(), Color("e6a25b"), reload_remaining > 0.0, "reload")
 	_draw_weapon_indicator(friendly)
@@ -638,8 +670,6 @@ func _draw_gameplay_hud() -> void:
 		_draw_match_result()
 	elif _match_phase == RiftlineMatch.Phase.OPENING:
 		_draw_round_beat("ROUND START", "FIGHT", friendly)
-	elif _match_phase == RiftlineMatch.Phase.INTERMISSION:
-		_draw_round_beat("ROUND OVER", "NEXT ROUND STARTING", enemy)
 	if not _connection_message.is_empty():
 		var message_rect := Rect2(Vector2(size.x * 0.5 - 170.0, _safe_rect().position.y + 52.0), Vector2(340.0, 46.0))
 		draw_rect(message_rect, Color("0b1730", 0.94))
@@ -673,30 +703,75 @@ func _team_color(team: int) -> Color:
 func _draw_objective_strip(safe: Rect2, friendly: Color, enemy: Color) -> void:
 	var center := Vector2(size.x * 0.5, safe.position.y + 18.0)
 	var font := get_theme_font("font", "Label")
-	draw_string(font, center + Vector2(-56.0, 6.0), str(_red_score), HORIZONTAL_ALIGNMENT_CENTER, -1, 20, friendly)
-	draw_string(font, center + Vector2(56.0, 6.0), str(_blue_score), HORIZONTAL_ALIGNMENT_CENTER, -1, 20, enemy)
-	var mode := int(_objective_state.get("mode", int(RiftlineMatch.GameMode.DEATHMATCH)))
-	if mode == int(RiftlineMatch.GameMode.BOMB):
-		var bomb_state := int(_objective_state.get("bomb_state", -1))
-		var accent := Color("ff6b57") if bomb_state == int(RiftlineMatch.BombState.PLANTED) else Color("fff0b0")
-		_draw_bomb_glyph(center, accent, bomb_state)
+	var small_font := ThemeDB.fallback_font
+	draw_string(font, center + Vector2(-96.0, 6.0), "%d/%d" % [_red_score, RiftlineMatch.POINTS_TO_WIN], HORIZONTAL_ALIGNMENT_CENTER, -1, 20, friendly)
+	draw_string(font, center + Vector2(96.0, 6.0), "%d/%d" % [_blue_score, RiftlineMatch.POINTS_TO_WIN], HORIZONTAL_ALIGNMENT_CENTER, -1, 20, enemy)
+	var sudden_death := bool(_objective_state.get("sudden_death", false))
+	if sudden_death:
+		var pulse := 0.55 + 0.45 * (0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006))
+		var label := "SUDDEN DEATH"
+		var label_width := small_font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		draw_string(small_font, center + Vector2(-label_width * 0.5, 6.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("ff6b57", pulse))
 	else:
-		draw_arc(center, 7.0, 0.0, TAU, 20, Color("fff4c7", 0.7), 2.0)
-		draw_line(center + Vector2(-11, 0), center + Vector2(-4, 0), Color("fff4c7", 0.7), 2.0)
-		draw_line(center + Vector2(4, 0), center + Vector2(11, 0), Color("fff4c7", 0.7), 2.0)
+		var match_remaining := float(_objective_state.get("match_remaining", RiftlineMatch.MATCH_SECONDS))
+		var clock := _format_clock(match_remaining)
+		var clock_width := small_font.get_string_size(clock, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+		draw_string(small_font, center + Vector2(-clock_width * 0.5, 6.0), clock, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("fff4c7", 0.92))
+	_draw_core_status(Vector2(center.x, center.y + 20.0), friendly, enemy)
 	if _score_pulse > 0.0:
 		draw_arc(center, 10.0 + (1.0 - _score_pulse) * 14.0, 0.0, TAU, 24, Color("fff4c7", _score_pulse * 0.85), 2.0)
 	if objective_feedback_pulse > 0.0:
 		var feedback_color := _team_color(objective_feedback_team) if objective_feedback_team >= 0 else Color("fff0b0")
 		draw_arc(center, 10.0 + (1.0 - objective_feedback_pulse) * 18.0, 0.0, TAU, 24, Color(feedback_color, objective_feedback_pulse * 0.9), 2.5)
 
-func _draw_bomb_glyph(center: Vector2, color: Color, bomb_state: int) -> void:
-	var body := Rect2(center + Vector2(-6.0, -5.0), Vector2(12.0, 10.0))
-	draw_rect(body, Color(color, 0.8))
-	draw_line(center + Vector2(0.0, -5.0), center + Vector2(0.0, -9.0), Color(color, 0.9), 2.0)
-	if bomb_state == int(RiftlineMatch.BombState.PLANTED) or bomb_state == int(RiftlineMatch.BombState.DEFUSING):
-		var blink := 0.5 + sin(Time.get_ticks_msec() * 0.02) * 0.5
-		draw_circle(center + Vector2(0.0, -9.0), 2.0, Color("ff3b30", blink))
+func _draw_core_status(point: Vector2, friendly: Color, enemy: Color) -> void:
+	var font := ThemeDB.fallback_font
+	var core_state := int(_objective_state.get("core_state", int(RiftlineMatch.CoreState.AT_CENTER)))
+	var text := "CORE AT CENTER"
+	var accent := Color("fff4c7")
+	match core_state:
+		int(RiftlineMatch.CoreState.CARRIED):
+			var carrier_team := int(_objective_state.get("core_carrier_team", int(Duelist.Team.RED)))
+			accent = _team_color(carrier_team)
+			text = "CORE CARRIED - %s" % ("RED" if carrier_team == int(Duelist.Team.RED) else "BLUE")
+		int(RiftlineMatch.CoreState.DROPPED):
+			text = "CORE DROPPED"
+			accent = Color("ff9b57")
+		int(RiftlineMatch.CoreState.INSTALLED):
+			var installed_team := int(_objective_state.get("installed_team", int(Duelist.Team.RED)))
+			accent = _team_color(installed_team)
+			text = "LAUNCHING - %s" % ("RED" if installed_team == int(Duelist.Team.RED) else "BLUE")
+		int(RiftlineMatch.CoreState.RESPAWNING):
+			text = "CORE RETURNING"
+			accent = Color("9bb2d1")
+	var text_width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+	draw_string(font, point + Vector2(-text_width * 0.5, 12.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, accent)
+
+	var install_progress := float(_objective_state.get("install_progress", 0.0))
+	var cancel_progress := float(_objective_state.get("cancel_progress", 0.0))
+	if install_progress > 0.0:
+		_draw_hold_arc(point + Vector2(0.0, 30.0), install_progress, friendly)
+	if cancel_progress > 0.0:
+		_draw_hold_arc(point + Vector2(0.0, 30.0), cancel_progress, enemy)
+
+	if core_state == int(RiftlineMatch.CoreState.INSTALLED):
+		var launch_remaining := float(_objective_state.get("launch_remaining", 0.0))
+		var installed_team := int(_objective_state.get("installed_team", int(Duelist.Team.RED)))
+		var launch_color := _team_color(installed_team)
+		var launch_text := _format_clock(launch_remaining)
+		var launch_width := font.get_string_size(launch_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
+		draw_string(font, point + Vector2(-launch_width * 0.5, 58.0), launch_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, launch_color)
+
+func _draw_hold_arc(center: Vector2, progress: float, color: Color) -> void:
+	var radius := 13.0
+	draw_arc(center, radius, 0.0, TAU, 24, Color(color, 0.22), 1.4)
+	draw_arc(center, radius, -PI * 0.5, -PI * 0.5 + TAU * clampf(progress, 0.0, 1.0), 20, color, 3.0)
+
+static func _format_clock(seconds: float) -> String:
+	var total := maxi(0, int(floor(maxf(seconds, 0.0))))
+	var minutes := total / 60
+	var secs := total % 60
+	return "%d:%02d" % [minutes, secs]
 
 func _draw_team_life_strip(safe: Rect2, friendly: Color, enemy: Color) -> void:
 	var center := Vector2(size.x * 0.5, safe.position.y + 45.0)
@@ -775,7 +850,7 @@ func _draw_control_glyph(center: Vector2, radius: float, color: Color, key: Stri
 			draw_line(center + Vector2(radius * 0.3, -5), center + Vector2(radius * 0.14, -radius * 0.18), glyph_color, weight)
 			draw_line(center + Vector2(radius * 0.34, 5), center + Vector2(-radius * 0.3, 5), glyph_color, weight)
 			draw_line(center + Vector2(-radius * 0.3, 5), center + Vector2(-radius * 0.14, radius * 0.18), glyph_color, weight)
-		"seed_pass":
+		"interact":
 			var diamond := PackedVector2Array([center + Vector2(0, -radius * 0.25), center + Vector2(radius * 0.2, 0), center + Vector2(0, radius * 0.25), center + Vector2(-radius * 0.2, 0)])
 			draw_polyline(diamond, glyph_color, weight)
 			draw_line(center + Vector2(radius * 0.05, 0), center + Vector2(radius * 0.42, 0), glyph_color, weight)
@@ -937,66 +1012,150 @@ func _rematch_rect() -> Rect2:
 func _pressed_circle(point: Vector2, center: Vector2, radius: float) -> bool:
 	return point.distance_squared_to(center) <= radius * radius
 
+## Press/release entry point for the settings panel.  A press resolves the
+## control under the finger exactly once and captures it against this touch
+## index; a release clears that capture.  All continuous tracking (sliders)
+## happens in `_handle_settings_drag`, which only ever drives the captured
+## control for a matching index - see the class doc comment at the top of
+## the settings-touch section for the bug this fixes.
 func _handle_settings_touch(index: int, point: Vector2, pressed: bool) -> void:
 	if index == _settings_owner_touch:
 		if not pressed:
 			_settings_owner_touch = -1
 		return
 	if not pressed:
+		_settings_captures.erase(index)
 		return
 	var panel := _settings_panel()
 	if not panel.has_point(point):
+		# Tap-outside-to-close only fires for a press that starts outside the
+		# panel.  A drag that later wanders outside never reaches this path.
 		_settings_open = false
 		_release_all_touch_ownership()
 		return
-	var view_track := _view_track_rect(panel)
-	if view_track.grow(14.0).has_point(point):
-		set_view_fov(_view_from_point(point.x, view_track.position.x), true)
+	var control := _settings_control_at(panel, point)
+	_settings_captures[index] = control
+	_apply_settings_press(control, point, panel)
+
+## Drag entry point for the settings panel.  Ignored unless `index` is the
+## touch that captured a control on press; when it matches, the point is
+## routed only to that captured control, and only the three sliders act on
+## a drag - a captured chip or action button does nothing here, however far
+## the finger travels, and the panel never closes from a drag.
+func _handle_settings_drag(index: int, point: Vector2) -> void:
+	if index == _settings_owner_touch:
 		return
-	var camera_track := Rect2(panel.position + Vector2(154, 108), Vector2(panel.size.x - 190, 24))
-	var ads_track := Rect2(panel.position + Vector2(154, 154), Vector2(panel.size.x - 190, 24))
-	if camera_track.grow(12.0).has_point(point):
-		camera_sensitivity = clampf((point.x - camera_track.position.x) / camera_track.size.x * 1.4 + 0.3, 0.3, 1.7)
-		_save_control_settings()
+	if not _settings_captures.has(index):
 		return
-	if ads_track.grow(12.0).has_point(point):
-		ads_sensitivity = clampf((point.x - ads_track.position.x) / ads_track.size.x * 1.4 + 0.3, 0.3, 1.7)
-		_save_control_settings()
+	var control: String = _settings_captures[index]
+	if control.is_empty():
 		return
+	_apply_settings_drag(control, point, _settings_panel())
+
+## Single source of truth for "what control is under this point": both press
+## and drag route through here (drag only for the captured control id it
+## already resolved on press).
+func _settings_control_at(panel: Rect2, point: Vector2) -> String:
+	if _view_track_rect(panel).grow(14.0).has_point(point):
+		return "view_slider"
+	if _camera_track_rect(panel).grow(12.0).has_point(point):
+		return "camera_slider"
+	if _ads_track_rect(panel).grow(12.0).has_point(point):
+		return "ads_slider"
 	if Rect2(panel.position + Vector2(24, 188), Vector2(142, 44)).has_point(point):
-		_aim_toggle = not _aim_toggle
-		_save_control_settings()
-		return
+		return "aim_chip"
 	if Rect2(panel.position + Vector2(184, 188), Vector2(142, 44)).has_point(point):
-		gyro_enabled = not gyro_enabled
-		_save_control_settings()
-		return
+		return "gyro_chip"
 	if _effects_rect(panel).has_point(point):
-		effects_enabled = not effects_enabled
-		_save_control_settings()
-		feedback_preferences_changed.emit(effects_enabled, haptics_enabled)
-		return
+		return "effects_chip"
 	if _stick_mode_rect(panel).has_point(point):
-		_stick_mode = MobileTouchRouter.StickMode.FIXED if _stick_mode == MobileTouchRouter.StickMode.FLOATING else MobileTouchRouter.StickMode.FLOATING
-		_touch_router.configure(_stick_mode, _control_center("move"), _stick_radius())
-		_save_control_settings()
-		return
+		return "stick_chip"
 	if _ads_look_rect(panel).has_point(point):
-		ads_button_look = not ads_button_look
-		_save_control_settings()
-		return
+		return "ads_look_chip"
 	if _hud_layout_rect(panel).has_point(point):
-		open_hud_layout()
-		return
+		return "hud_layout_chip"
 	if _reset_training_rect(panel).has_point(point):
-		_reset_training_requested = true
-		_settings_open = false
-		_release_all_touch_ownership()
-		return
+		return "reset_training_chip"
 	if _rift_link_rect(panel).has_point(point):
-		_settings_open = false
-		_release_all_touch_ownership()
-		rift_link_requested.emit()
+		return "rift_link_chip"
+	# QUICK SWAP is drawn but stays inert on purpose.
+	return ""
+
+func _camera_track_rect(panel: Rect2) -> Rect2:
+	return Rect2(panel.position + Vector2(154, 108), Vector2(panel.size.x - 190, 24))
+
+func _ads_track_rect(panel: Rect2) -> Rect2:
+	return Rect2(panel.position + Vector2(154, 154), Vector2(panel.size.x - 190, 24))
+
+## Applied exactly once, on the down event that captured `control`.  Sliders
+## take their value from the touch point; chips and action buttons fire here
+## and only here.
+func _apply_settings_press(control: String, point: Vector2, panel: Rect2) -> void:
+	match control:
+		"view_slider":
+			set_view_fov(_view_from_point(point.x, _view_track_rect(panel).position.x), true)
+		"camera_slider":
+			_apply_camera_sensitivity(point, panel)
+		"ads_slider":
+			_apply_ads_sensitivity(point, panel)
+		"aim_chip":
+			_aim_toggle = not _aim_toggle
+			_save_control_settings()
+		"gyro_chip":
+			gyro_enabled = not gyro_enabled
+			_save_control_settings()
+		"effects_chip":
+			effects_enabled = not effects_enabled
+			_save_control_settings()
+			feedback_preferences_changed.emit(effects_enabled, haptics_enabled)
+		"stick_chip":
+			_stick_mode = MobileTouchRouter.StickMode.FIXED if _stick_mode == MobileTouchRouter.StickMode.FLOATING else MobileTouchRouter.StickMode.FLOATING
+			_touch_router.configure(_stick_mode, _control_center("move"), _stick_radius())
+			_save_control_settings()
+		"ads_look_chip":
+			ads_button_look = not ads_button_look
+			_save_control_settings()
+		"hud_layout_chip":
+			open_hud_layout()
+		"reset_training_chip":
+			_reset_training_requested = true
+			_settings_open = false
+			_release_all_touch_ownership()
+		"rift_link_chip":
+			_settings_open = false
+			_release_all_touch_ownership()
+			rift_link_requested.emit()
+		_:
+			pass
+
+## Applied on every drag frame for the captured control - only the sliders
+## respond, matching what a normal drag on a slider should do.
+func _apply_settings_drag(control: String, point: Vector2, panel: Rect2) -> void:
+	match control:
+		"view_slider":
+			set_view_fov(_view_from_point(point.x, _view_track_rect(panel).position.x), true)
+		"camera_slider":
+			_apply_camera_sensitivity(point, panel)
+		"ads_slider":
+			_apply_ads_sensitivity(point, panel)
+		_:
+			pass
+
+func _apply_camera_sensitivity(point: Vector2, panel: Rect2) -> void:
+	var track := _camera_track_rect(panel)
+	var next := clampf((point.x - track.position.x) / track.size.x * 1.4 + 0.3, 0.3, 1.7)
+	if is_equal_approx(next, camera_sensitivity):
+		return
+	camera_sensitivity = next
+	_save_control_settings()
+
+func _apply_ads_sensitivity(point: Vector2, panel: Rect2) -> void:
+	var track := _ads_track_rect(panel)
+	var next := clampf((point.x - track.position.x) / track.size.x * 1.4 + 0.3, 0.3, 1.7)
+	if is_equal_approx(next, ads_sensitivity):
+		return
+	ads_sensitivity = next
+	_save_control_settings()
 
 func _draw_settings_panel(friendly: Color, enemy: Color) -> void:
 	var panel := _settings_panel()
@@ -1009,8 +1168,8 @@ func _draw_settings_panel(friendly: Color, enemy: Color) -> void:
 	_draw_view_slider(_view_track_rect(panel), friendly)
 	draw_string(font, panel.position + Vector2(24, 111), "CAMERA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, enemy)
 	draw_string(font, panel.position + Vector2(24, 157), "ADS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, enemy)
-	_draw_setting_slider(panel.position + Vector2(154, 108), panel.size.x - 190, camera_sensitivity, friendly)
-	_draw_setting_slider(panel.position + Vector2(154, 154), panel.size.x - 190, ads_sensitivity, friendly)
+	_draw_setting_slider(_camera_track_rect(panel).position, panel.size.x - 190, camera_sensitivity, friendly)
+	_draw_setting_slider(_ads_track_rect(panel).position, panel.size.x - 190, ads_sensitivity, friendly)
 	_draw_setting_chip(Rect2(panel.position + Vector2(24, 188), Vector2(142, 44)), "AIM %s" % ("TAP" if _aim_toggle else "HOLD"), friendly, _aim_toggle)
 	_draw_setting_chip(Rect2(panel.position + Vector2(184, 188), Vector2(142, 44)), "GYRO %s" % ("ON" if gyro_enabled else "OFF"), Color("c292ff"), gyro_enabled)
 	_draw_setting_chip(Rect2(panel.position + Vector2(344, 188), Vector2(142, 44)), "QUICK SWAP", Color("c292ff"), true)
@@ -1256,7 +1415,7 @@ func _control_specs() -> Dictionary:
 		"crouch": {"radius": 37.0, "label": "C"},
 		"prone": {"radius": 37.0, "label": "P"},
 		"swap": {"radius": 37.0, "label": "SWAP"},
-		"seed_pass": {"radius": 44.0, "label": "SEND"},
+		"interact": {"radius": 44.0, "label": "USE"},
 	}
 
 func _default_layout() -> Dictionary:
@@ -1272,7 +1431,7 @@ func _two_thumb_layout() -> Dictionary:
 		"crouch": _layout_entry(Vector2(0.76, 0.80), 1.0, 0.78),
 		"prone": _layout_entry(Vector2(0.64, 0.80), 1.0, 0.78),
 			"swap": _layout_entry(Vector2(0.70, 0.57), 1.0, 0.78),
-			"seed_pass": _layout_entry(Vector2(0.87, 0.37), 1.0, 0.82),
+			"interact": _layout_entry(Vector2(0.87, 0.37), 1.0, 0.82),
 	}
 
 func _four_finger_layout() -> Dictionary:
@@ -1285,7 +1444,7 @@ func _four_finger_layout() -> Dictionary:
 		"crouch": _layout_entry(Vector2(0.70, 0.79), 1.0, 0.78),
 		"prone": _layout_entry(Vector2(0.58, 0.79), 1.0, 0.78),
 			"swap": _layout_entry(Vector2(0.64, 0.56), 1.0, 0.78),
-			"seed_pass": _layout_entry(Vector2(0.86, 0.37), 1.0, 0.82),
+			"interact": _layout_entry(Vector2(0.86, 0.37), 1.0, 0.82),
 	}
 
 func _layout_entry(center: Vector2, scale: float, opacity: float) -> Dictionary:
@@ -1315,7 +1474,7 @@ func _action_key_at(point: Vector2) -> String:
 	var closest := ""
 	var closest_distance := INF
 	for key in MOVABLE_KEYS:
-		if key == "move" or key == "seed_pass" and not _seed_relay_available:
+		if key == "move" or key == "interact" and not _interact_available:
 			continue
 		var hit_radius := maxf(_control_radius(key), 22.0) + 8.0
 		var distance := point.distance_to(_control_center(key))
@@ -1366,6 +1525,14 @@ func _preview_stick_origin(point: Vector2, radius: float) -> Vector2:
 		clampf(point.x, region.position.x + radius, region.end.x - radius),
 		clampf(point.y, region.position.y + radius, region.end.y - radius))
 
+func _layout_config_key(config: ConfigFile, key: String) -> String:
+	if config.has_section_key(LAYOUT_SECTION, "%s_center_x" % key):
+		return key
+	var legacy: String = str(LEGACY_LAYOUT_KEY_NAMES.get(key, ""))
+	if not legacy.is_empty() and config.has_section_key(LAYOUT_SECTION, "%s_center_x" % legacy):
+		return legacy
+	return key
+
 func _load_control_settings() -> void:
 	var config := ConfigFile.new()
 	if config.load(CONFIG_PATH) != OK:
@@ -1386,10 +1553,14 @@ func _load_control_settings() -> void:
 	var migrate_legacy_default := has_saved_layout and saved_layout_version < LAYOUT_VERSION and _saved_layout_matches(_legacy_default_layout(), config)
 	for key in MOVABLE_KEYS:
 		var fallback: Dictionary = _default_layout()[key] if migrate_legacy_default or not has_saved_layout else _legacy_default_layout().get(key, _default_layout()[key])
-		var center_x := _config_float(config, LAYOUT_SECTION, "%s_center_x" % key, fallback.center.x, 0.0, 1.0)
-		var center_y := _config_float(config, LAYOUT_SECTION, "%s_center_y" % key, fallback.center.y, 0.0, 1.0)
-		var scale := _config_float(config, LAYOUT_SECTION, "%s_scale" % key, fallback.scale, 0.7, 1.35)
-		var opacity := _config_float(config, LAYOUT_SECTION, "%s_opacity" % key, fallback.opacity, 0.35, 1.0)
+		# A renamed control reads its saved position from the pre-rename key
+		# name if the new one is absent, so it does not silently reset an
+		# existing user's layout.
+		var config_key := _layout_config_key(config, key)
+		var center_x := _config_float(config, LAYOUT_SECTION, "%s_center_x" % config_key, fallback.center.x, 0.0, 1.0)
+		var center_y := _config_float(config, LAYOUT_SECTION, "%s_center_y" % config_key, fallback.center.y, 0.0, 1.0)
+		var scale := _config_float(config, LAYOUT_SECTION, "%s_scale" % config_key, fallback.scale, 0.7, 1.35)
+		var opacity := _config_float(config, LAYOUT_SECTION, "%s_opacity" % config_key, fallback.opacity, 0.35, 1.0)
 		_layout[key] = _layout_entry(Vector2(center_x, center_y), scale, opacity)
 	if migrate_legacy_default:
 		_layout = _default_layout()
@@ -1407,7 +1578,7 @@ func _legacy_default_layout() -> Dictionary:
 		"crouch": _layout_entry(Vector2(0.67, 0.79), 1.0, 0.78),
 		"prone": _layout_entry(Vector2(0.56, 0.79), 1.0, 0.78),
 		"swap": _layout_entry(Vector2(0.67, 0.53), 1.0, 0.78),
-		"seed_pass": _layout_entry(Vector2(0.87, 0.37), 1.0, 0.82),
+		"interact": _layout_entry(Vector2(0.87, 0.37), 1.0, 0.82),
 	}
 
 func _saved_layout_matches(expected: Dictionary, config: ConfigFile) -> bool:

@@ -2,7 +2,7 @@ extends SceneTree
 
 func _initialize() -> void:
 	var lobby := RiftlineLobby.new()
-	assert(lobby.configure(1, RiftlineMap.Id.DUEL_YARD, false))
+	lobby.configure(1, false)
 	var host := lobby.add_host()
 	assert(not host.is_empty())
 	assert(lobby.public_state().phase == RiftlineLobby.Phase.STAGING)
@@ -37,18 +37,20 @@ func _initialize() -> void:
 	assert(lobby.start_rematch())
 	assert(lobby.commit_live(lobby.current_generation()))
 
+	# Nuclear Rush is 4v4: a squad lobby fills 4-a-side with no map or mode to
+	# negotiate.
 	var squad := RiftlineLobby.new()
-	assert(squad.configure(3, RiftlineMap.Id.CONCOURSE, true))
-	for peer_id in range(1, 7):
+	squad.configure(4, true)
+	for peer_id in range(1, 9):
 		assert(not squad.admit_peer(peer_id).is_empty())
 	var records: Array = squad.public_state().records
-	assert(records.size() == 6)
-	assert(_count_team(records, Duelist.Team.RED) == 3)
-	assert(_count_team(records, Duelist.Team.BLUE) == 3)
+	assert(records.size() == 8)
+	assert(_count_team(records, Duelist.Team.RED) == 4)
+	assert(_count_team(records, Duelist.Team.BLUE) == 4)
 	for record in records:
 		assert(not record.has("peer_id"))
 		assert(not record.has("address"))
-	for peer_id in range(1, 7):
+	for peer_id in range(1, 9):
 		assert(squad.set_ready(peer_id, true))
 	assert(squad.start_live())
 	assert(squad.commit_live(squad.current_generation()))
@@ -59,8 +61,7 @@ func _initialize() -> void:
 	assert(not _contains_bot(squad.public_state().records))
 	assert(squad.reset_empty())
 	assert(int(squad.public_state().phase) == RiftlineLobby.Phase.STAGING)
-	assert(int(squad.public_state().team_size) == 3)
-	assert(int(squad.public_state().arena_id) == RiftlineMap.Id.CONCOURSE)
+	assert(int(squad.public_state().team_size) == 4)
 	assert(not squad.admit_peer(20).is_empty())
 
 	print("Riftline lobby exercise: PASS")

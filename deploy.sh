@@ -27,9 +27,9 @@ fi
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-"$GODOT" --headless --path "$HERE" --export-debug "iOS" "$OUT/WhoYouPeekin.xcodeproj"
+"$GODOT" --headless --path "$HERE" --export-debug "iOS" "$OUT/SOGS.xcodeproj"
 
-XCODE_PROJECT="$OUT/WhoYouPeekin.xcodeproj"
+XCODE_PROJECT="$OUT/SOGS.xcodeproj"
 SCHEME=$(find "$XCODE_PROJECT/xcshareddata/xcschemes" -maxdepth 1 -name '*.xcscheme' -print -quit 2>/dev/null | sed 's#.*/##; s#\.xcscheme$##')
 if [[ -z "$SCHEME" ]]; then
   SCHEME=$(xcodebuild -list -project "$XCODE_PROJECT" 2>/dev/null | awk '/Schemes:/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit}')
@@ -57,5 +57,5 @@ fi
 xcrun devicectl device install app --device "$DEVICE" "$APP"
 if ! xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE"; then
   # Wireless installs remain valid when iOS locks before the final launch.
-  echo "WhoYouPeekin installed. Unlock the device and open WhoYouPeekin from the Home Screen." >&2
+  echo "SOGS installed. Unlock the device and open SOGS from the Home Screen." >&2
 fi

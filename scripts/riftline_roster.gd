@@ -11,9 +11,9 @@ signal actor_added(record: Dictionary)
 signal actor_removed(actor_id: String)
 
 const MIN_TEAM_SIZE := 1
-const MAX_TEAM_SIZE := 5
+const MAX_TEAM_SIZE := 4
 
-var team_size := 1
+var team_size := 4
 var dedicated_session := false
 var bot_fill_enabled := false
 
@@ -22,7 +22,7 @@ var _actor_by_peer: Dictionary = {}
 var _used_actor_ids: Dictionary = {}
 var _peer_generations: Dictionary = {}
 
-func configure(requested_team_size: int = 1, is_dedicated_session: bool = false, allow_bot_fill: bool = false) -> bool:
+func configure(requested_team_size: int = 4, is_dedicated_session: bool = false, allow_bot_fill: bool = false) -> bool:
 	if requested_team_size < MIN_TEAM_SIZE or requested_team_size > MAX_TEAM_SIZE:
 		return false
 	team_size = requested_team_size
