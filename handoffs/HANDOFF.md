@@ -23,7 +23,9 @@ and builds the procedural map directly in the Godot editor viewport. Headless
 import and every `tools/*_exercise.gd` test pass. The arena now has a denser,
 layered cover pass inspired by competitive arena FPS layouts: north/south
 midfield decks with side ramps and lower passages, east/west roofed corridors,
-four mirrored hard corners, and staggered low cover on both base approaches.
+and a sketch-matched oval cover pattern. The free-standing layout has four
+rectangular columns on each flank, four inset shoulder blocks, paired cover at
+both bases, and three low round covers on each side of the central nuke room.
 All bot routes remain authored and symmetric. A desktop Forward Mobile sample
 held the 120 FPS target at 8.33 ms per frame. A concurrent
 4v4 LAN host/join smoke test also passed; the existing documented ENet MTU

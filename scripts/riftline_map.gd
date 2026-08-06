@@ -161,7 +161,7 @@ func tactical_facts() -> Dictionary:
 		},
 		"lane_posts": {
 			"west_arc": [Vector3(-31.0, 0.1, 31.0), Vector3(-39.0, 0.1, 0.0), Vector3(-31.0, 0.1, -31.0)],
-			"center_drive": [Vector3(0.0, 0.1, 29.0), Vector3(0.0, 0.1, 13.0), Vector3(0.0, 0.1, -13.0), Vector3(0.0, 0.1, -29.0)],
+			"center_drive": [Vector3(0.0, 0.1, 29.0), Vector3(2.3, 0.1, 13.0), Vector3(-2.3, 0.1, -13.0), Vector3(0.0, 0.1, -29.0)],
 			"east_arc": [Vector3(31.0, 0.1, 31.0), Vector3(39.0, 0.1, 0.0), Vector3(31.0, 0.1, -31.0)],
 		},
 	}
@@ -242,24 +242,49 @@ func _configure_concourse() -> void:
 		var chamber_position := Vector3(cos(angle) * 8.2, 1.25, sin(angle) * 8.2)
 		_add_route_solid(chamber_position, Vector3(3.4, 2.5, 0.7), CHALK_CERAMIC if index % 2 == 0 else OXIDIZED_COPPER, PI * 0.5 - angle)
 
-	# Symmetric half-map cover creates a direct center drive and two circular flanks.
-	for side in [-1.0, 1.0]:
-		_add_route_solid(Vector3(-23.0, 1.0, side * 27.0), Vector3(7.0, 2.0, 2.6), CHALK_CERAMIC, side * 0.22)
-		_add_route_solid(Vector3(23.0, 1.0, side * 27.0), Vector3(7.0, 2.0, 2.6), OXIDIZED_COPPER, -side * 0.22)
-		_add_route_solid(Vector3(-35.0, 0.8, side * 14.0), Vector3(4.5, 1.6, 3.0), STORMGLASS_DEEP, side * 0.35)
-		_add_route_solid(Vector3(35.0, 0.8, side * 14.0), Vector3(4.5, 1.6, 3.0), COPPER_LIGHT, -side * 0.35)
-		_add_route_solid(Vector3(0.0, 0.7, side * 18.0), Vector3(4.0, 1.4, 2.2), STORMGLASS_DEEP)
+	# Free-standing cover follows the supplied top-down diagram.
+	_add_concourse_diagram_cover()
 	_add_concourse_layered_terrain()
 
 	_route_nodes = [
 		Vector3(-30.0, 0.1, -40.0), Vector3(-10.0, 0.1, -40.0), Vector3(10.0, 0.1, -40.0), Vector3(30.0, 0.1, -40.0),
-		Vector3(-39.0, 0.1, -20.0), Vector3(-28.0, 0.1, -20.0), Vector3(-10.0, 0.1, -22.0), Vector3(0.0, 0.1, -24.0), Vector3(0.0, 0.1, -12.0), Vector3(10.0, 0.1, -22.0), Vector3(28.0, 0.1, -20.0), Vector3(39.0, 0.1, -20.0),
-		Vector3(-42.0, 0.1, -10.0), Vector3(-42.0, 0.1, 0.0), Vector3(-42.0, 0.1, 10.0), Vector3(-34.0, 0.1, -10.0), Vector3(-34.0, 0.1, 10.0),
+		Vector3(-39.0, 0.1, -20.0), Vector3(-28.0, 0.1, -20.0), Vector3(-10.0, 0.1, -22.0), Vector3(0.0, 0.1, -24.0), Vector3(-2.3, 0.1, -15.0), Vector3(2.3, 0.1, -15.0), Vector3(-2.3, 0.1, -12.0), Vector3(2.3, 0.1, -12.0), Vector3(-0.8, 0.1, -9.5), Vector3(0.8, 0.1, -9.5), Vector3(-0.8, 0.1, -7.0), Vector3(0.8, 0.1, -7.0), Vector3(10.0, 0.1, -22.0), Vector3(28.0, 0.1, -20.0), Vector3(39.0, 0.1, -20.0),
+		Vector3(-42.0, 0.1, -10.0), Vector3(-42.0, 0.1, 0.0), Vector3(-42.0, 0.1, 10.0), Vector3(-38.0, 0.1, -14.0), Vector3(-27.0, 0.1, -14.0), Vector3(-38.0, 0.1, 14.0), Vector3(-27.0, 0.1, 14.0),
 		Vector3(-28.0, 0.1, 0.0), Vector3(-11.0, 0.1, 0.0), Vector3(0.0, 0.1, 0.0), Vector3(11.0, 0.1, 0.0), Vector3(28.0, 0.1, 0.0),
-		Vector3(34.0, 0.1, -10.0), Vector3(34.0, 0.1, 10.0), Vector3(42.0, 0.1, -10.0), Vector3(42.0, 0.1, 0.0), Vector3(42.0, 0.1, 10.0),
-		Vector3(-39.0, 0.1, 20.0), Vector3(-28.0, 0.1, 20.0), Vector3(-10.0, 0.1, 22.0), Vector3(0.0, 0.1, 12.0), Vector3(0.0, 0.1, 24.0), Vector3(10.0, 0.1, 22.0), Vector3(28.0, 0.1, 20.0), Vector3(39.0, 0.1, 20.0),
+		Vector3(27.0, 0.1, -14.0), Vector3(38.0, 0.1, -14.0), Vector3(27.0, 0.1, 14.0), Vector3(38.0, 0.1, 14.0), Vector3(42.0, 0.1, -10.0), Vector3(42.0, 0.1, 0.0), Vector3(42.0, 0.1, 10.0),
+		Vector3(-39.0, 0.1, 20.0), Vector3(-28.0, 0.1, 20.0), Vector3(-10.0, 0.1, 22.0), Vector3(-2.3, 0.1, 15.0), Vector3(2.3, 0.1, 15.0), Vector3(-2.3, 0.1, 12.0), Vector3(2.3, 0.1, 12.0), Vector3(-0.8, 0.1, 9.5), Vector3(0.8, 0.1, 9.5), Vector3(-0.8, 0.1, 7.0), Vector3(0.8, 0.1, 7.0), Vector3(0.0, 0.1, 24.0), Vector3(10.0, 0.1, 22.0), Vector3(28.0, 0.1, 20.0), Vector3(39.0, 0.1, 20.0),
 		Vector3(-30.0, 0.1, 40.0), Vector3(-10.0, 0.1, 40.0), Vector3(10.0, 0.1, 40.0), Vector3(30.0, 0.1, 40.0),
 	]
+
+func _add_concourse_diagram_cover() -> void:
+	# Paired base blocks at the north and south tips of the diagram.
+	for side in [-1.0, 1.0]:
+		var half_name := "Sun" if side > 0.0 else "Void"
+		var half_color := OXIDIZED_COPPER if side > 0.0 else STORMGLASS_DEEP
+		_add_route_solid(Vector3(-3.2, 1.25, side * 43.0), Vector3(3.0, 2.5, 2.2), half_color, 0.0, "%sBaseCoverWest" % half_name)
+		_add_route_solid(Vector3(3.2, 1.25, side * 43.0), Vector3(3.0, 2.5, 2.2), half_color, 0.0, "%sBaseCoverEast" % half_name)
+
+	# Four tall rectangles on each side form the long oval around the objective.
+	for x_sign in [-1.0, 1.0]:
+		var lane_name := "West" if x_sign < 0.0 else "East"
+		for index in 4:
+			var z_position: float = [-24.0, -8.0, 8.0, 24.0][index]
+			_add_route_solid(Vector3(x_sign * 32.0, 1.5, z_position), Vector3(2.2, 3.0, 5.2), CHALK_CERAMIC, 0.0, "%sCoverColumn%d" % [lane_name, index + 1])
+
+	# Inset shoulder blocks reproduce the four corners of the sketched oval.
+	for side in [-1.0, 1.0]:
+		for x_sign in [-1.0, 1.0]:
+			var half_name := "Sun" if side > 0.0 else "Void"
+			var lane_name := "West" if x_sign < 0.0 else "East"
+			var shoulder_color := COPPER_LIGHT if x_sign * side > 0.0 else STORMGLASS_DEEP
+			_add_route_solid(Vector3(x_sign * 25.0, 1.5, side * 34.0), Vector3(2.5, 3.0, 5.0), shoulder_color, 0.0, "%s%sShoulderCover" % [half_name, lane_name])
+
+	# Three low round covers guard each open entrance without closing the nuke room.
+	for side in [-1.0, 1.0]:
+		var half_name := "Sun" if side > 0.0 else "Void"
+		for index in 3:
+			var x_position: float = [-4.6, 0.0, 4.6][index]
+			_add_cylinder_solid(Vector3(x_position, 0.6, side * 15.0), 2.3, 1.2, CHALK_CERAMIC, true, "%sCenterCover%d" % [half_name, index + 1])
 
 func _add_concourse_layered_terrain() -> void:
 	# Raised midfield decks create a playable upper route and a covered lower route.
@@ -287,23 +312,6 @@ func _add_concourse_layered_terrain() -> void:
 		_add_route_solid(Vector3(corridor_x - x_sign * 4.6, 1.4, 0.0), Vector3(0.8, 2.8, 14.0), CHALK_CERAMIC, 0.0, "%sInnerWall" % corridor_name)
 		_add_route_solid(Vector3(corridor_x + x_sign * 4.6, 1.4, 0.0), Vector3(0.8, 2.8, 14.0), corridor_color, 0.0, "%sOuterWall" % corridor_name)
 
-	# Four hard corners break long sightlines without closing the three main lanes.
-	for side in [-1.0, 1.0]:
-		for x_sign in [-1.0, 1.0]:
-			var half_name := "Sun" if side > 0.0 else "Void"
-			var lane_name := "West" if x_sign < 0.0 else "East"
-			var cover_color := CHALK_CERAMIC if x_sign * side > 0.0 else COPPER_LIGHT
-			_add_route_solid(Vector3(x_sign * 19.0, 1.45, side * 15.0), Vector3(1.0, 2.9, 8.0), cover_color, 0.0, "%s%sHardCornerA" % [half_name, lane_name])
-			_add_route_solid(Vector3(x_sign * 16.5, 1.45, side * 18.5), Vector3(6.0, 2.9, 1.0), cover_color, 0.0, "%s%sHardCornerB" % [half_name, lane_name])
-
-	# Low staggered barricades make the base approaches defensible but flankable.
-	for side in [-1.0, 1.0]:
-		var half_name := "Sun" if side > 0.0 else "Void"
-		for index in 3:
-			var x_position: float = [-26.0, 0.0, 26.0][index]
-			var rotation_y: float = float(side) * (-0.24 + float(index) * 0.24)
-			_add_route_solid(Vector3(x_position, 0.7, side * 40.0), Vector3(5.5, 1.4, 1.8), STORMGLASS_DEEP if index == 1 else COPPER_LIGHT, rotation_y, "%sApproachCover%d" % [half_name, index + 1])
-
 func _build_solids() -> void:
 	for solid in _solids:
 		_add_solid_node(solid)
@@ -324,15 +332,19 @@ func _add_solid(position: Vector3, dimensions: Vector3, color: Color, emission: 
 func _add_route_solid(position: Vector3, dimensions: Vector3, color: Color, rotation_y := 0.0, node_name := "") -> void:
 	_add_solid(position, dimensions, color, 0.0, true, rotation_y, node_name)
 
-func _add_cylinder_solid(position: Vector3, diameter: float, height: float, color: Color) -> void:
-	_solids.append({
+func _add_cylinder_solid(position: Vector3, diameter: float, height: float, color: Color, route_blocker := false, node_name := "") -> void:
+	var spec := {
 		"position": position,
 		"dimensions": Vector3(diameter, height, diameter),
 		"color": color,
 		"emission": 0.0,
 		"shape": "cylinder",
 		"rotation_y": 0.0,
-	})
+		"name": node_name,
+	}
+	_solids.append(spec)
+	if route_blocker:
+		_route_blockers.append(spec)
 
 func _add_ramp(position: Vector3, dimensions: Vector3, rise: float, color: Color, rotation_y := 0.0, node_name := "") -> void:
 	var spec := {"position": position, "dimensions": dimensions, "color": color, "emission": 0.0, "shape": "ramp", "rise": rise, "rotation_y": rotation_y, "name": node_name}

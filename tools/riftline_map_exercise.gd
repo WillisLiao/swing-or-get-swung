@@ -20,7 +20,7 @@ func _initialize() -> void:
 	var concourse_solid_count := concourse.solid_count()
 	assert(not _contains_mesh(concourse))
 	assert(concourse.ambient_motion_count() == 0)
-	assert(concourse_solid_count >= 95)
+	assert(concourse_solid_count >= 100)
 	assert(Vector2(concourse.seed_position().x, concourse.seed_position().z).length() < 0.01)
 	assert((concourse.gate_positions()[Duelist.Team.SUN] as Vector3).z > 0.0)
 	assert((concourse.gate_positions()[Duelist.Team.VOID] as Vector3).z < 0.0)
@@ -54,7 +54,7 @@ func _initialize() -> void:
 	rendered.configure(RiftlineMap.Id.CONCOURSE, true)
 	assert(_contains_mesh(rendered))
 	assert(rendered.ambient_motion_count() >= 6)
-	for landmark_name in ["SunBase", "VoidBase", "NukePickupRoom", "WestArc", "EastArc", "StormRing", "LayeredTerrain", "WestUnderpass", "EastUnderpass", "SunMidDeck", "VoidMidDeck"]:
+	for landmark_name in ["SunBase", "VoidBase", "NukePickupRoom", "WestArc", "EastArc", "StormRing", "LayeredTerrain", "WestUnderpass", "EastUnderpass", "SunMidDeck", "VoidMidDeck", "WestCoverColumn1", "EastCoverColumn4", "SunCenterCover2", "VoidCenterCover2", "SunBaseCoverWest", "VoidBaseCoverEast"]:
 		assert(_find_named_node(rendered, landmark_name) != null)
 	var rendered_duel := RiftlineMap.new()
 	root.add_child(rendered_duel)
