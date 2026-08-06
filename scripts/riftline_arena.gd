@@ -2120,7 +2120,7 @@ func _read_capture_arguments() -> void:
 			_squad_preview = "tactics"
 		elif argument.begins_with("--arena-preview="):
 			_arena_preview = argument.trim_prefix("--arena-preview=")
-			if _arena_preview in ["sun-dock", "relay-basin", "windwalk", "service-run", "void-dock", "carrier-gate", "first-person", "overview", "sun-bay", "void-bay", "nuke-center", "sun-base", "void-base"] and _offline_squad_size < 3:
+			if _arena_preview in ["sun-dock", "relay-basin", "windwalk", "service-run", "void-dock", "carrier-gate", "first-person", "overview", "sun-bay", "void-bay", "nuke-center", "sun-base", "void-base", "mid-deck", "west-underpass"] and _offline_squad_size < 3:
 				_offline_squad_size = 3
 		elif argument.begins_with("--feedback-preview="):
 			_feedback_preview = argument.trim_prefix("--feedback-preview=")
@@ -2235,6 +2235,14 @@ func _apply_arena_preview() -> void:
 		"void-base":
 			camera_position = Vector3(-16.0, 8.0, -38.0)
 			look_target = Vector3(0.0, 1.0, -52.0)
+		"mid-deck":
+			camera_position = Vector3(18.0, 8.5, 39.0)
+			look_target = Vector3(0.0, 2.0, 29.0)
+		"west-underpass":
+			camera_position = Vector3(-42.0, 1.65, 10.5)
+			look_target = Vector3(-42.0, 1.45, -4.0)
+			_local_duelist.position = Vector3(-42.0, 0.1, 10.5)
+			_local_duelist.rotation.y = PI
 	_local_duelist.camera.global_position = camera_position
 	_local_duelist.camera.look_at(look_target)
 	for actor in _all_authority_actors():

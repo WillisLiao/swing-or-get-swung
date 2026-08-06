@@ -17,8 +17,10 @@ func _initialize() -> void:
 	var concourse := RiftlineMap.new()
 	root.add_child(concourse)
 	concourse.configure(RiftlineMap.Id.CONCOURSE, false)
+	var concourse_solid_count := concourse.solid_count()
 	assert(not _contains_mesh(concourse))
 	assert(concourse.ambient_motion_count() == 0)
+	assert(concourse_solid_count >= 95)
 	assert(Vector2(concourse.seed_position().x, concourse.seed_position().z).length() < 0.01)
 	assert((concourse.gate_positions()[Duelist.Team.SUN] as Vector3).z > 0.0)
 	assert((concourse.gate_positions()[Duelist.Team.VOID] as Vector3).z < 0.0)
@@ -52,7 +54,7 @@ func _initialize() -> void:
 	rendered.configure(RiftlineMap.Id.CONCOURSE, true)
 	assert(_contains_mesh(rendered))
 	assert(rendered.ambient_motion_count() >= 6)
-	for landmark_name in ["SunBase", "VoidBase", "NukePickupRoom", "WestArc", "EastArc", "StormRing"]:
+	for landmark_name in ["SunBase", "VoidBase", "NukePickupRoom", "WestArc", "EastArc", "StormRing", "LayeredTerrain", "WestUnderpass", "EastUnderpass", "SunMidDeck", "VoidMidDeck"]:
 		assert(_find_named_node(rendered, landmark_name) != null)
 	var rendered_duel := RiftlineMap.new()
 	root.add_child(rendered_duel)
@@ -87,8 +89,10 @@ func _has_authored_route(map: RiftlineMap, origin: Vector3, goal: Vector3) -> bo
 		if next.distance_to(goal) < 1.0:
 			return true
 		if next.distance_to(current) < 0.5:
+			push_error("Authored route stalled: origin=%s current=%s goal=%s next=%s" % [origin, current, goal, next])
 			return false
 		current = next
+	push_error("Authored route exhausted: origin=%s current=%s goal=%s" % [origin, current, goal])
 	return false
 
 func _contains_mesh(node: Node) -> bool:

@@ -20,7 +20,12 @@ The mode is integrated with the HUD, practice-mode picker, LAN descriptors,
 replicated match state, and procedural `pulp_lit` visuals. Protocol version is
 10. `nuke_rush_arena.tscn` is the canonical Concourse scene used at runtime
 and builds the procedural map directly in the Godot editor viewport. Headless
-import and every `tools/*_exercise.gd` test pass. A concurrent
+import and every `tools/*_exercise.gd` test pass. The arena now has a denser,
+layered cover pass inspired by competitive arena FPS layouts: north/south
+midfield decks with side ramps and lower passages, east/west roofed corridors,
+four mirrored hard corners, and staggered low cover on both base approaches.
+All bot routes remain authored and symmetric. A desktop Forward Mobile sample
+held the 120 FPS target at 8.33 ms per frame. A concurrent
 4v4 LAN host/join smoke test also passed; the existing documented ENet MTU
 warning can still appear. Desktop overview, center-room, and live 4v4 captures
 were visually checked. Device deployment and touch playtesting remain for a

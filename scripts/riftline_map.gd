@@ -156,7 +156,7 @@ func tactical_facts() -> Dictionary:
 			"neutral_seed": _seed_position,
 			"center_return": {"sun": Vector3(0.0, 0.1, 25.0), "void": Vector3(0.0, 0.1, -25.0)},
 			"gate_escort": {"sun": Vector3(0.0, 0.1, -42.0), "void": Vector3(0.0, 0.1, 42.0)},
-			"home_approach": {"sun": Vector3(0.0, 0.1, 40.0), "void": Vector3(0.0, 0.1, -40.0)},
+			"home_approach": {"sun": Vector3(10.0, 0.1, 40.0), "void": Vector3(-10.0, 0.1, -40.0)},
 			"opposing_gate": {"sun": void_gate, "void": sun_gate},
 		},
 		"lane_posts": {
@@ -249,14 +249,60 @@ func _configure_concourse() -> void:
 		_add_route_solid(Vector3(-35.0, 0.8, side * 14.0), Vector3(4.5, 1.6, 3.0), STORMGLASS_DEEP, side * 0.35)
 		_add_route_solid(Vector3(35.0, 0.8, side * 14.0), Vector3(4.5, 1.6, 3.0), COPPER_LIGHT, -side * 0.35)
 		_add_route_solid(Vector3(0.0, 0.7, side * 18.0), Vector3(4.0, 1.4, 2.2), STORMGLASS_DEEP)
+	_add_concourse_layered_terrain()
 
 	_route_nodes = [
-		Vector3(-25.0, 0.1, -38.0), Vector3(0.0, 0.1, -40.0), Vector3(25.0, 0.1, -38.0),
-		Vector3(-39.0, 0.1, -20.0), Vector3(-18.0, 0.1, -20.0), Vector3(0.0, 0.1, -24.0), Vector3(18.0, 0.1, -20.0), Vector3(39.0, 0.1, -20.0),
-		Vector3(-42.0, 0.1, 0.0), Vector3(-24.0, 0.1, 0.0), Vector3(-11.0, 0.1, 0.0), Vector3(0.0, 0.1, 0.0), Vector3(11.0, 0.1, 0.0), Vector3(24.0, 0.1, 0.0), Vector3(42.0, 0.1, 0.0),
-		Vector3(-39.0, 0.1, 20.0), Vector3(-18.0, 0.1, 20.0), Vector3(0.0, 0.1, 24.0), Vector3(18.0, 0.1, 20.0), Vector3(39.0, 0.1, 20.0),
-		Vector3(-25.0, 0.1, 38.0), Vector3(0.0, 0.1, 40.0), Vector3(25.0, 0.1, 38.0),
+		Vector3(-30.0, 0.1, -40.0), Vector3(-10.0, 0.1, -40.0), Vector3(10.0, 0.1, -40.0), Vector3(30.0, 0.1, -40.0),
+		Vector3(-39.0, 0.1, -20.0), Vector3(-28.0, 0.1, -20.0), Vector3(-10.0, 0.1, -22.0), Vector3(0.0, 0.1, -24.0), Vector3(0.0, 0.1, -12.0), Vector3(10.0, 0.1, -22.0), Vector3(28.0, 0.1, -20.0), Vector3(39.0, 0.1, -20.0),
+		Vector3(-42.0, 0.1, -10.0), Vector3(-42.0, 0.1, 0.0), Vector3(-42.0, 0.1, 10.0), Vector3(-34.0, 0.1, -10.0), Vector3(-34.0, 0.1, 10.0),
+		Vector3(-28.0, 0.1, 0.0), Vector3(-11.0, 0.1, 0.0), Vector3(0.0, 0.1, 0.0), Vector3(11.0, 0.1, 0.0), Vector3(28.0, 0.1, 0.0),
+		Vector3(34.0, 0.1, -10.0), Vector3(34.0, 0.1, 10.0), Vector3(42.0, 0.1, -10.0), Vector3(42.0, 0.1, 0.0), Vector3(42.0, 0.1, 10.0),
+		Vector3(-39.0, 0.1, 20.0), Vector3(-28.0, 0.1, 20.0), Vector3(-10.0, 0.1, 22.0), Vector3(0.0, 0.1, 12.0), Vector3(0.0, 0.1, 24.0), Vector3(10.0, 0.1, 22.0), Vector3(28.0, 0.1, 20.0), Vector3(39.0, 0.1, 20.0),
+		Vector3(-30.0, 0.1, 40.0), Vector3(-10.0, 0.1, 40.0), Vector3(10.0, 0.1, 40.0), Vector3(30.0, 0.1, 40.0),
 	]
+
+func _add_concourse_layered_terrain() -> void:
+	# Raised midfield decks create a playable upper route and a covered lower route.
+	for side in [-1.0, 1.0]:
+		var side_name := "Sun" if side > 0.0 else "Void"
+		var deck_color := OXIDIZED_COPPER if side > 0.0 else STORMGLASS_DEEP
+		var deck_z: float = float(side) * 29.0
+		_add_solid(Vector3(0.0, 2.8, deck_z), Vector3(12.0, 0.6, 8.0), deck_color, 0.0, false, 0.0, "%sMidDeck" % side_name)
+		_add_solid(Vector3(0.0, 3.65, deck_z - 3.72), Vector3(12.0, 1.15, 0.45), CHALK_CERAMIC, 0.0, false, 0.0, "%sMidDeckRailA" % side_name)
+		_add_solid(Vector3(0.0, 3.65, deck_z + 3.72), Vector3(12.0, 1.15, 0.45), CHALK_CERAMIC, 0.0, false, 0.0, "%sMidDeckRailB" % side_name)
+		for x_sign in [-1.0, 1.0]:
+			var ramp_rotation := PI * 0.5 if x_sign < 0.0 else -PI * 0.5
+			var ramp_side := "West" if x_sign < 0.0 else "East"
+			_add_ramp(Vector3(x_sign * 9.0, 0.0, deck_z), Vector3(5.0, 0.2, 6.0), 3.1, deck_color, ramp_rotation, "%s%sRamp" % [side_name, ramp_side])
+			for z_sign in [-1.0, 1.0]:
+				var support_suffix := "A" if z_sign < 0.0 else "B"
+				_add_route_solid(Vector3(x_sign * 5.25, 1.35, deck_z + z_sign * 2.8), Vector3(0.75, 2.7, 0.75), deck_color, 0.0, "%s%sSupport%s" % [side_name, ramp_side, support_suffix])
+
+	# Covered outer corridors echo the reference's indoor/outdoor transitions.
+	for x_sign in [-1.0, 1.0]:
+		var corridor_name := "WestUnderpass" if x_sign < 0.0 else "EastUnderpass"
+		var corridor_color := STORMGLASS_DEEP if x_sign < 0.0 else OXIDIZED_COPPER
+		var corridor_x: float = float(x_sign) * 42.0
+		_add_solid(Vector3(corridor_x, 3.25, 0.0), Vector3(10.0, 0.55, 14.0), corridor_color, 0.0, false, 0.0, corridor_name)
+		_add_route_solid(Vector3(corridor_x - x_sign * 4.6, 1.4, 0.0), Vector3(0.8, 2.8, 14.0), CHALK_CERAMIC, 0.0, "%sInnerWall" % corridor_name)
+		_add_route_solid(Vector3(corridor_x + x_sign * 4.6, 1.4, 0.0), Vector3(0.8, 2.8, 14.0), corridor_color, 0.0, "%sOuterWall" % corridor_name)
+
+	# Four hard corners break long sightlines without closing the three main lanes.
+	for side in [-1.0, 1.0]:
+		for x_sign in [-1.0, 1.0]:
+			var half_name := "Sun" if side > 0.0 else "Void"
+			var lane_name := "West" if x_sign < 0.0 else "East"
+			var cover_color := CHALK_CERAMIC if x_sign * side > 0.0 else COPPER_LIGHT
+			_add_route_solid(Vector3(x_sign * 19.0, 1.45, side * 15.0), Vector3(1.0, 2.9, 8.0), cover_color, 0.0, "%s%sHardCornerA" % [half_name, lane_name])
+			_add_route_solid(Vector3(x_sign * 16.5, 1.45, side * 18.5), Vector3(6.0, 2.9, 1.0), cover_color, 0.0, "%s%sHardCornerB" % [half_name, lane_name])
+
+	# Low staggered barricades make the base approaches defensible but flankable.
+	for side in [-1.0, 1.0]:
+		var half_name := "Sun" if side > 0.0 else "Void"
+		for index in 3:
+			var x_position: float = [-26.0, 0.0, 26.0][index]
+			var rotation_y: float = float(side) * (-0.24 + float(index) * 0.24)
+			_add_route_solid(Vector3(x_position, 0.7, side * 40.0), Vector3(5.5, 1.4, 1.8), STORMGLASS_DEEP if index == 1 else COPPER_LIGHT, rotation_y, "%sApproachCover%d" % [half_name, index + 1])
 
 func _build_solids() -> void:
 	for solid in _solids:
@@ -269,14 +315,14 @@ func _build_presentation() -> void:
 		_build_duel_landmarks()
 	_build_stormgates()
 
-func _add_solid(position: Vector3, dimensions: Vector3, color: Color, emission: float, route_blocker := false, rotation_y := 0.0) -> void:
-	var spec := {"position": position, "dimensions": dimensions, "color": color, "emission": emission, "rotation_y": rotation_y}
+func _add_solid(position: Vector3, dimensions: Vector3, color: Color, emission: float, route_blocker := false, rotation_y := 0.0, node_name := "") -> void:
+	var spec := {"position": position, "dimensions": dimensions, "color": color, "emission": emission, "rotation_y": rotation_y, "name": node_name}
 	_solids.append(spec)
 	if route_blocker:
 		_route_blockers.append(spec)
 
-func _add_route_solid(position: Vector3, dimensions: Vector3, color: Color, rotation_y := 0.0) -> void:
-	_add_solid(position, dimensions, color, 0.0, true, rotation_y)
+func _add_route_solid(position: Vector3, dimensions: Vector3, color: Color, rotation_y := 0.0, node_name := "") -> void:
+	_add_solid(position, dimensions, color, 0.0, true, rotation_y, node_name)
 
 func _add_cylinder_solid(position: Vector3, diameter: float, height: float, color: Color) -> void:
 	_solids.append({
@@ -288,13 +334,15 @@ func _add_cylinder_solid(position: Vector3, diameter: float, height: float, colo
 		"rotation_y": 0.0,
 	})
 
-func _add_ramp(position: Vector3, dimensions: Vector3, rise: float, color: Color) -> void:
-	var spec := {"position": position, "dimensions": dimensions, "color": color, "emission": 0.0, "shape": "ramp", "rise": rise}
+func _add_ramp(position: Vector3, dimensions: Vector3, rise: float, color: Color, rotation_y := 0.0, node_name := "") -> void:
+	var spec := {"position": position, "dimensions": dimensions, "color": color, "emission": 0.0, "shape": "ramp", "rise": rise, "rotation_y": rotation_y, "name": node_name}
 	_solids.append(spec)
-	_route_blockers.append(spec)
 
 func _add_solid_node(spec: Dictionary) -> void:
 	var body := StaticBody3D.new()
+	var body_name := str(spec.get("name", ""))
+	if not body_name.is_empty():
+		body.name = body_name
 	body.position = spec.position
 	body.rotation.y = float(spec.get("rotation_y", 0.0))
 	add_child(body)
@@ -395,6 +443,15 @@ func _build_concourse_landmarks() -> void:
 		var angle := TAU * float(index) / 24.0
 		var position := Vector3(cos(angle) * 57.8, 5.6, sin(angle) * 57.8)
 		_add_landmark_part(storm_ring, _box_mesh(Vector3(15.0, 0.12, 0.12)), position, Color("547da0"), Vector3(0.0, PI * 0.5 - angle, 0.0), 0.35)
+
+	var layered_terrain := _landmark_root("LayeredTerrain")
+	for side in [-1.0, 1.0]:
+		var deck_accent := Color("ffb15c") if side > 0.0 else Color("75dbff")
+		_add_emissive_rail(Vector3(0.0, 3.15, side * 29.0), Vector3(10.5, 0.08, 0.08), deck_accent, layered_terrain)
+	for x_sign in [-1.0, 1.0]:
+		var corridor_accent := Color("75dbff") if x_sign < 0.0 else Color("ffb15c")
+		_add_emissive_rail(Vector3(x_sign * 42.0, 3.58, -6.4), Vector3(8.8, 0.08, 0.08), corridor_accent, layered_terrain)
+		_add_emissive_rail(Vector3(x_sign * 42.0, 3.58, 6.4), Vector3(8.8, 0.08, 0.08), corridor_accent, layered_terrain)
 
 func _build_stormgates() -> void:
 	_build_stormgate(_gates[Duelist.Team.SUN], Color("ffb15c"), -1.0)
