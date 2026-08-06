@@ -99,6 +99,11 @@ func _accept(key: String) -> void:
 			_mode = "bomb"
 			mode_requested.emit(_mode)
 			queue_redraw()
+		"mode_nuke_rush":
+			_mode = "nuke-rush"
+			_selected = "full"
+			mode_requested.emit(_mode)
+			queue_redraw()
 
 func _draw() -> void:
 	if not visible:
@@ -117,7 +122,7 @@ func _draw_entry() -> void:
 	var left := safe.position.x + 22.0
 	var top := maxf(safe.position.y + 74.0, safe.size.y * 0.18)
 	draw_string(_font, Vector2(left, top), "STEP INTO THE STORM", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 34, PAPER)
-	draw_string(_font, Vector2(left, top + 34.0), "Pick a mode. Deathmatch respawns you away from pressure; bomb is plant and defuse.", HORIZONTAL_ALIGNMENT_LEFT, minf(safe.size.x - 44.0, 720.0), 15, MUTED)
+	draw_string(_font, Vector2(left, top + 34.0), "Pick a mode. Nuke Rush is a 5v5 race from the center pickup to the enemy base.", HORIZONTAL_ALIGNMENT_LEFT, minf(safe.size.x - 44.0, 820.0), 15, MUTED)
 	var mode_y := top + 78.0
 	_register_button("mode_deathmatch", Rect2(left, mode_y, 190.0, 46.0))
 	draw_rect(_button_rects["mode_deathmatch"], SUN if _mode == "deathmatch" else PANEL, true)
@@ -125,6 +130,9 @@ func _draw_entry() -> void:
 	_register_button("mode_bomb", Rect2(left + 206.0, mode_y, 150.0, 46.0))
 	draw_rect(_button_rects["mode_bomb"], VOID if _mode == "bomb" else PANEL, true)
 	draw_string(_font, _button_rects["mode_bomb"].get_center() + Vector2(-38.0, 6.0), "BOMB", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, INK if _mode == "bomb" else PAPER)
+	_register_button("mode_nuke_rush", Rect2(left + 372.0, mode_y, 190.0, 46.0))
+	draw_rect(_button_rects["mode_nuke_rush"], Color("ffd34d") if _mode == "nuke-rush" else PANEL, true)
+	draw_string(_font, _button_rects["mode_nuke_rush"].get_center() + Vector2(-50.0, 6.0), "NUKE RUSH", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, INK if _mode == "nuke-rush" else PAPER)
 	var diagram_center := Vector2(safe.end.x - minf(220.0, safe.size.x * 0.24), top + 28.0)
 	_draw_formation(diagram_center, _selected, 1.0)
 	var label := _drill_label(_selected)

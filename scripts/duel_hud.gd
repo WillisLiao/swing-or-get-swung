@@ -312,6 +312,18 @@ func show_objective_event(event_type: String, _state: Dictionary) -> void:
 		"round_won":
 			_objective_message = "ROUND WON"
 			_score_pulse = 1.0
+		"nuke_picked_up":
+			_objective_message = "NUKE TAKEN"
+		"nuke_dropped":
+			_objective_message = "NUKE DROPPED"
+		"nuke_delivered":
+			_objective_message = "ENEMY BASE BREACHED"
+			_score_pulse = 1.0
+		"nuke_timeout":
+			_objective_message = "FURTHEST PUSH WINS"
+			_score_pulse = 1.0
+		"nuke_overtime":
+			_objective_message = "OVERTIME — TAKE THE NUKE"
 		_:
 			return
 	_objective_message_remaining = 1.4
@@ -739,6 +751,19 @@ func _draw_objective_strip(safe: Rect2, friendly: Color, enemy: Color) -> void:
 		var bomb_state := int(_objective_state.get("bomb_state", -1))
 		var accent := Color("ff6b57") if bomb_state == int(RiftlineMatch.BombState.PLANTED) else Color("fff0b0")
 		_draw_bomb_glyph(center, accent, bomb_state)
+	elif mode == int(RiftlineMatch.GameMode.NUKE_RUSH):
+		var nuke_state := int(_objective_state.get("nuke_state", int(RiftlineMatch.NukeState.AT_CENTER)))
+		var nuke_team := int(_objective_state.get("nuke_carrier_team", -1))
+		var nuke_is_neutral := nuke_state == int(RiftlineMatch.NukeState.AT_CENTER) or nuke_state == int(RiftlineMatch.NukeState.DROPPED)
+		var nuke_color := Color("ffd34d") if nuke_is_neutral or nuke_team < 0 else _team_color(nuke_team)
+		_draw_nuke_glyph(center, nuke_color)
+		var seconds := maxi(0, ceili(float(_objective_state.get("time_remaining", 0.0))))
+		var timer_text := "%d:%02d" % [seconds / 60, seconds % 60]
+		draw_string(font, center + Vector2(-22.0, -11.0), timer_text, HORIZONTAL_ALIGNMENT_CENTER, 44.0, 12, Color("f1f6ff", 0.86))
+		var sun_progress := clampf(float(_objective_state.get("sun_progress", 0.0)), 0.0, 1.0)
+		var void_progress := clampf(float(_objective_state.get("void_progress", 0.0)), 0.0, 1.0)
+		draw_line(center + Vector2(-5.0, 13.0), center + Vector2(-5.0 - 48.0 * sun_progress, 13.0), friendly, 3.0)
+		draw_line(center + Vector2(5.0, 13.0), center + Vector2(5.0 + 48.0 * void_progress, 13.0), enemy, 3.0)
 	else:
 		draw_arc(center, 7.0, 0.0, TAU, 20, Color("fff4c7", 0.7), 2.0)
 		draw_line(center + Vector2(-11, 0), center + Vector2(-4, 0), Color("fff4c7", 0.7), 2.0)
@@ -756,6 +781,15 @@ func _draw_bomb_glyph(center: Vector2, color: Color, bomb_state: int) -> void:
 	if bomb_state == int(RiftlineMatch.BombState.PLANTED) or bomb_state == int(RiftlineMatch.BombState.DEFUSING):
 		var blink := 0.5 + sin(Time.get_ticks_msec() * 0.02) * 0.5
 		draw_circle(center + Vector2(0.0, -9.0), 2.0, Color("ff3b30", blink))
+
+func _draw_nuke_glyph(center: Vector2, color: Color) -> void:
+	draw_circle(center, 7.0, Color("071126"))
+	draw_arc(center, 7.0, 0.0, TAU, 24, Color(color, 0.95), 2.0)
+	draw_circle(center, 2.0, Color(color, 0.95))
+	for index in 3:
+		var angle := -PI * 0.5 + TAU * float(index) / 3.0
+		var direction := Vector2.RIGHT.rotated(angle)
+		draw_line(center + direction * 3.0, center + direction * 6.0, Color(color, 0.9), 2.5)
 
 func _draw_team_life_strip(safe: Rect2, friendly: Color, enemy: Color) -> void:
 	var center := Vector2(size.x * 0.5, safe.position.y + 45.0)

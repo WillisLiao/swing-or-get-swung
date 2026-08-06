@@ -290,7 +290,7 @@ func _build_arena() -> void:
 func _build_match() -> void:
 	director = RiftlineMatch.new()
 	add_child(director)
-	director.configure(_bomb_site_points(), _presentation_enabled, _game_mode)
+	director.configure(_bomb_site_points(), _presentation_enabled, _game_mode, arena_map.seed_position())
 	_add_spawn_points()
 	var offline_roster := RiftlineRoster.new()
 	offline_roster.configure(maxi(1, _offline_squad_size), false, _offline_squad_size > 1)
@@ -321,8 +321,9 @@ func _build_match() -> void:
 func _bomb_site_points() -> Array:
 	var gates: Dictionary = arena_map.gate_positions()
 	var sites: Array = []
-	for key in gates.keys():
-		sites.append(gates[key] as Vector3)
+	for team in [Duelist.Team.SUN, Duelist.Team.VOID]:
+		if gates.has(team):
+			sites.append(gates[team] as Vector3)
 	if sites.is_empty():
 		sites.append(arena_map.seed_position())
 	return sites
@@ -378,7 +379,10 @@ func _ensure_actor(record: Dictionary, local_controlled: bool, authoritative_col
 	duelist.set_friendly_presenter(not local_controlled and team_value == int(_local_team))
 	var spawn := _spawn_for_actor(team_value as Duelist.Team, registry)
 	duelist.position = spawn
-	duelist.rotation.y = -PI * 0.5 if team_value == int(Duelist.Team.SUN) else PI * 0.5
+	if arena_map != null and arena_map.map_id() == RiftlineMap.Id.CONCOURSE:
+		duelist.rotation.y = 0.0 if team_value == int(Duelist.Team.SUN) else PI
+	else:
+		duelist.rotation.y = -PI * 0.5 if team_value == int(Duelist.Team.SUN) else PI * 0.5
 	duelist.set_actor_id(actor_id)
 	if local_controlled and hud != null:
 		duelist.set_horizontal_fov(hud.horizontal_fov)
@@ -601,7 +605,13 @@ func _on_practice_drill_requested(drill: String) -> void:
 	_start_practice_drill(drill)
 
 func _on_practice_mode_requested(mode: String) -> void:
-	_game_mode = RiftlineMatch.GameMode.BOMB if mode == "bomb" else RiftlineMatch.GameMode.DEATHMATCH
+	match mode:
+		"bomb":
+			_game_mode = RiftlineMatch.GameMode.BOMB
+		"nuke-rush":
+			_game_mode = RiftlineMatch.GameMode.NUKE_RUSH
+		_:
+			_game_mode = RiftlineMatch.GameMode.DEATHMATCH
 	if not _lan_active and director != null:
 		_clear_match_nodes()
 		_build_match()
@@ -675,7 +685,7 @@ func _on_objective_event(event_type: String, state: Dictionary) -> void:
 	if hud != null:
 		hud.show_objective_event(event_type, state)
 	if combat_feedback != null:
-		var local_event := str(state.get("bomb_carrier_id", "")) == _local_actor_id
+		var local_event := str(state.get("bomb_carrier_id", state.get("nuke_carrier_id", ""))) == _local_actor_id
 		combat_feedback.objective_event(event_type, state, local_event)
 	if _lan_host:
 		network.publish_event({"type": event_type, "state": state})
@@ -1011,7 +1021,7 @@ func _on_network_event(event: Dictionary, sender_id: int) -> void:
 		return
 	match event_type:
 		"session":
-			_on_session_descriptor({"map_id": int(event.get("map_id", int(RiftlineMap.Id.DUEL_YARD))), "team_size": int(event.get("team_size", 1))})
+			_on_session_descriptor({"map_id": int(event.get("map_id", int(RiftlineMap.Id.DUEL_YARD))), "team_size": int(event.get("team_size", 1)), "game_mode": int(event.get("game_mode", int(_game_mode)))})
 		"phase":
 			_apply_client_phase(int(event.get("phase", int(RiftlineMatch.Phase.OPENING))))
 		"score":
@@ -1042,7 +1052,7 @@ func _on_network_event(event: Dictionary, sender_id: int) -> void:
 			_apply_client_spawn(str(event.get("actor_id", "")), event.get("position", null), float(event.get("yaw", 0.0)))
 		"roster":
 			_sync_roster_records(event.get("records", []))
-		"objective_claimed", "objective_dropped", "objective_returned", "objective_delivered", "objective_relay_launched", "objective_relay_caught", "objective_relay_disrupted", "bomb_planted", "bomb_dropped", "round_won":
+		"objective_claimed", "objective_dropped", "objective_returned", "objective_delivered", "objective_relay_launched", "objective_relay_caught", "objective_relay_disrupted", "bomb_planted", "bomb_dropped", "round_won", "nuke_picked_up", "nuke_dropped", "nuke_delivered", "nuke_timeout", "nuke_overtime":
 			var objective_event_state: Dictionary = event.get("state", {})
 			_on_objective_event(str(event.get("type", "")), objective_event_state)
 
@@ -1090,8 +1100,8 @@ func _on_session_descriptor(descriptor: Dictionary) -> void:
 	if network != null:
 		network.arena_id = descriptor_map
 		network.team_size = clampi(int(descriptor.get("team_size", network.team_size)), RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE)
-		network.game_mode = clampi(int(descriptor.get("game_mode", int(_game_mode))), 0, 1)
-	_game_mode = clampi(int(network.game_mode), 0, 1) as RiftlineMatch.GameMode
+		network.game_mode = clampi(int(descriptor.get("game_mode", int(_game_mode))), 0, 2)
+	_game_mode = clampi(int(network.game_mode), 0, 2) as RiftlineMatch.GameMode
 	if arena_map == null or arena_map.map_id() != descriptor_map:
 		_clear_match_nodes()
 		_rebuild_map(descriptor_map)
@@ -1109,7 +1119,7 @@ func _replace_match_for_lan(host: bool) -> void:
 	add_child(director)
 	if arena_map == null or arena_map.map_id() != network.arena_id:
 		_rebuild_map(network.arena_id as RiftlineMap.Id)
-	director.configure(_bomb_site_points(), _presentation_enabled, _game_mode)
+	director.configure(_bomb_site_points(), _presentation_enabled, _game_mode, arena_map.seed_position())
 	var team_points := arena_map.spawn_points(Duelist.Team.SUN)
 	if network.team_size <= 1:
 		team_points = [team_points[0]]
@@ -1528,30 +1538,34 @@ func _sync_bomb_presentation() -> void:
 		return
 	var bomb_state := int(director.bomb_state)
 	var is_bomb_mode := int(director.mode) == int(RiftlineMatch.GameMode.BOMB)
-	var show_bomb := is_bomb_mode and (bomb_state == int(RiftlineMatch.BombState.PLANTED) or bomb_state == int(RiftlineMatch.BombState.PLANTING))
+	var is_nuke_rush := int(director.mode) == int(RiftlineMatch.GameMode.NUKE_RUSH)
+	var show_bomb := (is_bomb_mode and (bomb_state == int(RiftlineMatch.BombState.PLANTED) or bomb_state == int(RiftlineMatch.BombState.PLANTING))) or (is_nuke_rush and int(director.nuke_state) != int(RiftlineMatch.NukeState.DELIVERED))
 	if show_bomb:
 		if _bomb_presentation_root == null:
-			_build_bomb_presentation()
+			if is_nuke_rush:
+				_build_nuke_presentation()
+			else:
+				_build_bomb_presentation()
 		if _bomb_presentation_root != null:
 			_bomb_presentation_root.visible = true
-			_bomb_presentation_root.global_position = director.bomb_position
+			_bomb_presentation_root.global_position = director.nuke_position if is_nuke_rush else director.bomb_position
 			if _bomb_blink_light != null:
 				var blink := (sin(Time.get_ticks_msec() * 0.006) * 0.5 + 0.5)
-				_bomb_blink_light.light_energy = 0.4 + blink * 1.8
+				_bomb_blink_light.light_energy = 0.7 + blink * 2.2
 	elif _bomb_presentation_root != null:
 		_bomb_presentation_root.visible = false
 
 func _sync_bomb_site_markers() -> void:
 	if not _presentation_enabled or director == null:
 		return
-	var is_bomb_mode := int(director.mode) == int(RiftlineMatch.GameMode.BOMB)
-	if is_bomb_mode and _bomb_site_markers.is_empty() and not director.bomb_sites.is_empty():
+	var show_markers := int(director.mode) in [int(RiftlineMatch.GameMode.BOMB), int(RiftlineMatch.GameMode.NUKE_RUSH)]
+	if show_markers and _bomb_site_markers.is_empty() and not director.bomb_sites.is_empty():
 		_build_bomb_site_markers()
 	if _bomb_site_markers.is_empty():
 		return
 	for marker in _bomb_site_markers:
 		if is_instance_valid(marker):
-			marker.visible = is_bomb_mode
+			marker.visible = show_markers
 
 func _sync_interact_progress() -> void:
 	if director == null or _local_duelist == null:
@@ -1619,6 +1633,64 @@ func _build_bomb_presentation() -> void:
 	_bomb_blink_light.position = Vector3(0.0, 0.3, 0.0)
 	_bomb_presentation_root.add_child(_bomb_blink_light)
 
+func _build_nuke_presentation() -> void:
+	if _bomb_presentation_root != null:
+		return
+	_bomb_presentation_root = Node3D.new()
+	_bomb_presentation_root.name = "NukeRushWarhead"
+	add_child(_bomb_presentation_root)
+	_bomb_model = Node3D.new()
+	_bomb_model.name = "WarheadModel"
+	_bomb_presentation_root.add_child(_bomb_model)
+
+	var body := MeshInstance3D.new()
+	var body_mesh := CapsuleMesh.new()
+	body_mesh.radius = 0.34
+	body_mesh.height = 1.75
+	body_mesh.radial_segments = 20
+	body.mesh = body_mesh
+	body.rotation.z = PI * 0.5
+	body.material_override = _pulp_material(Color("3c4a40"), 0.0)
+	_bomb_model.add_child(body)
+
+	for x_offset in [-0.42, 0.42]:
+		var band := MeshInstance3D.new()
+		var band_mesh := CylinderMesh.new()
+		band_mesh.top_radius = 0.37
+		band_mesh.bottom_radius = 0.37
+		band_mesh.height = 0.12
+		band.mesh = band_mesh
+		band.position.x = x_offset
+		band.rotation.z = PI * 0.5
+		band.material_override = _pulp_material(Color("ffd34d"), 1.4)
+		_bomb_model.add_child(band)
+
+	for fin_rotation in [0.0, PI * 0.5]:
+		var fin := MeshInstance3D.new()
+		var fin_mesh := BoxMesh.new()
+		fin_mesh.size = Vector3(0.48, 0.08, 0.82)
+		fin.mesh = fin_mesh
+		fin.position.x = -0.72
+		fin.rotation.x = fin_rotation
+		fin.material_override = _pulp_material(Color("d7ddd0"), 0.0)
+		_bomb_model.add_child(fin)
+
+	var warning_light := MeshInstance3D.new()
+	var warning_mesh := SphereMesh.new()
+	warning_mesh.radius = 0.08
+	warning_mesh.height = 0.16
+	warning_light.mesh = warning_mesh
+	warning_light.position = Vector3(0.2, 0.32, 0.0)
+	warning_light.material_override = _pulp_material(Color("ff4a3d"), 5.0)
+	_bomb_model.add_child(warning_light)
+
+	_bomb_blink_light = OmniLight3D.new()
+	_bomb_blink_light.light_color = Color("ff5a42")
+	_bomb_blink_light.omni_range = 4.0
+	_bomb_blink_light.light_energy = 1.0
+	_bomb_blink_light.position = Vector3(0.0, 0.45, 0.0)
+	_bomb_presentation_root.add_child(_bomb_blink_light)
+
 func _build_bomb_site_markers() -> void:
 	if director == null or director.bomb_sites.is_empty():
 		return
@@ -1628,7 +1700,7 @@ func _build_bomb_site_markers() -> void:
 		var site_pos: Vector3 = director.bomb_sites[index] as Vector3
 		var marker_root := Node3D.new()
 		marker_root.name = "BombSite_%s" % site_labels[index]
-		marker_root.global_position = site_pos
+		marker_root.position = site_pos
 		add_child(marker_root)
 		var accent: Color = site_colors[index] if index < site_colors.size() else Color("ffffff")
 		# Glowing pillar.
@@ -2021,6 +2093,9 @@ func _read_capture_arguments() -> void:
 			var requested_mode := argument.trim_prefix("--mode=").to_lower()
 			if requested_mode == "bomb":
 				_game_mode = RiftlineMatch.GameMode.BOMB
+			elif requested_mode in ["nuke", "nuke-rush"]:
+				_game_mode = RiftlineMatch.GameMode.NUKE_RUSH
+				_offline_squad_size = maxi(_offline_squad_size, 5)
 			elif requested_mode == "deathmatch":
 				_game_mode = RiftlineMatch.GameMode.DEATHMATCH
 		elif argument.begins_with("--squad-preview="):
@@ -2035,7 +2110,7 @@ func _read_capture_arguments() -> void:
 			_squad_preview = "tactics"
 		elif argument.begins_with("--arena-preview="):
 			_arena_preview = argument.trim_prefix("--arena-preview=")
-			if _arena_preview in ["sun-dock", "relay-basin", "windwalk", "service-run", "void-dock", "carrier-gate", "first-person", "overview", "sun-bay", "void-bay"] and _offline_squad_size < 3:
+			if _arena_preview in ["sun-dock", "relay-basin", "windwalk", "service-run", "void-dock", "carrier-gate", "first-person", "overview", "sun-bay", "void-bay", "nuke-center", "sun-base", "void-base"] and _offline_squad_size < 3:
 				_offline_squad_size = 3
 		elif argument.begins_with("--feedback-preview="):
 			_feedback_preview = argument.trim_prefix("--feedback-preview=")
@@ -2089,7 +2164,7 @@ func _read_capture_arguments() -> void:
 	if _capture_overview and hud != null and _local_duelist != null:
 		# A renderer-only inspection hook that lets captures verify both spawn halves at once.
 		_local_duelist.camera.cull_mask = 1
-		_local_duelist.camera.global_position = Vector3(0.0, 31.0, 27.0)
+		_local_duelist.camera.global_position = Vector3(0.0, 82.0, 58.0)
 		_local_duelist.camera.look_at(Vector3(0.0, 0.0, 0.0))
 	if _capture_rift_link and hud != null:
 		hud.set_connection_flow_active(true)
@@ -2103,12 +2178,16 @@ func _read_capture_arguments() -> void:
 func _apply_arena_preview() -> void:
 	if _local_duelist == null or _local_duelist.camera == null:
 		return
+	if hud != null:
+		hud.set_match_phase(RiftlineMatch.Phase.LIVE)
+		if director != null:
+			hud.set_objective_state(director.objective_state())
 	_local_duelist.camera.cull_mask = 1
-	var camera_position := Vector3(0.0, 31.0, 27.0)
+	var camera_position := Vector3(0.0, 82.0, 58.0)
 	var look_target := Vector3.ZERO
 	match _arena_preview:
 		"overview":
-			camera_position = Vector3(0.0, 31.0, 27.0)
+			camera_position = Vector3(0.0, 82.0, 58.0)
 			look_target = Vector3(0.0, 0.0, 0.0)
 		"first-person":
 			camera_position = Vector3(0.0, 1.65, 18.0)
@@ -2135,10 +2214,20 @@ func _apply_arena_preview() -> void:
 			look_target = Vector3(55.0, 1.4, 0.0)
 			_local_duelist.position = Vector3(38.0, 0.1, 5.0)
 			_local_duelist.rotation.y = -0.9
+		"nuke-center":
+			camera_position = Vector3(13.0, 8.0, 16.0)
+			look_target = Vector3(0.0, 0.9, 0.0)
+		"sun-base":
+			camera_position = Vector3(16.0, 8.0, 38.0)
+			look_target = Vector3(0.0, 1.0, 52.0)
+		"void-base":
+			camera_position = Vector3(-16.0, 8.0, -38.0)
+			look_target = Vector3(0.0, 1.0, -52.0)
 	_local_duelist.camera.global_position = camera_position
 	_local_duelist.camera.look_at(look_target)
 	for actor in _all_authority_actors():
 		actor.set_physics_process(false)
+		actor.set_process(false)
 
 
 func _apply_weapon_preview() -> void:

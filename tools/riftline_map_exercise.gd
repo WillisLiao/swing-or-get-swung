@@ -19,6 +19,9 @@ func _initialize() -> void:
 	concourse.configure(RiftlineMap.Id.CONCOURSE, false)
 	assert(not _contains_mesh(concourse))
 	assert(concourse.ambient_motion_count() == 0)
+	assert(Vector2(concourse.seed_position().x, concourse.seed_position().z).length() < 0.01)
+	assert((concourse.gate_positions()[Duelist.Team.SUN] as Vector3).z > 0.0)
+	assert((concourse.gate_positions()[Duelist.Team.VOID] as Vector3).z < 0.0)
 	for team in [Duelist.Team.SUN, Duelist.Team.VOID]:
 		var spawns := concourse.spawn_points(team)
 		assert(spawns.size() == 5)
@@ -49,7 +52,7 @@ func _initialize() -> void:
 	rendered.configure(RiftlineMap.Id.CONCOURSE, true)
 	assert(_contains_mesh(rendered))
 	assert(rendered.ambient_motion_count() >= 6)
-	for landmark_name in ["SunDock", "VoidDock", "RelayBasin", "Windwalk", "ServiceRun", "StormHorizon"]:
+	for landmark_name in ["SunBase", "VoidBase", "NukePickupRoom", "WestArc", "EastArc", "StormRing"]:
 		assert(_find_named_node(rendered, landmark_name) != null)
 	var rendered_duel := RiftlineMap.new()
 	root.add_child(rendered_duel)
@@ -70,8 +73,7 @@ func _has_authored_route(map: RiftlineMap, origin: Vector3, goal: Vector3) -> bo
 	var current := origin
 	for _step in 64:
 		var next := map.route_toward(current, goal)
-		assert(next.x >= -62.0 and next.x <= 62.0)
-		assert(next.z >= -38.0 and next.z <= 38.0)
+		assert(Vector2(next.x, next.z).length() <= RiftlineMap.CONCOURSE_RADIUS + 1.5)
 		if next.distance_to(goal) < 1.0:
 			return true
 		if next.distance_to(current) < 0.5:

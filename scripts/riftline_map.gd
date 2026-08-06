@@ -16,22 +16,23 @@ const DUEL_VOID_SPAWN := Vector3(16.0, 0.1, -6.0)
 const DUEL_SUN_GATE := Vector3(-18.5, 0.05, 6.0)
 const DUEL_VOID_GATE := Vector3(18.5, 0.05, -6.0)
 
-const CONCOURSE_SEED := Vector3(0.0, 0.7, 0.0)
-const CONCOURSE_SUN_GATE := Vector3(-56.0, 0.05, 0.0)
-const CONCOURSE_VOID_GATE := Vector3(56.0, 0.05, 0.0)
+const CONCOURSE_RADIUS := 60.0
+const CONCOURSE_SEED := Vector3(0.0, 0.72, 0.0)
+const CONCOURSE_SUN_GATE := Vector3(0.0, 0.05, 52.0)
+const CONCOURSE_VOID_GATE := Vector3(0.0, 0.05, -52.0)
 const CONCOURSE_SUN_SPAWNS := [
-	Vector3(-48.0, 0.1, -16.0),
-	Vector3(-48.0, 0.1, -8.0),
-	Vector3(-48.0, 0.1, 0.0),
-	Vector3(-48.0, 0.1, 8.0),
-	Vector3(-48.0, 0.1, 16.0),
+	Vector3(-10.0, 0.1, 48.0),
+	Vector3(-5.0, 0.1, 48.0),
+	Vector3(0.0, 0.1, 48.0),
+	Vector3(5.0, 0.1, 48.0),
+	Vector3(10.0, 0.1, 48.0),
 ]
 const CONCOURSE_VOID_SPAWNS := [
-	Vector3(48.0, 0.1, 16.0),
-	Vector3(48.0, 0.1, 8.0),
-	Vector3(48.0, 0.1, 0.0),
-	Vector3(48.0, 0.1, -8.0),
-	Vector3(48.0, 0.1, -16.0),
+	Vector3(10.0, 0.1, -48.0),
+	Vector3(5.0, 0.1, -48.0),
+	Vector3(0.0, 0.1, -48.0),
+	Vector3(-5.0, 0.1, -48.0),
+	Vector3(-10.0, 0.1, -48.0),
 ]
 
 var _map_id: Id = Id.DUEL_YARD
@@ -147,15 +148,15 @@ func tactical_facts() -> Dictionary:
 		"seed": _seed_position,
 		"anchors": {
 			"neutral_seed": _seed_position,
-			"center_return": {"sun": Vector3(-26.0, 0.1, 0.0), "void": Vector3(26.0, 0.1, 0.0)},
-			"gate_escort": {"sun": Vector3(40.0, 0.1, 0.0), "void": Vector3(-40.0, 0.1, 0.0)},
-			"home_approach": {"sun": Vector3(-40.0, 0.1, 0.0), "void": Vector3(40.0, 0.1, 0.0)},
+			"center_return": {"sun": Vector3(0.0, 0.1, 25.0), "void": Vector3(0.0, 0.1, -25.0)},
+			"gate_escort": {"sun": Vector3(0.0, 0.1, -42.0), "void": Vector3(0.0, 0.1, 42.0)},
+			"home_approach": {"sun": Vector3(0.0, 0.1, 40.0), "void": Vector3(0.0, 0.1, -40.0)},
 			"opposing_gate": {"sun": void_gate, "void": sun_gate},
 		},
 		"lane_posts": {
-			"windwalk": [Vector3(-34.0, 0.1, 25.0), Vector3(0.0, 0.1, 27.0), Vector3(34.0, 0.1, 25.0)],
-			"relay_basin": [Vector3(-25.0, 0.1, 0.0), Vector3(0.0, 0.1, 0.0), Vector3(25.0, 0.1, 0.0)],
-			"service_run": [Vector3(-34.0, 0.1, -25.0), Vector3(0.0, 0.1, -27.0), Vector3(34.0, 0.1, -25.0)],
+			"west_arc": [Vector3(-31.0, 0.1, 31.0), Vector3(-39.0, 0.1, 0.0), Vector3(-31.0, 0.1, -31.0)],
+			"center_drive": [Vector3(0.0, 0.1, 29.0), Vector3(0.0, 0.1, 13.0), Vector3(0.0, 0.1, -13.0), Vector3(0.0, 0.1, -29.0)],
+			"east_arc": [Vector3(31.0, 0.1, 31.0), Vector3(39.0, 0.1, 0.0), Vector3(31.0, 0.1, -31.0)],
 		},
 	}
 
@@ -209,51 +210,46 @@ func _configure_concourse() -> void:
 	_spawns[Duelist.Team.SUN] = CONCOURSE_SUN_SPAWNS.duplicate()
 	_spawns[Duelist.Team.VOID] = CONCOURSE_VOID_SPAWNS.duplicate()
 
-	# The footprint stays compatible with the existing match and network seams.
-	# Neutral geometry owns the palette; team color only appears on gates and actors.
-	_add_solid(Vector3(0, -0.5, 0), Vector3(124, 1, 76), STORMGLASS_SLATE, 0.0)
-	_add_solid(Vector3(0, 3, -38), Vector3(124, 6, 1), STORMGLASS_DEEP, 0.0)
-	_add_solid(Vector3(0, 3, 38), Vector3(124, 6, 1), STORMGLASS_DEEP, 0.0)
-	_add_solid(Vector3(-62, 3, 0), Vector3(1, 6, 76), STORMGLASS_DEEP, 0.0)
-	_add_solid(Vector3(62, 3, 0), Vector3(1, 6, 76), STORMGLASS_DEEP, 0.0)
+	# A true circular play space: cylinder floor plus tangent wall segments.
+	_add_cylinder_solid(Vector3(0.0, -0.5, 0.0), CONCOURSE_RADIUS * 2.0, 1.0, STORMGLASS_SLATE)
+	var wall_segments := 40
+	var wall_length := TAU * (CONCOURSE_RADIUS + 0.5) / float(wall_segments) + 0.35
+	for index in wall_segments:
+		var angle := TAU * float(index) / float(wall_segments)
+		var wall_position := Vector3(cos(angle) * (CONCOURSE_RADIUS + 0.5), 2.75, sin(angle) * (CONCOURSE_RADIUS + 0.5))
+		_add_solid(wall_position, Vector3(wall_length, 5.5, 1.2), STORMGLASS_DEEP, 0.0, false, PI * 0.5 - angle)
 
-	# Sun Dock: split exits and a protected central sight break.
-	_add_route_solid(Vector3(-45, 1.55, -13), Vector3(2.4, 3.1, 7.0), CHALK_CERAMIC)
-	_add_route_solid(Vector3(-43, 1.2, 0), Vector3(2.4, 2.4, 4.2), STORMGLASS_DEEP)
-	_add_route_solid(Vector3(-45, 1.35, 13), Vector3(2.0, 2.7, 6.0), CHALK_CERAMIC)
-	_add_route_solid(Vector3(-40.5, 0.9, -20), Vector3(5.0, 1.8, 3.0), OXIDIZED_COPPER)
-	_add_route_solid(Vector3(-40.5, 0.9, 20), Vector3(5.0, 1.8, 3.0), COPPER_LIGHT)
+	# Opposing bases sit inside the north/south rim with five clear spawn slots.
+	_add_route_solid(Vector3(0.0, 1.45, 55.0), Vector3(25.0, 2.9, 1.4), OXIDIZED_COPPER)
+	_add_route_solid(Vector3(-13.0, 1.2, 50.0), Vector3(1.4, 2.4, 10.0), COPPER_LIGHT)
+	_add_route_solid(Vector3(13.0, 1.2, 50.0), Vector3(1.4, 2.4, 10.0), COPPER_LIGHT)
+	_add_route_solid(Vector3(0.0, 1.45, -55.0), Vector3(25.0, 2.9, 1.4), STORMGLASS_DEEP)
+	_add_route_solid(Vector3(-13.0, 1.2, -50.0), Vector3(1.4, 2.4, 10.0), CHALK_CERAMIC)
+	_add_route_solid(Vector3(13.0, 1.2, -50.0), Vector3(1.4, 2.4, 10.0), CHALK_CERAMIC)
 
-	# Void Dock: equivalent timing with suspended-fin and slanted-canopy silhouettes.
-	_add_route_solid(Vector3(45, 1.55, 13), Vector3(2.4, 3.1, 7.0), CHALK_CERAMIC)
-	_add_route_solid(Vector3(43, 1.2, 0), Vector3(2.4, 2.4, 4.2), STORMGLASS_DEEP)
-	_add_route_solid(Vector3(45, 1.35, -13), Vector3(2.0, 2.7, 6.0), CHALK_CERAMIC)
-	_add_route_solid(Vector3(40.5, 0.9, 20), Vector3(5.0, 1.8, 3.0), OXIDIZED_COPPER)
-	_add_route_solid(Vector3(40.5, 0.9, -20), Vector3(5.0, 1.8, 3.0), COPPER_LIGHT)
+	# The central pickup room is an open ring with equal north/south entrances.
+	var chamber_segments := 16
+	for index in chamber_segments:
+		var angle := TAU * float(index) / float(chamber_segments)
+		if absf(cos(angle)) < 0.34:
+			continue
+		var chamber_position := Vector3(cos(angle) * 8.2, 1.25, sin(angle) * 8.2)
+		_add_route_solid(chamber_position, Vector3(3.4, 2.5, 0.7), CHALK_CERAMIC if index % 2 == 0 else OXIDIZED_COPPER, PI * 0.5 - angle)
 
-	# Relay Basin: four low plates keep the center dangerous without making it empty.
-	_add_route_solid(Vector3(-8, 0.75, -5), Vector3(5.5, 1.5, 2.8), OXIDIZED_COPPER)
-	_add_route_solid(Vector3(7, 0.9, 5), Vector3(5.0, 1.8, 3.2), COPPER_LIGHT)
-	_add_route_solid(Vector3(-1, 0.7, 10), Vector3(3.0, 1.4, 2.6), CHALK_CERAMIC)
-	_add_route_solid(Vector3(2, 0.72, -10), Vector3(3.4, 1.44, 2.8), STORMGLASS_DEEP)
-
-	# Windwalk: a modest rise, two cover choices, and an uninterrupted outer edge.
-	_add_route_solid(Vector3(-28, 1.0, 25), Vector3(4.5, 2.0, 3.2), CHALK_CERAMIC)
-	_add_route_solid(Vector3(-8, 0.75, 29), Vector3(3.0, 1.5, 3.4), STORMGLASS_DEEP)
-	_add_route_solid(Vector3(14, 1.15, 24), Vector3(4.4, 2.3, 3.0), CHALK_CERAMIC)
-	_add_route_solid(Vector3(29, 0.75, 29), Vector3(3.0, 1.5, 3.2), STORMGLASS_DEEP)
-	_add_ramp(Vector3(-19, 0.0, 20), Vector3(8.0, 1.6, 8.0), 1.6, CHALK_CERAMIC)
-
-	# Service Run: warm, low, and readable through staggered under-gantry cover.
-	_add_route_solid(Vector3(-29, 0.75, -27), Vector3(5.4, 1.5, 3.4), COPPER_LIGHT)
-	_add_route_solid(Vector3(-10, 1.05, -24), Vector3(3.4, 2.1, 5.4), OXIDIZED_COPPER)
-	_add_route_solid(Vector3(13, 0.8, -30), Vector3(5.8, 1.6, 3.2), COPPER_LIGHT)
-	_add_route_solid(Vector3(30, 1.0, -25), Vector3(4.2, 2.0, 3.8), OXIDIZED_COPPER)
+	# Symmetric half-map cover creates a direct center drive and two circular flanks.
+	for side in [-1.0, 1.0]:
+		_add_route_solid(Vector3(-23.0, 1.0, side * 27.0), Vector3(7.0, 2.0, 2.6), CHALK_CERAMIC, side * 0.22)
+		_add_route_solid(Vector3(23.0, 1.0, side * 27.0), Vector3(7.0, 2.0, 2.6), OXIDIZED_COPPER, -side * 0.22)
+		_add_route_solid(Vector3(-35.0, 0.8, side * 14.0), Vector3(4.5, 1.6, 3.0), STORMGLASS_DEEP, side * 0.35)
+		_add_route_solid(Vector3(35.0, 0.8, side * 14.0), Vector3(4.5, 1.6, 3.0), COPPER_LIGHT, -side * 0.35)
+		_add_route_solid(Vector3(0.0, 0.7, side * 18.0), Vector3(4.0, 1.4, 2.2), STORMGLASS_DEEP)
 
 	_route_nodes = [
-		Vector3(-39, 0.1, 25), Vector3(-27, 0.1, 25), Vector3(-11, 0.1, 26), Vector3(11, 0.1, 26), Vector3(27, 0.1, 25), Vector3(39, 0.1, 25),
-		Vector3(-39, 0.1, 0), Vector3(-24, 0.1, 0), Vector3(-12, 0.1, 0), Vector3(0, 0.1, 0), Vector3(12, 0.1, 0), Vector3(24, 0.1, 0), Vector3(39, 0.1, 0),
-		Vector3(-39, 0.1, -25), Vector3(-27, 0.1, -25), Vector3(-11, 0.1, -26), Vector3(11, 0.1, -26), Vector3(27, 0.1, -25), Vector3(39, 0.1, -25),
+		Vector3(-25.0, 0.1, -38.0), Vector3(0.0, 0.1, -40.0), Vector3(25.0, 0.1, -38.0),
+		Vector3(-39.0, 0.1, -20.0), Vector3(-18.0, 0.1, -20.0), Vector3(0.0, 0.1, -24.0), Vector3(18.0, 0.1, -20.0), Vector3(39.0, 0.1, -20.0),
+		Vector3(-42.0, 0.1, 0.0), Vector3(-24.0, 0.1, 0.0), Vector3(-11.0, 0.1, 0.0), Vector3(0.0, 0.1, 0.0), Vector3(11.0, 0.1, 0.0), Vector3(24.0, 0.1, 0.0), Vector3(42.0, 0.1, 0.0),
+		Vector3(-39.0, 0.1, 20.0), Vector3(-18.0, 0.1, 20.0), Vector3(0.0, 0.1, 24.0), Vector3(18.0, 0.1, 20.0), Vector3(39.0, 0.1, 20.0),
+		Vector3(-25.0, 0.1, 38.0), Vector3(0.0, 0.1, 40.0), Vector3(25.0, 0.1, 38.0),
 	]
 
 func _build_solids() -> void:
@@ -267,14 +263,24 @@ func _build_presentation() -> void:
 		_build_duel_landmarks()
 	_build_stormgates()
 
-func _add_solid(position: Vector3, dimensions: Vector3, color: Color, emission: float, route_blocker := false) -> void:
-	var spec := {"position": position, "dimensions": dimensions, "color": color, "emission": emission}
+func _add_solid(position: Vector3, dimensions: Vector3, color: Color, emission: float, route_blocker := false, rotation_y := 0.0) -> void:
+	var spec := {"position": position, "dimensions": dimensions, "color": color, "emission": emission, "rotation_y": rotation_y}
 	_solids.append(spec)
 	if route_blocker:
 		_route_blockers.append(spec)
 
-func _add_route_solid(position: Vector3, dimensions: Vector3, color: Color) -> void:
-	_add_solid(position, dimensions, color, 0.0, true)
+func _add_route_solid(position: Vector3, dimensions: Vector3, color: Color, rotation_y := 0.0) -> void:
+	_add_solid(position, dimensions, color, 0.0, true, rotation_y)
+
+func _add_cylinder_solid(position: Vector3, diameter: float, height: float, color: Color) -> void:
+	_solids.append({
+		"position": position,
+		"dimensions": Vector3(diameter, height, diameter),
+		"color": color,
+		"emission": 0.0,
+		"shape": "cylinder",
+		"rotation_y": 0.0,
+	})
 
 func _add_ramp(position: Vector3, dimensions: Vector3, rise: float, color: Color) -> void:
 	var spec := {"position": position, "dimensions": dimensions, "color": color, "emission": 0.0, "shape": "ramp", "rise": rise}
@@ -284,15 +290,27 @@ func _add_ramp(position: Vector3, dimensions: Vector3, rise: float, color: Color
 func _add_solid_node(spec: Dictionary) -> void:
 	var body := StaticBody3D.new()
 	body.position = spec.position
+	body.rotation.y = float(spec.get("rotation_y", 0.0))
 	add_child(body)
+	var shape_name := str(spec.get("shape", "box"))
 	if _presentation_enabled:
 		var mesh_instance := MeshInstance3D.new()
-		mesh_instance.mesh = _ramp_mesh(spec.dimensions, float(spec.get("rise", 0.0))) if str(spec.get("shape", "box")) == "ramp" else _box_mesh(spec.dimensions)
+		if shape_name == "ramp":
+			mesh_instance.mesh = _ramp_mesh(spec.dimensions, float(spec.get("rise", 0.0)))
+		elif shape_name == "cylinder":
+			var cylinder_mesh := CylinderMesh.new()
+			cylinder_mesh.top_radius = float(spec.dimensions.x) * 0.5
+			cylinder_mesh.bottom_radius = float(spec.dimensions.x) * 0.5
+			cylinder_mesh.height = float(spec.dimensions.y)
+			cylinder_mesh.radial_segments = 64
+			mesh_instance.mesh = cylinder_mesh
+		else:
+			mesh_instance.mesh = _box_mesh(spec.dimensions)
 		mesh_instance.material_override = _pulp_material(spec.color, float(spec.emission))
 		body.add_child(mesh_instance)
 	var collision := CollisionShape3D.new()
 	var shape: Shape3D
-	if str(spec.get("shape", "box")) == "ramp":
+	if shape_name == "ramp":
 		var ramp_shape := ConvexPolygonShape3D.new()
 		var half_x := float(spec.dimensions.x) * 0.5
 		var half_z := float(spec.dimensions.z) * 0.5
@@ -302,6 +320,11 @@ func _add_solid_node(spec: Dictionary) -> void:
 			Vector3(-half_x, float(spec.rise), half_z), Vector3(half_x, float(spec.rise), half_z),
 		])
 		shape = ramp_shape
+	elif shape_name == "cylinder":
+		var cylinder_shape := CylinderShape3D.new()
+		cylinder_shape.radius = float(spec.dimensions.x) * 0.5
+		cylinder_shape.height = float(spec.dimensions.y)
+		shape = cylinder_shape
 	else:
 		var box_shape := BoxShape3D.new()
 		box_shape.size = spec.dimensions
@@ -318,79 +341,54 @@ func _build_duel_landmarks() -> void:
 	_add_emissive_rail(Vector3(15, 0.06, 0), Vector3(0.08, 0.08, 20), Color("f4a55e"))
 
 func _build_concourse_landmarks() -> void:
-	# No vertex colors are needed for this authored layer; every new part uses
-	# the shared pulp shader's uniform palette instead.
-	var sun_dock := _landmark_root("SunDock")
-	_register_ambient_motion(sun_dock, 0.004, 0.31, 0.0, 1)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(-7.0, 3.4, 0.0), CHALK_CERAMIC)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(7.0, 3.4, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.08))
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(14.2, 0.24, 0.24)), Vector3(0.0, 6.8, 0.0), COPPER_LIGHT, Vector3.ZERO, 0.55)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.16, 3.5, 0.16)), Vector3(-2.6, 2.0, 2.6), OXIDIZED_COPPER, Vector3(0.0, 0.0, -0.2))
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.16, 3.5, 0.16)), Vector3(2.6, 2.0, 2.6), OXIDIZED_COPPER, Vector3(0.0, 0.0, 0.2))
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(5.5, 0.18, 0.18)), Vector3(0.0, 3.75, 2.6), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.0), 0.35)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(5.5, 0.16, 0.16)), Vector3(0.0, 1.0, -3.4), COPPER_LIGHT)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.16, 1.9, 0.16)), Vector3(-2.3, 0.95, -3.4), OXIDIZED_COPPER)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.16, 1.9, 0.16)), Vector3(2.3, 0.95, -3.4), OXIDIZED_COPPER)
+	# Base silhouettes mirror the hand sketch: blue north, orange south, five slots each.
+	var sun_base := _landmark_root("SunBase")
+	sun_base.position = CONCOURSE_SUN_GATE
+	_register_ambient_motion(sun_base, 0.004, 0.31, 0.0, 2)
+	_add_landmark_part(sun_base, _box_mesh(Vector3(24.0, 0.22, 0.22)), Vector3(0.0, 4.4, 2.8), COPPER_LIGHT, Vector3.ZERO, 0.8)
+	for x_offset in [-10.0, -5.0, 0.0, 5.0, 10.0]:
+		_add_landmark_part(sun_base, _box_mesh(Vector3(1.5, 0.08, 2.4)), Vector3(x_offset, 0.06, -4.0), Color("ff9b4a"), Vector3.ZERO, 1.2)
+	_add_landmark_part(sun_base, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(-12.0, 3.2, 2.8), CHALK_CERAMIC)
+	_add_landmark_part(sun_base, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(12.0, 3.2, 2.8), CHALK_CERAMIC)
 
-	var void_dock := _landmark_root("VoidDock")
-	_register_ambient_motion(void_dock, 0.004, 0.44, 0.7, 1)
-	void_dock.scale.x = -1.0
-	_add_landmark_part(void_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(-7.0, 3.4, 0.0), CHALK_CERAMIC)
-	_add_landmark_part(void_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(7.0, 3.4, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, -0.08))
-	_add_landmark_part(void_dock, _box_mesh(Vector3(14.2, 0.24, 0.24)), Vector3(0.0, 6.8, 0.0), OXIDIZED_COPPER, Vector3.ZERO, 0.55)
-	_add_landmark_part(void_dock, _box_mesh(Vector3(0.18, 5.0, 0.18)), Vector3(-4.5, 3.9, -2.8), STORMGLASS_DEEP, Vector3(0.0, 0.0, -0.28))
-	_add_landmark_part(void_dock, _box_mesh(Vector3(0.18, 5.0, 0.18)), Vector3(0.0, 3.0, -2.8), STORMGLASS_DEEP, Vector3(0.0, 0.0, -0.18))
-	_add_landmark_part(void_dock, _box_mesh(Vector3(0.18, 5.0, 0.18)), Vector3(4.5, 4.3, -2.8), STORMGLASS_DEEP, Vector3(0.0, 0.0, -0.34))
-	_add_landmark_part(void_dock, _box_mesh(Vector3(10.5, 0.18, 0.18)), Vector3(0.0, 5.9, -2.8), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.12), 0.35)
+	var void_base := _landmark_root("VoidBase")
+	void_base.position = CONCOURSE_VOID_GATE
+	_register_ambient_motion(void_base, 0.004, 0.37, 0.8, 2)
+	_add_landmark_part(void_base, _box_mesh(Vector3(24.0, 0.22, 0.22)), Vector3(0.0, 4.4, -2.8), Color("75dbff"), Vector3.ZERO, 0.8)
+	for x_offset in [-10.0, -5.0, 0.0, 5.0, 10.0]:
+		_add_landmark_part(void_base, _box_mesh(Vector3(1.5, 0.08, 2.4)), Vector3(x_offset, 0.06, 4.0), Color("75dbff"), Vector3.ZERO, 1.2)
+	_add_landmark_part(void_base, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(-12.0, 3.2, -2.8), CHALK_CERAMIC)
+	_add_landmark_part(void_base, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(12.0, 3.2, -2.8), CHALK_CERAMIC)
 
-	var relay_basin := _landmark_root("RelayBasin")
-	_objective_pulse_root = relay_basin
-	_register_ambient_motion(relay_basin, 0.006, 0.27, 1.2, 2)
-	_add_landmark_part(relay_basin, _box_mesh(Vector3(5.0, 0.18, 0.18)), Vector3(-2.5, 4.9, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, -0.16), 0.55)
-	_add_landmark_part(relay_basin, _box_mesh(Vector3(5.0, 0.18, 0.18)), Vector3(2.5, 4.9, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.16), 0.55)
-	_add_landmark_part(relay_basin, _box_mesh(Vector3(0.18, 0.18, 4.2)), Vector3(0.0, 4.9, -2.1), OXIDIZED_COPPER, Vector3(0.16, 0.0, 0.0), 0.4)
-	_add_landmark_part(relay_basin, _box_mesh(Vector3(0.18, 0.18, 4.2)), Vector3(0.0, 4.9, 2.1), OXIDIZED_COPPER, Vector3(-0.16, 0.0, 0.0), 0.4)
-	_add_pulp_cylinder(Vector3(0.0, 1.35, 0.0), 0.42, 2.7, SEED_LIGHT, relay_basin, 3.2)
-	for frame_data in [[Vector3(-4.5, 0.0, 3.5), -0.15], [Vector3(4.5, 0.0, -3.5), 0.15]]:
-		var frame := _landmark_root("SignalFrame", relay_basin)
-		frame.position = frame_data[0]
-		frame.rotation.y = float(frame_data[1])
-		_add_landmark_part(frame, _box_mesh(Vector3(0.14, 4.6, 0.14)), Vector3(-1.0, 2.0, 0.0), CHALK_CERAMIC)
-		_add_landmark_part(frame, _box_mesh(Vector3(0.14, 4.6, 0.14)), Vector3(1.0, 2.0, 0.0), CHALK_CERAMIC)
-		_add_landmark_part(frame, _box_mesh(Vector3(2.2, 0.14, 0.14)), Vector3(0.0, 4.1, 0.0), SEED_LIGHT, Vector3.ZERO, 1.4)
+	# The nuke model is supplied by the objective presenter; this room provides its pedestal and warnings.
+	var pickup_room := _landmark_root("NukePickupRoom")
+	_objective_pulse_root = pickup_room
+	_register_ambient_motion(pickup_room, 0.006, 0.28, 1.3, 1)
+	_add_pulp_cylinder(Vector3(0.0, 0.18, 0.0), 2.3, 0.32, STORMGLASS_DEEP, pickup_room)
+	_add_pulp_cylinder(Vector3(0.0, 0.38, 0.0), 1.45, 0.16, SEED_LIGHT, pickup_room, 1.8)
+	for direction in [-1.0, 1.0]:
+		_add_landmark_part(pickup_room, _box_mesh(Vector3(5.4, 0.16, 0.16)), Vector3(0.0, 4.8, direction * 6.7), CHALK_CERAMIC, Vector3.ZERO, 0.45)
+		_add_landmark_part(pickup_room, _box_mesh(Vector3(0.16, 4.6, 0.16)), Vector3(-2.6, 2.5, direction * 6.7), OXIDIZED_COPPER)
+		_add_landmark_part(pickup_room, _box_mesh(Vector3(0.16, 4.6, 0.16)), Vector3(2.6, 2.5, direction * 6.7), OXIDIZED_COPPER)
+	_add_emissive_rail(Vector3(0.0, 0.055, 10.5), Vector3(0.1, 0.08, 8.0), Color("ffb15c"), pickup_room)
+	_add_emissive_rail(Vector3(0.0, 0.055, -10.5), Vector3(0.1, 0.08, 8.0), Color("75dbff"), pickup_room)
 
-	var windwalk := _landmark_root("Windwalk")
-	_register_ambient_motion(windwalk, 0.005, 0.22, 1.9, 2)
-	var mast := _landmark_root("TransitMast", windwalk)
-	mast.position = Vector3(-8.0, 0.0, 0.0)
-	mast.rotation.z = -0.12
-	_add_landmark_part(mast, _box_mesh(Vector3(0.28, 8.0, 0.28)), Vector3.ZERO, CHALK_CERAMIC)
-	_add_landmark_part(mast, _box_mesh(Vector3(4.6, 0.16, 0.16)), Vector3(1.15, 2.8, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.18), 0.6)
-	_add_landmark_part(mast, _box_mesh(Vector3(0.14, 2.0, 0.14)), Vector3(2.2, 2.15, 0.0), COPPER_LIGHT, Vector3(0.0, 0.0, -0.22), 0.8)
-	_add_emissive_rail(Vector3(0.0, 0.06, 8.0), Vector3(78.0, 0.08, 0.08), Color("8bb8d5"), windwalk)
-	_add_landmark_part(windwalk, _box_mesh(Vector3(0.14, 0.14, 8.0)), Vector3(-27.0, 2.2, -1.0), CHALK_CERAMIC, Vector3(0.0, 0.0, -0.16), 0.3)
-	_add_landmark_part(windwalk, _box_mesh(Vector3(0.14, 0.14, 8.0)), Vector3(27.0, 2.2, -1.0), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.16), 0.3)
+	var west_arc := _landmark_root("WestArc")
+	_register_ambient_motion(west_arc, 0.003, 0.21, 1.9, 2)
+	_add_emissive_rail(Vector3(-39.0, 0.06, 0.0), Vector3(0.08, 0.08, 52.0), Color("8bb8d5"), west_arc)
+	_add_landmark_part(west_arc, _box_mesh(Vector3(0.18, 6.0, 0.18)), Vector3(-44.0, 3.0, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, -0.14))
 
-	var service_run := _landmark_root("ServiceRun")
-	_register_ambient_motion(service_run, 0.003, 0.36, 2.4, 1)
-	var gantry := _landmark_root("MaintenanceGantry", service_run)
-	gantry.position = Vector3(8.0, 0.0, 0.0)
-	_add_landmark_part(gantry, _box_mesh(Vector3(0.22, 4.8, 0.22)), Vector3(-2.0, 2.0, 0.0), OXIDIZED_COPPER)
-	_add_landmark_part(gantry, _box_mesh(Vector3(0.22, 4.8, 0.22)), Vector3(2.0, 2.0, 0.0), OXIDIZED_COPPER)
-	_add_landmark_part(gantry, _box_mesh(Vector3(4.4, 0.18, 0.18)), Vector3(0.0, 4.2, 0.0), COPPER_LIGHT, Vector3.ZERO, 1.0)
-	_add_pulp_cylinder(Vector3(-18.0, 1.0, 0.0), 0.8, 1.8, OXIDIZED_COPPER, service_run)
-	_add_pulp_cylinder(Vector3(20.0, 0.8, 0.0), 0.65, 1.4, COPPER_LIGHT, service_run)
-	_add_landmark_part(service_run, _box_mesh(Vector3(7.0, 2.4, 0.16)), Vector3(-19.0, 2.4, 0.0), STORMGLASS_DEEP, Vector3.ZERO, 0.2)
-	_add_landmark_part(service_run, _box_mesh(Vector3(7.0, 2.4, 0.16)), Vector3(22.0, 2.4, 0.0), STORMGLASS_DEEP, Vector3.ZERO, 0.2)
-	_add_emissive_rail(Vector3(0.0, 0.06, -8.0), Vector3(78.0, 0.08, 0.08), COPPER_LIGHT, service_run)
+	var east_arc := _landmark_root("EastArc")
+	_register_ambient_motion(east_arc, 0.003, 0.24, 2.4, 2)
+	_add_emissive_rail(Vector3(39.0, 0.06, 0.0), Vector3(0.08, 0.08, 52.0), COPPER_LIGHT, east_arc)
+	_add_landmark_part(east_arc, _box_mesh(Vector3(0.18, 6.0, 0.18)), Vector3(44.0, 3.0, 0.0), OXIDIZED_COPPER, Vector3(0.0, 0.0, 0.14))
 
-	var storm_horizon := _landmark_root("StormHorizon")
-	_register_ambient_motion(storm_horizon, 0.003, 0.18, 2.9, 2)
-	storm_horizon.position = Vector3(0.0, 0.0, 42.0)
-	_add_landmark_part(storm_horizon, _box_mesh(Vector3(18.0, 0.22, 0.22)), Vector3(-20.0, 9.0, 0.0), STORMGLASS_DEEP, Vector3(0.0, 0.0, -0.1))
-	_add_landmark_part(storm_horizon, _box_mesh(Vector3(0.22, 15.0, 0.22)), Vector3(-28.0, 3.0, 0.0), OXIDIZED_COPPER, Vector3(0.0, 0.0, -0.18))
-	_add_landmark_part(storm_horizon, _box_mesh(Vector3(0.22, 15.0, 0.22)), Vector3(-12.0, 3.0, 0.0), STORMGLASS_DEEP, Vector3(0.0, 0.0, 0.18))
-	_add_landmark_part(storm_horizon, _box_mesh(Vector3(22.0, 0.18, 0.18)), Vector3(19.0, 5.0, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.12), 0.22)
+	var storm_ring := _landmark_root("StormRing")
+	_register_ambient_motion(storm_ring, 0.002, 0.16, 2.9, 1)
+	for index in 24:
+		var angle := TAU * float(index) / 24.0
+		var position := Vector3(cos(angle) * 57.8, 5.6, sin(angle) * 57.8)
+		_add_landmark_part(storm_ring, _box_mesh(Vector3(15.0, 0.12, 0.12)), position, Color("547da0"), Vector3(0.0, PI * 0.5 - angle, 0.0), 0.35)
 
 func _build_stormgates() -> void:
 	_build_stormgate(_gates[Duelist.Team.SUN], Color("ffb15c"), -1.0)
@@ -492,15 +490,17 @@ func _pulp_material(color: Color, glow: float) -> ShaderMaterial:
 
 func _segment_hits_route_blocker(origin: Vector3, destination: Vector3) -> bool:
 	for blocker in _route_blockers:
-		if _segment_hits_box(origin, destination, blocker.position, blocker.dimensions, 0.6):
+		if _segment_hits_box(origin, destination, blocker.position, blocker.dimensions, 0.6, float(blocker.get("rotation_y", 0.0))):
 			return true
 	return false
 
-func _segment_hits_box(origin: Vector3, destination: Vector3, center: Vector3, dimensions: Vector3, padding: float) -> bool:
-	var minimum := center - dimensions * 0.5 - Vector3(padding, 1.0, padding)
-	var maximum := center + dimensions * 0.5 + Vector3(padding, 1.0, padding)
-	var start := Vector2(origin.x, origin.z)
-	var end := Vector2(destination.x, destination.z)
+func _segment_hits_box(origin: Vector3, destination: Vector3, center: Vector3, dimensions: Vector3, padding: float, rotation_y := 0.0) -> bool:
+	var local_origin := (origin - center).rotated(Vector3.UP, -rotation_y)
+	var local_destination := (destination - center).rotated(Vector3.UP, -rotation_y)
+	var minimum := -dimensions * 0.5 - Vector3(padding, 1.0, padding)
+	var maximum := dimensions * 0.5 + Vector3(padding, 1.0, padding)
+	var start := Vector2(local_origin.x, local_origin.z)
+	var end := Vector2(local_destination.x, local_destination.z)
 	var delta := end - start
 	var t_min := 0.0
 	var t_max := 1.0
@@ -529,6 +529,10 @@ func _point_in_solid(point: Vector3, padding := 0.0) -> bool:
 	for solid in _solids:
 		var center: Vector3 = solid.position
 		var dimensions: Vector3 = solid.dimensions
-		if absf(point.x - center.x) <= dimensions.x * 0.5 + padding and absf(point.y - center.y) <= dimensions.y * 0.5 + padding and absf(point.z - center.z) <= dimensions.z * 0.5 + padding:
+		var local_point := (point - center).rotated(Vector3.UP, -float(solid.get("rotation_y", 0.0)))
+		if str(solid.get("shape", "box")) == "cylinder":
+			if Vector2(local_point.x, local_point.z).length() <= dimensions.x * 0.5 + padding and absf(local_point.y) <= dimensions.y * 0.5 + padding:
+				return true
+		elif absf(local_point.x) <= dimensions.x * 0.5 + padding and absf(local_point.y) <= dimensions.y * 0.5 + padding and absf(local_point.z) <= dimensions.z * 0.5 + padding:
 			return true
 	return false

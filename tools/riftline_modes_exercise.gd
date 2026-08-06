@@ -1,7 +1,7 @@
 extends SceneTree
 
-# Locks the two live modes: team deathmatch (kill score + enemy-aware safe
-# respawn) and bomb (plant/defuse progress, fuse, round wins, side swap).
+# Locks the live modes: team deathmatch, bomb, and the neutral-objective
+# Nuke Rush race from center pickup to the opposing base.
 
 func _initialize() -> void:
 	var root := Node3D.new()
@@ -10,6 +10,7 @@ func _initialize() -> void:
 	await physics_frame
 	_test_deathmatch(root)
 	_test_bomb(root)
+	_test_nuke_rush(root)
 	print("Riftline modes exercise: PASS")
 	quit()
 
@@ -92,3 +93,59 @@ func _test_bomb(root: Node3D) -> void:
 	assert(match_node.bomb_state == RiftlineMatch.BombState.DEFUSED)
 	# Defuse awards the defending team (VOID) the round.
 	assert(match_node.scores[Duelist.Team.VOID] == 1)
+
+func _test_nuke_rush(root: Node3D) -> void:
+	var sun_base := Vector3(0.0, 0.1, 30.0)
+	var void_base := Vector3(0.0, 0.1, -30.0)
+	var pickup := Vector3.ZERO
+	var match_node := RiftlineMatch.new()
+	match_node.configure([sun_base, void_base], false, RiftlineMatch.GameMode.NUKE_RUSH, pickup)
+	root.add_child(match_node)
+	match_node.add_spawn(Duelist.Team.SUN, sun_base)
+	match_node.add_spawn(Duelist.Team.VOID, void_base)
+	var sun := _make_duelist(root, Duelist.Team.SUN, "nuke_sun", Vector3(0.0, 0.1, 0.0))
+	var void_d := _make_duelist(root, Duelist.Team.VOID, "nuke_void", Vector3(5.0, 0.1, 0.0))
+	match_node.register_duelist(sun, "nuke_sun")
+	match_node.register_duelist(void_d, "nuke_void")
+	match_node.begin()
+	match_node._opening_remaining = 0.0
+	await physics_frame
+	assert(match_node.is_live())
+	assert(match_node.nuke_state == RiftlineMatch.NukeState.AT_CENTER)
+
+	# The first player into the center room takes the neutral warhead.
+	match_node._tick_nuke_rush(0.1)
+	assert(match_node.nuke_state == RiftlineMatch.NukeState.CARRIED)
+	assert(match_node.nuke_carrier_id == "nuke_sun")
+	sun.position = Vector3(0.0, 0.1, -18.0)
+	match_node._tick_nuke_rush(0.1)
+	assert(float(match_node.nuke_progress[Duelist.Team.SUN]) > 0.5)
+
+	# A carrier defeat drops the warhead and allows the opposing team to steal it.
+	match_node._on_defeated(sun, void_d)
+	assert(match_node.nuke_state == RiftlineMatch.NukeState.DROPPED)
+	void_d.position = sun.position
+	match_node._tick_nuke_rush(0.1)
+	assert(match_node.nuke_carrier_id == "nuke_void")
+
+	# Reaching the opposing base ends the match immediately.
+	void_d.position = sun_base
+	match_node._tick_nuke_rush(0.1)
+	assert(match_node.nuke_state == RiftlineMatch.NukeState.DELIVERED)
+	assert(match_node.phase == RiftlineMatch.Phase.FINISHED)
+	assert(match_node.scores[Duelist.Team.VOID] == 1)
+
+	# At timeout, the team with the furthest recorded push wins.
+	var timeout_match := RiftlineMatch.new()
+	timeout_match.configure([sun_base, void_base], false, RiftlineMatch.GameMode.NUKE_RUSH, pickup)
+	root.add_child(timeout_match)
+	timeout_match.nuke_progress[Duelist.Team.SUN] = 0.42
+	timeout_match.nuke_progress[Duelist.Team.VOID] = 0.68
+	timeout_match._finish_nuke_timeout()
+	assert(timeout_match.phase == RiftlineMatch.Phase.FINISHED)
+	assert(timeout_match.scores[Duelist.Team.VOID] == 1)
+
+	# LAN descriptors preserve the third mode value for fork-to-upstream sessions.
+	var network := RiftlineNetwork.new()
+	var descriptor := network._descriptor_from_packet({"team_size": 5, "game_mode": 2, "map_id": int(RiftlineMap.Id.CONCOURSE)})
+	assert(int(descriptor.game_mode) == int(RiftlineMatch.GameMode.NUKE_RUSH))

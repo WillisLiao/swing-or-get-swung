@@ -17,7 +17,7 @@ signal lobby_live_received(state: Dictionary)
 signal lobby_abandoned_received(state: Dictionary)
 
 const PROJECT_ID := "riftline-lan"
-const PROTOCOL_VERSION := 9
+const PROTOCOL_VERSION := 10
 const APP_HOST_DUEL_REMOTE_SLOTS := 1
 const APP_HOST_SQUAD_REMOTE_SLOTS := 9
 const DEDICATED_REMOTE_SLOTS := 10
@@ -329,7 +329,7 @@ func _poll_discovery() -> void:
 		session_descriptor = _descriptor_from_packet(packet)
 		arena_id = int(session_descriptor.get("map_id", int(arena_id))) as RiftlineMap.Id
 		team_size = int(session_descriptor.get("team_size", team_size))
-		game_mode = clampi(int(session_descriptor.get("game_mode", game_mode)), 0, 1)
+		game_mode = clampi(int(session_descriptor.get("game_mode", game_mode)), 0, 2)
 		host_discovered.emit({"marker": marker, "address": _discovered_address, "mode": str(packet.get("mode", "duel")), "team_size": int(packet.get("team_size", 1)), "map_id": str(packet.get("map_id", "duel-yard")), "label": "RIFT FOUND"})
 		session_status.emit("RIFT FOUND")
 
@@ -430,7 +430,7 @@ func _rpc_event(event: Dictionary) -> void:
 		session_descriptor = descriptor
 		arena_id = int(descriptor.get("map_id", int(arena_id))) as RiftlineMap.Id
 		team_size = clampi(int(descriptor.get("team_size", team_size)), RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE)
-		game_mode = clampi(int(descriptor.get("game_mode", game_mode)), 0, 1)
+		game_mode = clampi(int(descriptor.get("game_mode", game_mode)), 0, 2)
 		session_descriptor_received.emit(descriptor)
 	elif event_type == "lobby_state":
 		lobby_state = _validated_lobby_state(event.get("state", {}))
@@ -503,7 +503,7 @@ func _descriptor_from_packet(packet: Dictionary) -> Dictionary:
 		map_value = arena_id_from_name(str(packet.get("map_name", "")))
 	return {
 		"team_size": clampi(int(packet.get("team_size", team_size)), RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE),
-		"game_mode": clampi(int(packet.get("game_mode", game_mode)), 0, 1),
+		"game_mode": clampi(int(packet.get("game_mode", game_mode)), 0, 2),
 		"map_id": map_value if map_value in [RiftlineMap.Id.DUEL_YARD, RiftlineMap.Id.CONCOURSE] else int(default_arena_for_team_size(int(packet.get("team_size", team_size)))),
 		"protocol": int(packet.get("protocol", packet.get("version", PROTOCOL_VERSION))),
 	}
@@ -596,6 +596,9 @@ func _read_command_line_options() -> void:
 			var mode_name := argument.trim_prefix("--mode=")
 			if mode_name == "bomb":
 				game_mode = 1
+			elif mode_name in ["nuke", "nuke-rush"]:
+				game_mode = 2
+				team_size = maxi(team_size, 5)
 			elif mode_name == "deathmatch":
 				game_mode = 0
 			else:
@@ -619,6 +622,8 @@ func _read_command_line_options() -> void:
 			_sim_random.seed = int(argument.trim_prefix("--net-sim-seed="))
 		elif argument == "--lobby-auto-ready":
 			_lobby_auto_ready = true
+	if game_mode == 2 and team_size < 4:
+		team_size = 5
 	arena_id = arena_override as RiftlineMap.Id if arena_override >= 0 else RiftlineMap.Id.CONCOURSE if arena_preview_requested else default_arena_for_team_size(team_size)
 	if _sim_latency > 0.0 or _sim_jitter > 0.0 or _sim_loss_percent > 0.0:
 		print("Riftline network test profile: latency=%dms jitter=%dms loss=%.1f%%" % [_sim_latency * 1000.0, _sim_jitter * 1000.0, _sim_loss_percent])
@@ -764,7 +769,7 @@ func _validated_lobby_state(value: Variant) -> Dictionary:
 		"arena_id": int(state.get("arena_id", int(arena_id))),
 		"arena_name": str(state.get("arena_name", arena_name(arena_id))),
 		"team_size": clampi(int(state.get("team_size", team_size)), RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE),
-		"game_mode": clampi(int(state.get("game_mode", game_mode)), 0, 1),
+		"game_mode": clampi(int(state.get("game_mode", game_mode)), 0, 2),
 		"revision": maxi(0, int(state.get("revision", 0))),
 		"records": _validated_public_records(state.get("records", [])),
 		"complete": bool(state.get("complete", false)),
