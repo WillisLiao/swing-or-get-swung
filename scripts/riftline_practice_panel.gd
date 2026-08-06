@@ -9,8 +9,8 @@ const INK := Color("071126")
 const PANEL := Color("0e1d38")
 const PAPER := Color("f1f6ff")
 const MUTED := Color("9bb2d1")
-const SUN := Color("ffb15c")
-const VOID := Color("75dbff")
+const RED := Color("ff6a57")
+const BLUE := Color("75dbff")
 const RESPONSIVE := preload("res://scripts/riftline_responsive_layout.gd")
 
 var _board := false
@@ -105,7 +105,7 @@ func _draw() -> void:
 		return
 	_button_rects.clear()
 	draw_rect(Rect2(Vector2.ZERO, size), INK, true)
-	draw_line(Vector2(48.0, 42.0), Vector2(size.x - 48.0, 42.0), Color(VOID, 0.24), 1.0)
+	draw_line(Vector2(48.0, 42.0), Vector2(size.x - 48.0, 42.0), Color(BLUE, 0.24), 1.0)
 	draw_string(_font, Vector2(52.0, 31.0), "WHOYOUPEEKIN / FIELD DRILLS", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 13, MUTED)
 	if _board:
 		_draw_board()
@@ -120,23 +120,23 @@ func _draw_entry() -> void:
 	draw_string(_font, Vector2(left, top + 34.0), "Pick a mode. Deathmatch respawns you away from pressure; bomb is plant and defuse.", HORIZONTAL_ALIGNMENT_LEFT, minf(safe.size.x - 44.0, 720.0), 15, MUTED)
 	var mode_y := top + 78.0
 	_register_button("mode_deathmatch", Rect2(left, mode_y, 190.0, 46.0))
-	draw_rect(_button_rects["mode_deathmatch"], SUN if _mode == "deathmatch" else PANEL, true)
+	draw_rect(_button_rects["mode_deathmatch"], RED if _mode == "deathmatch" else PANEL, true)
 	draw_string(_font, _button_rects["mode_deathmatch"].get_center() + Vector2(-58.0, 6.0), "DEATHMATCH", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, INK if _mode == "deathmatch" else PAPER)
 	_register_button("mode_bomb", Rect2(left + 206.0, mode_y, 150.0, 46.0))
-	draw_rect(_button_rects["mode_bomb"], VOID if _mode == "bomb" else PANEL, true)
+	draw_rect(_button_rects["mode_bomb"], BLUE if _mode == "bomb" else PANEL, true)
 	draw_string(_font, _button_rects["mode_bomb"].get_center() + Vector2(-38.0, 6.0), "BOMB", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, INK if _mode == "bomb" else PAPER)
 	var diagram_center := Vector2(safe.end.x - minf(220.0, safe.size.x * 0.24), top + 28.0)
 	_draw_formation(diagram_center, _selected, 1.0)
 	var label := _drill_label(_selected)
-	draw_string(_font, Vector2(left, top + 115.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, SUN)
+	draw_string(_font, Vector2(left, top + 115.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, RED)
 	draw_string(_font, Vector2(left, top + 145.0), _drill_description(_selected), HORIZONTAL_ALIGNMENT_LEFT, minf(safe.size.x - 44.0, 620.0), 15, PAPER)
 	var action_y := safe.end.y - 106.0
 	_register_button("enter", Rect2(left, action_y, 250.0, 58.0))
-	draw_rect(_button_rects["enter"], SUN, true)
+	draw_rect(_button_rects["enter"], RED, true)
 	draw_string(_font, _button_rects["enter"].get_center() + Vector2(-45.0, 6.0), "ENTER DRILL", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 15, INK)
 	_register_button("choose", Rect2(left + 270.0, action_y, 220.0, 58.0))
 	draw_rect(_button_rects["choose"], PANEL, true)
-	draw_line(_button_rects["choose"].position, _button_rects["choose"].position + Vector2(220.0, 0), VOID, 1.5)
+	draw_line(_button_rects["choose"].position, _button_rects["choose"].position + Vector2(220.0, 0), BLUE, 1.5)
 	draw_string(_font, _button_rects["choose"].get_center() + Vector2(-47.0, 6.0), "CHOOSE DRILL", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 14, PAPER)
 	draw_string(_font, Vector2(left, safe.end.y - 18.0), "OFFLINE PRACTICE / LAST DRILL REMEMBERED", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, MUTED)
 
@@ -154,7 +154,7 @@ func _draw_board() -> void:
 		var rect := Rect2(start_x + index * (card_width + gap), top + 78.0, card_width, 250.0)
 		_register_button(key, rect)
 		draw_rect(rect, PANEL, true)
-		draw_line(rect.position, rect.position + Vector2(rect.size.x, 0), SUN if key == _selected else VOID, 2.0)
+		draw_line(rect.position, rect.position + Vector2(rect.size.x, 0), RED if key == _selected else BLUE, 2.0)
 		_draw_formation(rect.position + Vector2(rect.size.x * 0.5, 82.0), key, 0.82)
 		draw_string(_font, rect.position + Vector2(24.0, 160.0), _drill_label(key), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 18, PAPER)
 		draw_string(_font, rect.position + Vector2(24.0, 190.0), _drill_description(key), HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 48.0, 13, MUTED)
@@ -170,24 +170,24 @@ func _draw_formation(center: Vector2, drill: String, scale: float) -> void:
 	var line_y := center.y + 42.0 * scale
 	draw_line(center + Vector2(-145.0 * scale, 0), center + Vector2(145.0 * scale, 0), Color(MUTED, 0.35), 1.0)
 	draw_circle(center, 8.0 * scale, Color("fff4c7"))
-	var sun_points: Array[Vector2] = []
-	var void_points: Array[Vector2] = []
+	var red_points: Array[Vector2] = []
+	var blue_points: Array[Vector2] = []
 	match drill:
 		"solo":
-			sun_points = [center + Vector2(-72.0, 0)]
-			void_points = [center + Vector2(72.0, 0)]
+			red_points = [center + Vector2(-72.0, 0)]
+			blue_points = [center + Vector2(72.0, 0)]
 		"wing":
-			sun_points = [center + Vector2(-74.0, -24.0), center + Vector2(-74.0, 24.0)]
-			void_points = [center + Vector2(74.0, -24.0), center + Vector2(74.0, 24.0)]
+			red_points = [center + Vector2(-74.0, -24.0), center + Vector2(-74.0, 24.0)]
+			blue_points = [center + Vector2(74.0, -24.0), center + Vector2(74.0, 24.0)]
 		_:
-			sun_points = [center + Vector2(-82.0, -32.0), center + Vector2(-90.0, 0), center + Vector2(-82.0, 32.0)]
-			void_points = [center + Vector2(82.0, -32.0), center + Vector2(90.0, 0), center + Vector2(82.0, 32.0)]
-	for point in sun_points:
-		draw_circle(point, 8.0 * scale, SUN)
-		draw_line(point, center, Color(SUN, 0.28), 1.0)
-	for point in void_points:
-		draw_circle(point, 8.0 * scale, VOID)
-		draw_line(point, center, Color(VOID, 0.28), 1.0)
+			red_points = [center + Vector2(-82.0, -32.0), center + Vector2(-90.0, 0), center + Vector2(-82.0, 32.0)]
+			blue_points = [center + Vector2(82.0, -32.0), center + Vector2(90.0, 0), center + Vector2(82.0, 32.0)]
+	for point in red_points:
+		draw_circle(point, 8.0 * scale, RED)
+		draw_line(point, center, Color(RED, 0.28), 1.0)
+	for point in blue_points:
+		draw_circle(point, 8.0 * scale, BLUE)
+		draw_line(point, center, Color(BLUE, 0.28), 1.0)
 
 func _register_button(key: String, rect: Rect2) -> void:
 	_button_rects[key] = rect

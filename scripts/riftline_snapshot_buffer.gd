@@ -63,7 +63,7 @@ func _interpolate(older: Dictionary, newer: Dictionary, weight: float) -> Dictio
 	result["eliminated"] = bool(older.get("eliminated", false)) if weight < 0.5 else bool(newer.get("eliminated", false))
 	# Discrete combat and objective facts must never be blended between actors'
 	# timeline samples.  Position and aim interpolate; these values take newest.
-	for key in ["last_input", "magazine_rounds", "reserve_ammo", "reload_remaining", "carrying_seed", "lean"]:
+	for key in ["last_input", "magazine_rounds", "reserve_ammo", "reload_remaining", "carrying_seed"]:
 		if newer.has(key):
 			result[key] = newer[key]
 	return _clean_state(result)

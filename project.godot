@@ -63,14 +63,6 @@ reload={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"physical_keycode":82)]
 }
-lean_left={
-"deadzone": 0.5,
-"events": [Object(InputEventKey,"physical_keycode":81)]
-}
-lean_right={
-"deadzone": 0.5,
-"events": [Object(InputEventKey,"physical_keycode":69)]
-}
 interact={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"physical_keycode":70)]

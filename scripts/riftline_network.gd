@@ -548,8 +548,6 @@ func _validate_input(peer_id: int, frame: Dictionary) -> Dictionary:
 	for key in ["aim", "fire", "jump", "crouch", "prone", "weapon_switch", "reload", "pass_seed", "interact"]:
 		if not frame.has(key) or typeof(frame[key]) != TYPE_BOOL:
 			return {}
-	if not frame.has("lean") or not _is_finite_number(frame["lean"]):
-		return {}
 	return {
 		"protocol": PROTOCOL_VERSION,
 		"sequence": int(frame.sequence),
@@ -566,7 +564,6 @@ func _validate_input(peer_id: int, frame: Dictionary) -> Dictionary:
 		"reload": bool(frame.reload),
 		"pass_seed": bool(frame.pass_seed),
 		"interact": bool(frame.interact),
-		"lean": clampi(int(frame["lean"]), -1, 1),
 	}
 
 func _is_finite_number(value: Variant) -> bool:
@@ -787,7 +784,7 @@ func _validated_public_records(value: Variant) -> Array[Dictionary]:
 			continue
 		var actor_id := str(candidate.get("actor_id", ""))
 		var team := int(candidate.get("team", -1))
-		if actor_id.is_empty() or team < Duelist.Team.SUN or team > Duelist.Team.VOID:
+		if actor_id.is_empty() or team < Duelist.Team.RED or team > Duelist.Team.BLUE:
 			continue
 		result.append({"actor_id": actor_id, "team": team, "human": bool(candidate.get("human", false))})
 	return result

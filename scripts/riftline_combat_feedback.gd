@@ -72,7 +72,7 @@ func projectile_impacted(fact: Dictionary, local_position: Vector3) -> void:
 		return
 	_remember_event(event_key)
 	var impact_position: Vector3 = fact.get("position", Vector3.ZERO)
-	var team := int(fact.get("team", int(Duelist.Team.SUN)))
+	var team := int(fact.get("team", int(Duelist.Team.RED)))
 	_play_world("carbine_impact", impact_position, 2)
 	var shooter_id := str(fact.get("shooter_id", ""))
 	var target_id := str(fact.get("target_id", ""))

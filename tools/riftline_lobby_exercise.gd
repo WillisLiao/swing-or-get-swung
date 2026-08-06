@@ -43,8 +43,8 @@ func _initialize() -> void:
 		assert(not squad.admit_peer(peer_id).is_empty())
 	var records: Array = squad.public_state().records
 	assert(records.size() == 6)
-	assert(_count_team(records, Duelist.Team.SUN) == 3)
-	assert(_count_team(records, Duelist.Team.VOID) == 3)
+	assert(_count_team(records, Duelist.Team.RED) == 3)
+	assert(_count_team(records, Duelist.Team.BLUE) == 3)
 	for record in records:
 		assert(not record.has("peer_id"))
 		assert(not record.has("address"))

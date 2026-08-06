@@ -33,7 +33,7 @@ func configure(requested_team_size: int = 1, is_dedicated_session: bool = false,
 func add_host() -> Dictionary:
 	if dedicated_session or _records_by_id.has("host"):
 		return {}
-	return _add_record("host", -1, Duelist.Team.SUN, true)
+	return _add_record("host", -1, Duelist.Team.RED, true)
 
 func assign_peer(peer_id: int) -> Dictionary:
 	if peer_id <= 0 or _actor_by_peer.has(peer_id):
@@ -92,7 +92,7 @@ func public_records() -> Array[Dictionary]:
 
 
 func is_ready() -> bool:
-	for team in [Duelist.Team.SUN, Duelist.Team.VOID]:
+	for team in [Duelist.Team.RED, Duelist.Team.BLUE]:
 		var count := _team_count(team, false if not bot_fill_enabled else true)
 		if count < team_size:
 			return false
@@ -122,17 +122,17 @@ func _add_record(actor_id: String, peer_id: int, team: Duelist.Team, human: bool
 	return next.duplicate(true)
 
 func _balanced_team() -> int:
-	var sun_count := _team_count(Duelist.Team.SUN, false)
-	var void_count := _team_count(Duelist.Team.VOID, false)
-	if sun_count >= team_size and void_count >= team_size:
+	var red_count := _team_count(Duelist.Team.RED, false)
+	var blue_count := _team_count(Duelist.Team.BLUE, false)
+	if red_count >= team_size and blue_count >= team_size:
 		return -1
-	if sun_count < void_count:
-		return int(Duelist.Team.SUN)
-	if void_count < sun_count:
-		return int(Duelist.Team.VOID)
+	if red_count < blue_count:
+		return int(Duelist.Team.RED)
+	if blue_count < red_count:
+		return int(Duelist.Team.BLUE)
 	# The app-hosted first remote remains the familiar Void rival.  Dedicated
 	# sessions use Sun as their explicit deterministic tie-break.
-	return int(Duelist.Team.SUN) if dedicated_session else int(Duelist.Team.VOID)
+	return int(Duelist.Team.RED) if dedicated_session else int(Duelist.Team.BLUE)
 
 func _has_room_for(team: Duelist.Team) -> bool:
 	return _team_count(team, true) < team_size

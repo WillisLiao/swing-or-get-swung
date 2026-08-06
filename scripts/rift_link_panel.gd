@@ -286,11 +286,11 @@ func _draw_icon(center: Vector2, color: Color, active: bool) -> void:
 	draw_line(center + Vector2(-10, 0), center + Vector2(10, 0), color, 2.0)
 
 func _draw_crew(origin: Vector2, width: float, color: Color) -> void:
-	var rows := [Duelist.Team.SUN, Duelist.Team.VOID]
+	var rows := [Duelist.Team.RED, Duelist.Team.BLUE]
 	var row_height := 48.0
 	for row in rows.size():
 		var team: Duelist.Team = rows[row]
-		var team_color := Color("ffad5d") if team == Duelist.Team.SUN else Color("71cfff")
+		var team_color := Color("ff6a57") if team == Duelist.Team.RED else Color("71cfff")
 		var records := _team_records(team)
 		var count := maxi(1, int(_state.get("team_size", 1)))
 		var gap := minf(42.0, (width - 24.0) / float(count))
@@ -299,7 +299,7 @@ func _draw_crew(origin: Vector2, width: float, color: Color) -> void:
 			var record: Dictionary = records[index] if index < records.size() else {}
 			var filled := not record.is_empty()
 			var ready := filled and bool(record.get("ready", false))
-			if team == Duelist.Team.SUN:
+			if team == Duelist.Team.RED:
 				draw_colored_polygon(PackedVector2Array([center + Vector2(0, -11), center + Vector2(11, 0), center + Vector2(0, 11), center + Vector2(-11, 0)]), Color(team_color, 0.88 if filled else 0.08))
 				draw_polyline(PackedVector2Array([center + Vector2(0, -11), center + Vector2(11, 0), center + Vector2(0, 11), center + Vector2(-11, 0), center + Vector2(0, -11)]), Color(team_color, 0.95), 2.0)
 			else:
@@ -307,7 +307,7 @@ func _draw_crew(origin: Vector2, width: float, color: Color) -> void:
 				draw_arc(center, 10.0, 0.0, TAU, 20, Color(team_color, 0.95), 2.0)
 			if ready:
 				draw_arc(center, 16.0, -PI * 0.82, -PI * 0.18, 12, Color("f1f6ff", 0.96), 2.0)
-		draw_string(ThemeDB.fallback_font, origin + Vector2(width - 64.0, row * row_height + 5.0), "SUN" if team == Duelist.Team.SUN else "VOID", HORIZONTAL_ALIGNMENT_RIGHT, 64, 11, Color(team_color, 0.86))
+		draw_string(ThemeDB.fallback_font, origin + Vector2(width - 64.0, row * row_height + 5.0), "RED" if team == Duelist.Team.RED else "BLUE", HORIZONTAL_ALIGNMENT_RIGHT, 64, 11, Color(team_color, 0.86))
 
 func _team_records(team: Duelist.Team) -> Array:
 	var result: Array = []
@@ -334,24 +334,24 @@ func _preview_state(name: String) -> Dictionary:
 	var complete := false
 	match name:
 		"host-empty":
-			records = [{"actor_id": "host", "team": int(Duelist.Team.SUN), "human": true, "ready": false}]
+			records = [{"actor_id": "host", "team": int(Duelist.Team.RED), "human": true, "ready": false}]
 			_local_actor_id = "host"
 		"host-crew":
-			records = [{"actor_id": "host", "team": int(Duelist.Team.SUN), "human": true, "ready": false}, {"actor_id": "peer", "team": int(Duelist.Team.VOID), "human": true, "ready": false}]
+			records = [{"actor_id": "host", "team": int(Duelist.Team.RED), "human": true, "ready": false}, {"actor_id": "peer", "team": int(Duelist.Team.BLUE), "human": true, "ready": false}]
 			_local_actor_id = "host"
 			complete = true
 		"host-ready":
-			records = [{"actor_id": "host", "team": int(Duelist.Team.SUN), "human": true, "ready": true}, {"actor_id": "peer", "team": int(Duelist.Team.VOID), "human": true, "ready": false}]
+			records = [{"actor_id": "host", "team": int(Duelist.Team.RED), "human": true, "ready": true}, {"actor_id": "peer", "team": int(Duelist.Team.BLUE), "human": true, "ready": false}]
 			_local_actor_id = "host"
 			complete = true
 		"arming":
 			phase = RiftlineLobby.Phase.ARMING
-			records = [{"actor_id": "host", "team": int(Duelist.Team.SUN), "human": true, "ready": true}, {"actor_id": "peer", "team": int(Duelist.Team.VOID), "human": true, "ready": true}]
+			records = [{"actor_id": "host", "team": int(Duelist.Team.RED), "human": true, "ready": true}, {"actor_id": "peer", "team": int(Duelist.Team.BLUE), "human": true, "ready": true}]
 			_local_actor_id = "host"
 			complete = true
 		"rematch":
 			phase = RiftlineLobby.Phase.REMATCH
-			records = [{"actor_id": "host", "team": int(Duelist.Team.SUN), "human": true, "ready": true}, {"actor_id": "peer", "team": int(Duelist.Team.VOID), "human": true, "ready": false}]
+			records = [{"actor_id": "host", "team": int(Duelist.Team.RED), "human": true, "ready": true}, {"actor_id": "peer", "team": int(Duelist.Team.BLUE), "human": true, "ready": false}]
 			_local_actor_id = "host"
 			complete = true
 		"severed":
@@ -362,8 +362,8 @@ func _preview_state(name: String) -> Dictionary:
 			complete = true
 			_local_actor_id = "peer_1"
 			for index in team_size:
-				records.append({"actor_id": "peer_%d" % index, "team": int(Duelist.Team.SUN), "human": true, "ready": index == 1})
-				records.append({"actor_id": "peer_%d" % (index + team_size), "team": int(Duelist.Team.VOID), "human": true, "ready": index == 2})
+				records.append({"actor_id": "peer_%d" % index, "team": int(Duelist.Team.RED), "human": true, "ready": index == 1})
+				records.append({"actor_id": "peer_%d" % (index + team_size), "team": int(Duelist.Team.BLUE), "human": true, "ready": index == 2})
 		_:
 			return {}
 	return {"phase": phase, "arena_id": int(RiftlineMap.Id.CONCOURSE if team_size > 1 else RiftlineMap.Id.DUEL_YARD), "arena_name": "concourse" if team_size > 1 else "duel-yard", "team_size": team_size, "records": records, "revision": 4, "complete": complete, "launchable": false}

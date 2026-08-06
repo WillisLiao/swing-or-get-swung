@@ -9,8 +9,8 @@ func _initialize() -> void:
 	var ballistics := BALLISTICS.new()
 	root.add_child(ballistics)
 
-	var human := _make_duelist(root, Duelist.Team.SUN, "human", Vector3.ZERO)
-	var bot := _make_duelist(root, Duelist.Team.VOID, "bot", Vector3(5.0, 0.0, 0.0))
+	var human := _make_duelist(root, Duelist.Team.RED, "human", Vector3.ZERO)
+	var bot := _make_duelist(root, Duelist.Team.BLUE, "bot", Vector3(5.0, 0.0, 0.0))
 	var impacts: Array[Dictionary] = []
 	var fired: Array[Dictionary] = []
 	ballistics.projectile_fired.connect(func(fact: Dictionary) -> void: fired.append(fact))
@@ -118,7 +118,7 @@ func _initialize() -> void:
 	human.set_combat_pose(false, 0.1)
 
 	# A same-team target can be crossed by a projectile but never takes damage.
-	var friendly := _make_duelist(root, Duelist.Team.SUN, "friendly", Vector3(0.0, 0.0, -4.0))
+	var friendly := _make_duelist(root, Duelist.Team.RED, "friendly", Vector3(0.0, 0.0, -4.0))
 	ballistics.clear()
 	var friendly_health := friendly.health
 	ballistics.fire(human, Duelist.Weapon.PULSE, Vector3(0.0, 1.0, 0.0), Vector3(0.0, 0.0, -1.0))

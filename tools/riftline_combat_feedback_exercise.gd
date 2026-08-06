@@ -35,8 +35,8 @@ func _initialize() -> void:
 	assert(not reloaded_preferences.effects_enabled)
 	assert(not reloaded_preferences.haptics_enabled)
 
-	var local := _make_duelist(root, Duelist.Team.SUN, "local")
-	var enemy := _make_duelist(root, Duelist.Team.VOID, "enemy")
+	var local := _make_duelist(root, Duelist.Team.RED, "local")
+	var enemy := _make_duelist(root, Duelist.Team.BLUE, "enemy")
 	var initial_health := local.health
 	var initial_weapon := local.weapon
 	var impact := {
@@ -66,8 +66,8 @@ func _initialize() -> void:
 	assert(is_equal_approx(local.health, initial_health))
 	assert(enemy.health == Duelist.HEALTH)
 	feedback._last_damage_feedback_msec = -10000
-	feedback.knife_struck("enemy", Vector3(2.0, 1.0, 0.0), Vector3.ZERO, Duelist.Team.VOID, false, true, "local", Vector3(2.0, 1.0, 0.0), "knife:1", local.global_position)
-	feedback.knife_struck("enemy", Vector3(2.0, 1.0, 0.0), Vector3.ZERO, Duelist.Team.VOID, false, true, "local", Vector3(2.0, 1.0, 0.0), "knife:1", local.global_position)
+	feedback.knife_struck("enemy", Vector3(2.0, 1.0, 0.0), Vector3.ZERO, Duelist.Team.BLUE, false, true, "local", Vector3(2.0, 1.0, 0.0), "knife:1", local.global_position)
+	feedback.knife_struck("enemy", Vector3(2.0, 1.0, 0.0), Vector3.ZERO, Duelist.Team.BLUE, false, true, "local", Vector3(2.0, 1.0, 0.0), "knife:1", local.global_position)
 	assert(damage_count[0] == 2)
 
 	# Reusing the event path remains a no-op in headless mode and never allocates voices.

@@ -6,7 +6,7 @@ extends Node
 # but has no seed objective.  Deathmatch respawns at the safest own-team point;
 # bomb is round-based with plant/defuse progress, a fuse, and side swaps.
 
-signal score_changed(sun: int, void_score: int)
+signal score_changed(red_score: int, blue_score: int)
 signal phase_changed(phase: Phase)
 signal match_finished(winner: Duelist.Team)
 signal respawn_started(victim: Duelist)
@@ -33,14 +33,14 @@ const BOMB_DEFUSE_RADIUS := 2.2
 
 var mode: GameMode = GameMode.DEATHMATCH
 
-var rosters: Dictionary = {Duelist.Team.SUN: [], Duelist.Team.VOID: []}
-var scores: Dictionary = {Duelist.Team.SUN: 0, Duelist.Team.VOID: 0}
-var spawn_points: Dictionary = {Duelist.Team.SUN: [], Duelist.Team.VOID: []}
+var rosters: Dictionary = {Duelist.Team.RED: [], Duelist.Team.BLUE: []}
+var scores: Dictionary = {Duelist.Team.RED: 0, Duelist.Team.BLUE: 0}
+var spawn_points: Dictionary = {Duelist.Team.RED: [], Duelist.Team.BLUE: []}
 var bomb_sites: Array = []
 var phase: Phase = Phase.OPENING
 
 var bomb_state: BombState = BombState.CARRIED
-var bomb_team: Duelist.Team = Duelist.Team.SUN
+var bomb_team: Duelist.Team = Duelist.Team.RED
 var bomb_carrier_id := ""
 var bomb_position := Vector3.ZERO
 var bomb_plant_progress := 0.0
@@ -54,7 +54,7 @@ var _respawn_generation: Dictionary = {}
 var _opening_remaining := 0.0
 var _intermission_remaining := 0.0
 var _started := false
-var _winner: Duelist.Team = Duelist.Team.SUN
+var _winner: Duelist.Team = Duelist.Team.RED
 var _last_replica_tick := -1
 var _interact_held: Dictionary = {}
 
@@ -87,7 +87,7 @@ func unregister_duelist(actor_id: String) -> void:
 	_duelists_by_id.erase(actor_id)
 	_respawn_generation.erase(actor_id)
 	_interact_held.erase(actor_id)
-	if rosters[Duelist.Team.SUN].is_empty() or rosters[Duelist.Team.VOID].is_empty():
+	if rosters[Duelist.Team.RED].is_empty() or rosters[Duelist.Team.BLUE].is_empty():
 		_started = false
 		_cancel_respawns()
 		_set_phase(Phase.OPENING)
@@ -114,8 +114,8 @@ func authoritative_state() -> Dictionary:
 	return {
 		"phase": int(phase),
 		"mode": int(mode),
-		"sun_score": int(scores[Duelist.Team.SUN]),
-		"void_score": int(scores[Duelist.Team.VOID]),
+		"red_score": int(scores[Duelist.Team.RED]),
+		"blue_score": int(scores[Duelist.Team.BLUE]),
 		"objective": _objective_state(),
 	}
 
@@ -131,13 +131,13 @@ func apply_replica_state(snapshot: Dictionary) -> void:
 	var phase_changed_locally := next_phase != phase
 	phase = next_phase
 	mode = clampi(int(snapshot.get("mode", int(mode))), int(GameMode.DEATHMATCH), int(GameMode.BOMB)) as GameMode
-	scores[Duelist.Team.SUN] = int(snapshot.get("sun_score", 0))
-	scores[Duelist.Team.VOID] = int(snapshot.get("void_score", 0))
+	scores[Duelist.Team.RED] = int(snapshot.get("red_score", 0))
+	scores[Duelist.Team.BLUE] = int(snapshot.get("blue_score", 0))
 	var objective: Dictionary = snapshot.get("objective", {})
 	_apply_objective_presentation(objective)
 	if phase_changed_locally:
 		_set_phase(phase)
-	score_changed.emit(scores[Duelist.Team.SUN], scores[Duelist.Team.VOID])
+	score_changed.emit(scores[Duelist.Team.RED], scores[Duelist.Team.BLUE])
 
 func objective_state() -> Dictionary:
 	return _objective_state()
@@ -178,7 +178,7 @@ func _start_round() -> void:
 	_cancel_respawns()
 	_reset_duelists_to_spawns()
 	if mode == GameMode.BOMB:
-		# Side swap each round; SUN opens as the first attacking side.
+		# Side swap each round; RED opens as the first attacking side.
 		bomb_team = _next_attacking_team()
 		_reset_bomb()
 	_set_phase(Phase.OPENING)
@@ -186,8 +186,8 @@ func _start_round() -> void:
 
 func _next_attacking_team() -> Duelist.Team:
 	if _round_generation == 0:
-		return Duelist.Team.SUN
-	return Duelist.Team.VOID if bomb_team == Duelist.Team.SUN else Duelist.Team.SUN
+		return Duelist.Team.RED
+	return Duelist.Team.BLUE if bomb_team == Duelist.Team.RED else Duelist.Team.RED
 
 func _reset_bomb() -> void:
 	bomb_state = BombState.CARRIED
@@ -201,7 +201,7 @@ func _reset_bomb() -> void:
 		bomb_position = carrier.global_position
 
 func _reset_duelists_to_spawns() -> void:
-	for team in [Duelist.Team.SUN, Duelist.Team.VOID]:
+	for team in [Duelist.Team.RED, Duelist.Team.BLUE]:
 		var roster: Array = rosters[team]
 		var points: Array = spawn_points[team]
 		for i in roster.size():
@@ -216,7 +216,7 @@ func _on_defeated(victim: Duelist, killer: Duelist) -> void:
 		return
 	if mode == GameMode.DEATHMATCH:
 		scores[killer.team] += 1
-		score_changed.emit(scores[Duelist.Team.SUN], scores[Duelist.Team.VOID])
+		score_changed.emit(scores[Duelist.Team.RED], scores[Duelist.Team.BLUE])
 		_schedule_respawn(victim)
 		if scores[killer.team] >= DM_SCORE_TO_WIN:
 			_finish_match(killer.team)
@@ -245,14 +245,14 @@ func _hand_bomb_to_attacker() -> void:
 func _check_team_wipe() -> void:
 	if bomb_state == BombState.PLANTED:
 		return
-	var sun_alive := _living_count(Duelist.Team.SUN)
-	var void_alive := _living_count(Duelist.Team.VOID)
-	if sun_alive <= 0 and void_alive <= 0:
+	var red_alive := _living_count(Duelist.Team.RED)
+	var blue_alive := _living_count(Duelist.Team.BLUE)
+	if red_alive <= 0 and blue_alive <= 0:
 		_end_round(_other(bomb_team))
-	elif sun_alive <= 0:
-		_end_round(Duelist.Team.VOID)
-	elif void_alive <= 0:
-		_end_round(Duelist.Team.SUN)
+	elif red_alive <= 0:
+		_end_round(Duelist.Team.BLUE)
+	elif blue_alive <= 0:
+		_end_round(Duelist.Team.RED)
 
 func _tick_bomb(delta: float) -> void:
 	match bomb_state:
@@ -313,7 +313,7 @@ func _near_any_site(point: Vector3) -> bool:
 
 func _end_round(winner: Duelist.Team) -> void:
 	scores[winner] += 1
-	score_changed.emit(scores[Duelist.Team.SUN], scores[Duelist.Team.VOID])
+	score_changed.emit(scores[Duelist.Team.RED], scores[Duelist.Team.BLUE])
 	objective_event.emit("round_won", _objective_state())
 	if scores[winner] >= BOMB_ROUNDS_TO_WIN:
 		_finish_match(winner)
@@ -382,7 +382,7 @@ func _living_count(team: Duelist.Team) -> int:
 	return _living_duelists(team).size()
 
 func _other(team: Duelist.Team) -> Duelist.Team:
-	return Duelist.Team.VOID if team == Duelist.Team.SUN else Duelist.Team.SUN
+	return Duelist.Team.BLUE if team == Duelist.Team.RED else Duelist.Team.RED
 
 func _is_registered(duelist: Duelist) -> bool:
 	return duelist != null and rosters[duelist.team].has(duelist)

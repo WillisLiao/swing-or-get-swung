@@ -38,7 +38,7 @@ var _map_id: Id = Id.DUEL_YARD
 var _presentation_enabled := false
 var _seed_position := Vector3.ZERO
 var _gates: Dictionary = {}
-var _spawns: Dictionary = {Duelist.Team.SUN: [], Duelist.Team.VOID: []}
+var _spawns: Dictionary = {Duelist.Team.RED: [], Duelist.Team.BLUE: []}
 var _solids: Array[Dictionary] = []
 var _route_blockers: Array[Dictionary] = []
 var _route_nodes: Array[Vector3] = []
@@ -128,18 +128,18 @@ func solid_count() -> int:
 	return _solids.size()
 
 func tactical_facts() -> Dictionary:
-	var sun_gate: Vector3 = _gates.get(Duelist.Team.SUN, Vector3.ZERO)
-	var void_gate: Vector3 = _gates.get(Duelist.Team.VOID, Vector3.ZERO)
-	var sun_home := sun_gate.lerp(_seed_position, 0.38)
-	var void_home := void_gate.lerp(_seed_position, 0.38)
+	var red_gate: Vector3 = _gates.get(Duelist.Team.RED, Vector3.ZERO)
+	var blue_gate: Vector3 = _gates.get(Duelist.Team.BLUE, Vector3.ZERO)
+	var red_home := red_gate.lerp(_seed_position, 0.38)
+	var blue_home := blue_gate.lerp(_seed_position, 0.38)
 	if _map_id == Id.DUEL_YARD:
 		return {
 			"seed": _seed_position,
 			"anchors": {
 				"neutral_seed": _seed_position,
-				"center_return": {"sun": sun_home, "void": void_home},
-				"gate_escort": {"sun": void_gate, "void": sun_gate},
-				"home_approach": {"sun": sun_home, "void": void_home},
+				"center_return": {"red": red_home, "blue": blue_home},
+				"gate_escort": {"red": blue_gate, "blue": red_gate},
+				"home_approach": {"red": red_home, "blue": blue_home},
 			},
 			"lane_posts": {"center": [Vector3(-7.0, 0.1, 0.0), Vector3(7.0, 0.1, 0.0)]},
 		}
@@ -147,10 +147,10 @@ func tactical_facts() -> Dictionary:
 		"seed": _seed_position,
 		"anchors": {
 			"neutral_seed": _seed_position,
-			"center_return": {"sun": Vector3(-26.0, 0.1, 0.0), "void": Vector3(26.0, 0.1, 0.0)},
-			"gate_escort": {"sun": Vector3(40.0, 0.1, 0.0), "void": Vector3(-40.0, 0.1, 0.0)},
-			"home_approach": {"sun": Vector3(-40.0, 0.1, 0.0), "void": Vector3(40.0, 0.1, 0.0)},
-			"opposing_gate": {"sun": void_gate, "void": sun_gate},
+			"center_return": {"red": Vector3(-26.0, 0.1, 0.0), "blue": Vector3(26.0, 0.1, 0.0)},
+			"gate_escort": {"red": Vector3(40.0, 0.1, 0.0), "blue": Vector3(-40.0, 0.1, 0.0)},
+			"home_approach": {"red": Vector3(-40.0, 0.1, 0.0), "blue": Vector3(40.0, 0.1, 0.0)},
+			"opposing_gate": {"red": blue_gate, "blue": red_gate},
 		},
 		"lane_posts": {
 			"windwalk": [Vector3(-34.0, 0.1, 25.0), Vector3(0.0, 0.1, 27.0), Vector3(34.0, 0.1, 25.0)],
@@ -164,7 +164,7 @@ func _clear_layout() -> void:
 		child.queue_free()
 	_seed_position = Vector3.ZERO
 	_gates.clear()
-	_spawns = {Duelist.Team.SUN: [], Duelist.Team.VOID: []}
+	_spawns = {Duelist.Team.RED: [], Duelist.Team.BLUE: []}
 	_solids.clear()
 	_route_blockers.clear()
 	_route_nodes.clear()
@@ -185,11 +185,11 @@ func ambient_motion_count() -> int:
 func _configure_duel_yard() -> void:
 	_seed_position = Vector3.ZERO
 	_gates = {
-		Duelist.Team.SUN: DUEL_SUN_GATE,
-		Duelist.Team.VOID: DUEL_VOID_GATE,
+		Duelist.Team.RED: DUEL_SUN_GATE,
+		Duelist.Team.BLUE: DUEL_VOID_GATE,
 	}
-	_spawns[Duelist.Team.SUN] = [DUEL_SUN_SPAWN]
-	_spawns[Duelist.Team.VOID] = [DUEL_VOID_SPAWN]
+	_spawns[Duelist.Team.RED] = [DUEL_SUN_SPAWN]
+	_spawns[Duelist.Team.BLUE] = [DUEL_VOID_SPAWN]
 	_add_solid(Vector3(0, -0.5, 0), Vector3(44, 1, 32), Color("3d547c"), 0.0)
 	_add_solid(Vector3(0, 3, -16), Vector3(44, 6, 1), Color("28496e"), 0.0)
 	_add_solid(Vector3(0, 3, 16), Vector3(44, 6, 1), Color("28496e"), 0.0)
@@ -203,11 +203,11 @@ func _configure_duel_yard() -> void:
 func _configure_concourse() -> void:
 	_seed_position = CONCOURSE_SEED
 	_gates = {
-		Duelist.Team.SUN: CONCOURSE_SUN_GATE,
-		Duelist.Team.VOID: CONCOURSE_VOID_GATE,
+		Duelist.Team.RED: CONCOURSE_SUN_GATE,
+		Duelist.Team.BLUE: CONCOURSE_VOID_GATE,
 	}
-	_spawns[Duelist.Team.SUN] = CONCOURSE_SUN_SPAWNS.duplicate()
-	_spawns[Duelist.Team.VOID] = CONCOURSE_VOID_SPAWNS.duplicate()
+	_spawns[Duelist.Team.RED] = CONCOURSE_SUN_SPAWNS.duplicate()
+	_spawns[Duelist.Team.BLUE] = CONCOURSE_VOID_SPAWNS.duplicate()
 
 	# The footprint stays compatible with the existing match and network seams.
 	# Neutral geometry owns the palette; team color only appears on gates and actors.
@@ -320,28 +320,28 @@ func _build_duel_landmarks() -> void:
 func _build_concourse_landmarks() -> void:
 	# No vertex colors are needed for this authored layer; every new part uses
 	# the shared pulp shader's uniform palette instead.
-	var sun_dock := _landmark_root("SunDock")
-	_register_ambient_motion(sun_dock, 0.004, 0.31, 0.0, 1)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(-7.0, 3.4, 0.0), CHALK_CERAMIC)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(7.0, 3.4, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.08))
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(14.2, 0.24, 0.24)), Vector3(0.0, 6.8, 0.0), COPPER_LIGHT, Vector3.ZERO, 0.55)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.16, 3.5, 0.16)), Vector3(-2.6, 2.0, 2.6), OXIDIZED_COPPER, Vector3(0.0, 0.0, -0.2))
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.16, 3.5, 0.16)), Vector3(2.6, 2.0, 2.6), OXIDIZED_COPPER, Vector3(0.0, 0.0, 0.2))
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(5.5, 0.18, 0.18)), Vector3(0.0, 3.75, 2.6), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.0), 0.35)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(5.5, 0.16, 0.16)), Vector3(0.0, 1.0, -3.4), COPPER_LIGHT)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.16, 1.9, 0.16)), Vector3(-2.3, 0.95, -3.4), OXIDIZED_COPPER)
-	_add_landmark_part(sun_dock, _box_mesh(Vector3(0.16, 1.9, 0.16)), Vector3(2.3, 0.95, -3.4), OXIDIZED_COPPER)
+	var red_dock := _landmark_root("RedDock")
+	_register_ambient_motion(red_dock, 0.004, 0.31, 0.0, 1)
+	_add_landmark_part(red_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(-7.0, 3.4, 0.0), CHALK_CERAMIC)
+	_add_landmark_part(red_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(7.0, 3.4, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.08))
+	_add_landmark_part(red_dock, _box_mesh(Vector3(14.2, 0.24, 0.24)), Vector3(0.0, 6.8, 0.0), COPPER_LIGHT, Vector3.ZERO, 0.55)
+	_add_landmark_part(red_dock, _box_mesh(Vector3(0.16, 3.5, 0.16)), Vector3(-2.6, 2.0, 2.6), OXIDIZED_COPPER, Vector3(0.0, 0.0, -0.2))
+	_add_landmark_part(red_dock, _box_mesh(Vector3(0.16, 3.5, 0.16)), Vector3(2.6, 2.0, 2.6), OXIDIZED_COPPER, Vector3(0.0, 0.0, 0.2))
+	_add_landmark_part(red_dock, _box_mesh(Vector3(5.5, 0.18, 0.18)), Vector3(0.0, 3.75, 2.6), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.0), 0.35)
+	_add_landmark_part(red_dock, _box_mesh(Vector3(5.5, 0.16, 0.16)), Vector3(0.0, 1.0, -3.4), COPPER_LIGHT)
+	_add_landmark_part(red_dock, _box_mesh(Vector3(0.16, 1.9, 0.16)), Vector3(-2.3, 0.95, -3.4), OXIDIZED_COPPER)
+	_add_landmark_part(red_dock, _box_mesh(Vector3(0.16, 1.9, 0.16)), Vector3(2.3, 0.95, -3.4), OXIDIZED_COPPER)
 
-	var void_dock := _landmark_root("VoidDock")
-	_register_ambient_motion(void_dock, 0.004, 0.44, 0.7, 1)
-	void_dock.scale.x = -1.0
-	_add_landmark_part(void_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(-7.0, 3.4, 0.0), CHALK_CERAMIC)
-	_add_landmark_part(void_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(7.0, 3.4, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, -0.08))
-	_add_landmark_part(void_dock, _box_mesh(Vector3(14.2, 0.24, 0.24)), Vector3(0.0, 6.8, 0.0), OXIDIZED_COPPER, Vector3.ZERO, 0.55)
-	_add_landmark_part(void_dock, _box_mesh(Vector3(0.18, 5.0, 0.18)), Vector3(-4.5, 3.9, -2.8), STORMGLASS_DEEP, Vector3(0.0, 0.0, -0.28))
-	_add_landmark_part(void_dock, _box_mesh(Vector3(0.18, 5.0, 0.18)), Vector3(0.0, 3.0, -2.8), STORMGLASS_DEEP, Vector3(0.0, 0.0, -0.18))
-	_add_landmark_part(void_dock, _box_mesh(Vector3(0.18, 5.0, 0.18)), Vector3(4.5, 4.3, -2.8), STORMGLASS_DEEP, Vector3(0.0, 0.0, -0.34))
-	_add_landmark_part(void_dock, _box_mesh(Vector3(10.5, 0.18, 0.18)), Vector3(0.0, 5.9, -2.8), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.12), 0.35)
+	var blue_dock := _landmark_root("BlueDock")
+	_register_ambient_motion(blue_dock, 0.004, 0.44, 0.7, 1)
+	blue_dock.scale.x = -1.0
+	_add_landmark_part(blue_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(-7.0, 3.4, 0.0), CHALK_CERAMIC)
+	_add_landmark_part(blue_dock, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(7.0, 3.4, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, -0.08))
+	_add_landmark_part(blue_dock, _box_mesh(Vector3(14.2, 0.24, 0.24)), Vector3(0.0, 6.8, 0.0), OXIDIZED_COPPER, Vector3.ZERO, 0.55)
+	_add_landmark_part(blue_dock, _box_mesh(Vector3(0.18, 5.0, 0.18)), Vector3(-4.5, 3.9, -2.8), STORMGLASS_DEEP, Vector3(0.0, 0.0, -0.28))
+	_add_landmark_part(blue_dock, _box_mesh(Vector3(0.18, 5.0, 0.18)), Vector3(0.0, 3.0, -2.8), STORMGLASS_DEEP, Vector3(0.0, 0.0, -0.18))
+	_add_landmark_part(blue_dock, _box_mesh(Vector3(0.18, 5.0, 0.18)), Vector3(4.5, 4.3, -2.8), STORMGLASS_DEEP, Vector3(0.0, 0.0, -0.34))
+	_add_landmark_part(blue_dock, _box_mesh(Vector3(10.5, 0.18, 0.18)), Vector3(0.0, 5.9, -2.8), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.12), 0.35)
 
 	var relay_basin := _landmark_root("RelayBasin")
 	_objective_pulse_root = relay_basin
@@ -393,8 +393,8 @@ func _build_concourse_landmarks() -> void:
 	_add_landmark_part(storm_horizon, _box_mesh(Vector3(22.0, 0.18, 0.18)), Vector3(19.0, 5.0, 0.0), CHALK_CERAMIC, Vector3(0.0, 0.0, 0.12), 0.22)
 
 func _build_stormgates() -> void:
-	_build_stormgate(_gates[Duelist.Team.SUN], Color("ffb15c"), -1.0)
-	_build_stormgate(_gates[Duelist.Team.VOID], Color("75dbff"), 1.0)
+	_build_stormgate(_gates[Duelist.Team.RED], Color("ff6a57"), -1.0)
+	_build_stormgate(_gates[Duelist.Team.BLUE], Color("75dbff"), 1.0)
 
 func _build_stormgate(position: Vector3, color: Color, lean: float) -> void:
 	var gate := Node3D.new()

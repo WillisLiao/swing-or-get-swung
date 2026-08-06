@@ -9,9 +9,9 @@ func _initialize() -> void:
 	var duel := RiftlineMap.new()
 	root.add_child(duel)
 	duel.configure(RiftlineMap.Id.DUEL_YARD, false)
-	assert(duel.spawn_points(Duelist.Team.SUN).size() == 1)
-	assert(duel.spawn_points(Duelist.Team.VOID).size() == 1)
-	assert(duel.gate_positions()[Duelist.Team.SUN] != duel.gate_positions()[Duelist.Team.VOID])
+	assert(duel.spawn_points(Duelist.Team.RED).size() == 1)
+	assert(duel.spawn_points(Duelist.Team.BLUE).size() == 1)
+	assert(duel.gate_positions()[Duelist.Team.RED] != duel.gate_positions()[Duelist.Team.BLUE])
 	assert(duel.solid_count() > 0)
 
 	var concourse := RiftlineMap.new()
@@ -19,7 +19,7 @@ func _initialize() -> void:
 	concourse.configure(RiftlineMap.Id.CONCOURSE, false)
 	assert(not _contains_mesh(concourse))
 	assert(concourse.ambient_motion_count() == 0)
-	for team in [Duelist.Team.SUN, Duelist.Team.VOID]:
+	for team in [Duelist.Team.RED, Duelist.Team.BLUE]:
 		var spawns := concourse.spawn_points(team)
 		assert(spawns.size() == 5)
 		for index in spawns.size():
@@ -28,7 +28,7 @@ func _initialize() -> void:
 				assert(spawns[index].distance_to(spawns[other_index]) >= 3.5)
 			var goal := concourse.seed_position()
 			assert(_has_authored_route(concourse, spawns[index], goal))
-			var enemy_team := Duelist.Team.VOID if team == Duelist.Team.SUN else Duelist.Team.SUN
+			var enemy_team := Duelist.Team.BLUE if team == Duelist.Team.RED else Duelist.Team.RED
 			assert(_has_authored_route(concourse, goal, concourse.gate_positions()[enemy_team]))
 	var facts := concourse.tactical_facts()
 	assert(facts.has("anchors"))
@@ -49,7 +49,7 @@ func _initialize() -> void:
 	rendered.configure(RiftlineMap.Id.CONCOURSE, true)
 	assert(_contains_mesh(rendered))
 	assert(rendered.ambient_motion_count() >= 6)
-	for landmark_name in ["SunDock", "VoidDock", "RelayBasin", "Windwalk", "ServiceRun", "StormHorizon"]:
+	for landmark_name in ["RedDock", "BlueDock", "RelayBasin", "Windwalk", "ServiceRun", "StormHorizon"]:
 		assert(_find_named_node(rendered, landmark_name) != null)
 	var rendered_duel := RiftlineMap.new()
 	root.add_child(rendered_duel)

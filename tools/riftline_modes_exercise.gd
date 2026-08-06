@@ -26,29 +26,29 @@ func _test_deathmatch(root: Node3D) -> void:
 	var match_node := RiftlineMatch.new()
 	match_node.configure([Vector3(0, 0, 0)], false, RiftlineMatch.GameMode.DEATHMATCH)
 	root.add_child(match_node)
-	match_node.add_spawn(Duelist.Team.SUN, Vector3(-30, 0.1, 0))
-	match_node.add_spawn(Duelist.Team.SUN, Vector3(-30, 0.1, 10))
-	match_node.add_spawn(Duelist.Team.VOID, Vector3(30, 0.1, 0))
-	var sun := _make_duelist(root, Duelist.Team.SUN, "dm_sun", Vector3(-30, 0.1, 0))
-	var void_d := _make_duelist(root, Duelist.Team.VOID, "dm_void", Vector3(30, 0.1, 0))
-	match_node.register_duelist(sun, "dm_sun")
-	match_node.register_duelist(void_d, "dm_void")
+	match_node.add_spawn(Duelist.Team.RED, Vector3(-30, 0.1, 0))
+	match_node.add_spawn(Duelist.Team.RED, Vector3(-30, 0.1, 10))
+	match_node.add_spawn(Duelist.Team.BLUE, Vector3(30, 0.1, 0))
+	var red := _make_duelist(root, Duelist.Team.RED, "dm_red", Vector3(-30, 0.1, 0))
+	var blue_d := _make_duelist(root, Duelist.Team.BLUE, "dm_blue", Vector3(30, 0.1, 0))
+	match_node.register_duelist(red, "dm_red")
+	match_node.register_duelist(blue_d, "dm_blue")
 	match_node.begin()
 	match_node._opening_remaining = 0.0
 	await physics_frame
 	assert(match_node.is_live())
 	# Going live arms the duelists so they can actually move and fight.
-	assert(sun.match_active)
-	assert(void_d.match_active)
+	assert(red.match_active)
+	assert(blue_d.match_active)
 
 	# A kill scores the killer's team.
-	match_node._on_defeated(void_d, sun)
-	assert(match_node.scores[Duelist.Team.SUN] == 1)
+	match_node._on_defeated(blue_d, red)
+	assert(match_node.scores[Duelist.Team.RED] == 1)
 
 	# Safe spawn prefers the point with fewer nearby enemies.  Park an enemy at
-	# the first SUN point; the picker must choose the other one.
-	var enemy_near := _make_duelist(root, Duelist.Team.VOID, "dm_near", Vector3(-29, 0.1, 0))
-	var picked := match_node._pick_safe_spawn(sun)
+	# the first RED point; the picker must choose the other one.
+	var enemy_near := _make_duelist(root, Duelist.Team.BLUE, "dm_near", Vector3(-29, 0.1, 0))
+	var picked := match_node._pick_safe_spawn(red)
 	assert(picked.distance_to(Vector3(-30, 0.1, 10)) < 0.01)
 	enemy_near.queue_free()
 
@@ -57,38 +57,38 @@ func _test_bomb(root: Node3D) -> void:
 	var match_node := RiftlineMatch.new()
 	match_node.configure([site_a], false, RiftlineMatch.GameMode.BOMB)
 	root.add_child(match_node)
-	match_node.add_spawn(Duelist.Team.SUN, Vector3(-30, 0.1, 0))
-	match_node.add_spawn(Duelist.Team.VOID, Vector3(30, 0.1, 0))
-	var attacker := _make_duelist(root, Duelist.Team.SUN, "b_sun", Vector3(-30, 0.1, 0))
-	var defender := _make_duelist(root, Duelist.Team.VOID, "b_void", Vector3(30, 0.1, 0))
-	match_node.register_duelist(attacker, "b_sun")
-	match_node.register_duelist(defender, "b_void")
+	match_node.add_spawn(Duelist.Team.RED, Vector3(-30, 0.1, 0))
+	match_node.add_spawn(Duelist.Team.BLUE, Vector3(30, 0.1, 0))
+	var attacker := _make_duelist(root, Duelist.Team.RED, "b_red", Vector3(-30, 0.1, 0))
+	var defender := _make_duelist(root, Duelist.Team.BLUE, "b_blue", Vector3(30, 0.1, 0))
+	match_node.register_duelist(attacker, "b_red")
+	match_node.register_duelist(defender, "b_blue")
 	match_node.begin()
 	match_node._opening_remaining = 0.0
 	await physics_frame
 	assert(match_node.is_live())
-	# SUN opens as the attacking side and holds the bomb.
-	assert(match_node.bomb_team == Duelist.Team.SUN)
-	assert(match_node.bomb_carrier_id == "b_sun")
+	# RED opens as the attacking side and holds the bomb.
+	assert(match_node.bomb_team == Duelist.Team.RED)
+	assert(match_node.bomb_carrier_id == "b_red")
 	assert(match_node.bomb_state == RiftlineMatch.BombState.CARRIED)
 
 	# Carrier plants at the site by holding interact.
 	attacker.position = site_a
-	match_node.set_interact("b_sun", true)
+	match_node.set_interact("b_red", true)
 	match_node._tick_bomb(0.1)
 	assert(match_node.bomb_state == RiftlineMatch.BombState.PLANTING)
 	for i in range(40):
 		match_node._tick_bomb(0.1)
 	assert(match_node.bomb_state == RiftlineMatch.BombState.PLANTED)
-	match_node.set_interact("b_sun", false)
+	match_node.set_interact("b_red", false)
 
 	# Defender defuses by holding interact at the bomb.
 	defender.position = site_a
-	match_node.set_interact("b_void", true)
+	match_node.set_interact("b_blue", true)
 	for i in range(40):
 		match_node._tick_bomb(0.1)
 		if match_node.bomb_state == RiftlineMatch.BombState.DEFUSED:
 			break
 	assert(match_node.bomb_state == RiftlineMatch.BombState.DEFUSED)
-	# Defuse awards the defending team (VOID) the round.
-	assert(match_node.scores[Duelist.Team.VOID] == 1)
+	# Defuse awards the defending team (BLUE) the round.
+	assert(match_node.scores[Duelist.Team.BLUE] == 1)

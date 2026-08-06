@@ -9,7 +9,7 @@ signal fire_requested(shooter: Duelist, weapon: Weapon, origin: Vector3, directi
 signal knife_strike(shooter_id: String, origin: Vector3, end: Vector3, team: Team, hit_target: bool, target_id: String)
 signal damaged(amount: float, remaining: float, attacker_id: String, source_position: Vector3, enemy_team: int)
 
-enum Team { SUN, VOID }
+enum Team { RED, BLUE }
 enum Stance { STAND, CROUCH, PRONE }
 enum Weapon { PULSE, KNIFE }
 
@@ -26,15 +26,9 @@ const MIN_HORIZONTAL_FOV := 70.0
 const MAX_HORIZONTAL_FOV := 90.0
 const ADS_HORIZONTAL_FOV_RATIO := 0.74
 const ADS_MOVEMENT_MULTIPLIER := 0.82
-# Lean is an authoritative camera-and-eye state, not a cosmetic tilt: the head
-# offset moves the shot origin sideways so peeking cover actually clears it.
-const LEAN_HEAD_OFFSET := 0.42
-# The gun visibly tilts around its front sight so the sight picture stays true,
-# while the camera horizon remains parallel to the ground.
-const GUN_LEAN_ROLL := 0.3
-const LEAN_REMOTE_BODY_ROLL := 0.17
 # Locomotion lean: silhouettes tilt into a strafe so movement reads as animation.
 const STRAFE_LEAN_ROLL := 0.07
+const STRAFE_BODY_OFFSET := 0.084
 const FIRST_PERSON_WEAPON_SCALE := 0.38
 const M4_IRON_SIGHT_FRONT_TIP_LOCAL := Vector3(0.0, 0.295, -1.06)
 const M4_ADS_WEAPON_ANCHOR := Vector3(0.0, -0.1121, -0.96)
@@ -63,14 +57,13 @@ const HIP_BURST_MAX_INDEX := 6
 const HIP_BURST_HORIZONTAL_STEP := 0.0085
 const HIP_BURST_VERTICAL_STEP := 0.0045
 
-var team: Team = Team.SUN
+var team: Team = Team.RED
 var actor_id := ""
 var health := HEALTH
 var eliminated := false
 var carrying_seed := false
 var stance: Stance = Stance.STAND
 var weapon: Weapon = Weapon.PULSE
-var lean := 0
 var horizontal_fov := DEFAULT_HORIZONTAL_FOV
 var _last_camera_aspect := -1.0
 var magazine_rounds := M4_MAGAZINE_SIZE
@@ -109,7 +102,6 @@ var _damage_flash_remaining := 0.0
 var _flinch_remaining := 0.0
 var _obstruction_remaining := 0.0
 var _swap_motion := 0.0
-var _gun_lean := 0.0
 var _recoil_kick := 0.0
 var _recoil_lateral := 0.0
 var _magazine_mesh: MeshInstance3D
@@ -277,17 +269,7 @@ func _process(delta: float) -> void:
 				target += Vector3(-0.12, 0.07, 0.22)
 			var obstruction_tilt := 0.08 if _obstruction_remaining > 0.0 or _local_muzzle_obstructed() else 0.0
 			var base_tilt := first_person_kunai_rotation().z if weapon == Weapon.KNIFE else 0.0
-			# Gun lean: the weapon tilts around its front sight tip so the gun
-			# visibly leans while the sight picture and the level horizon hold.
-			_gun_lean = lerpf(_gun_lean, -lean * GUN_LEAN_ROLL, clampf(delta * 14.0, 0.0, 1.0))
-			if weapon == Weapon.PULSE:
-				var tip_local := M4_IRON_SIGHT_FRONT_TIP_LOCAL * FIRST_PERSON_WEAPON_SCALE
-				var tip_cam := target + tip_local
-				var cos_roll := cos(_gun_lean)
-				var sin_roll := sin(_gun_lean)
-				var rotated_tip := Vector3(tip_local.x * cos_roll - tip_local.y * sin_roll, tip_local.x * sin_roll + tip_local.y * cos_roll, tip_local.z)
-				target = tip_cam - rotated_tip
-			_weapon_root.rotation.z = lerpf(_weapon_root.rotation.z, base_tilt + obstruction_tilt + _gun_lean, clampf(delta * 18.0, 0.0, 1.0))
+			_weapon_root.rotation.z = lerpf(_weapon_root.rotation.z, base_tilt + obstruction_tilt, clampf(delta * 18.0, 0.0, 1.0))
 			if _swap_motion > 0.0:
 				target += Vector3(0.0, -0.16 * sin(_swap_motion * PI), 0.18 * sin(_swap_motion * PI))
 		if reload_remaining > 0.0 and _local_camera:
@@ -318,8 +300,7 @@ func _process(delta: float) -> void:
 	if camera != null:
 		var camera_stance_offset := -0.14 if stance == Stance.CROUCH else -0.28 if stance == Stance.PRONE else 0.0
 		camera.position.y = lerpf(camera.position.y, camera_stance_offset, clampf(delta * 9.0, 0.0, 1.0))
-		# The horizon always stays parallel to the ground: lean moves the eye
-		# sideways and tilts the gun and body, never the camera roll.
+		# The horizon always stays parallel to the ground; the camera never rolls.
 		camera.rotation.z = 0.0
 	if _body_visual_root != null:
 		var powered_down := eliminated
@@ -327,9 +308,9 @@ func _process(delta: float) -> void:
 		if not powered_down:
 			var local_velocity := global_transform.basis.orthonormalized().inverse() * velocity
 			strafe = clampf(local_velocity.x / 6.0, -1.0, 1.0)
-		var lean_roll := 0.0 if powered_down else -lean * LEAN_REMOTE_BODY_ROLL - strafe * STRAFE_LEAN_ROLL
-		_body_visual_root.rotation.z = lerpf(_body_visual_root.rotation.z, -0.92 if powered_down else lean_roll, clampf(delta * (7.0 if powered_down else 9.0), 0.0, 1.0))
-		_body_visual_root.position.x = lerpf(_body_visual_root.position.x, 0.0 if powered_down else (lean * 0.55 + strafe * 0.2) * LEAN_HEAD_OFFSET, clampf(delta * 9.0, 0.0, 1.0))
+		var strafe_roll := 0.0 if powered_down else -strafe * STRAFE_LEAN_ROLL
+		_body_visual_root.rotation.z = lerpf(_body_visual_root.rotation.z, -0.92 if powered_down else strafe_roll, clampf(delta * (7.0 if powered_down else 9.0), 0.0, 1.0))
+		_body_visual_root.position.x = lerpf(_body_visual_root.position.x, 0.0 if powered_down else strafe * STRAFE_BODY_OFFSET, clampf(delta * 9.0, 0.0, 1.0))
 		_body_visual_root.position.y = lerpf(_body_visual_root.position.y, -0.24 if powered_down else 0.0, clampf(delta * (7.0 if powered_down else 9.0), 0.0, 1.0))
 	if _carrier_signal_root != null:
 		_carrier_signal_root.visible = is_carrying_seed()
@@ -397,14 +378,13 @@ func set_match_active(active: bool) -> void:
 		_swap_motion = 0.0
 		_recoil_kick = 0.0
 		_recoil_lateral = 0.0
-		set_lean(0)
 		if _magazine_mesh != null:
 			_magazine_mesh.visible = true
 
 func set_interact_progress(value: float) -> void:
 	interact_progress = clampf(value, 0.0, 1.0)
 
-func make_input_frame(sequence: int, move_input: Vector2, aiming: bool, firing: bool, wants_jump: bool, crouch_edge: bool, prone_edge: bool, weapon_switch_edge: bool, reload_edge: bool, pass_seed_edge: bool = false, lean_value: int = 0, interact_held_value: bool = false) -> Dictionary:
+func make_input_frame(sequence: int, move_input: Vector2, aiming: bool, firing: bool, wants_jump: bool, crouch_edge: bool, prone_edge: bool, weapon_switch_edge: bool, reload_edge: bool, pass_seed_edge: bool = false, interact_held_value: bool = false) -> Dictionary:
 	return {
 		"sequence": sequence,
 		"move_x": clampf(move_input.x, -1.0, 1.0),
@@ -419,7 +399,6 @@ func make_input_frame(sequence: int, move_input: Vector2, aiming: bool, firing: 
 		"weapon_switch": weapon_switch_edge,
 		"reload": reload_edge,
 		"pass_seed": pass_seed_edge,
-		"lean": clampi(lean_value, -1, 1),
 		"interact": interact_held_value,
 	}
 
@@ -440,7 +419,6 @@ func authoritative_state(server_tick: int, last_input_sequence: int) -> Dictiona
 		"reload_remaining": reload_remaining,
 		"stance": int(stance),
 		"weapon": int(weapon),
-		"lean": lean,
 		"eliminated": eliminated,
 		"carrying_seed": is_carrying_seed(),
 	}
@@ -472,7 +450,6 @@ func apply_discrete_input(frame: Dictionary) -> void:
 func apply_continuous_input(frame: Dictionary, delta: float, simulate_combat: bool) -> void:
 	if eliminated or not match_active:
 		_pending_jump = false
-		set_lean(0)
 		_simulate_motion(Vector2.ZERO, false, delta)
 		return
 	# Absolute look values make a frame replayable after a correction and remove peer-specific mouse deltas.
@@ -481,7 +458,6 @@ func apply_continuous_input(frame: Dictionary, delta: float, simulate_combat: bo
 		if head != null:
 			head.rotation.x = clampf(float(frame.get("pitch", head.rotation.x)), -1.05, 0.9)
 		_aiming = bool(frame.get("aim", _aiming))
-		set_lean(int(frame.get("lean", 0)))
 	var move_input := Vector2(float(frame.get("move_x", 0.0)), float(frame.get("move_y", 0.0))) if not frame.is_empty() else Vector2.ZERO
 	var wants_jump := _pending_jump
 	_pending_jump = false
@@ -505,7 +481,6 @@ func apply_presentation_state(state: Dictionary) -> void:
 	var next_stance := clampi(int(state.get("stance", int(stance))), int(Stance.STAND), int(Stance.PRONE))
 	if stance != next_stance:
 		_apply_stance(next_stance as Stance)
-	set_lean(clampi(int(state.get("lean", 0)), -1, 1))
 	var next_weapon := clampi(int(state.get("weapon", int(weapon))), int(Weapon.PULSE), int(Weapon.KNIFE))
 	if weapon != next_weapon:
 		set_weapon_presentation(next_weapon as Weapon)
@@ -575,14 +550,6 @@ func set_stance(next_stance: Stance) -> void:
 	if eliminated or not match_active or stance == next_stance:
 		return
 	_apply_stance(next_stance)
-
-func set_lean(value: int) -> void:
-	var next := clampi(value, -1, 1)
-	if lean == next:
-		return
-	lean = next
-	if head != null:
-		head.position.x = lean * LEAN_HEAD_OFFSET
 
 func _apply_stance(next_stance: Stance) -> void:
 	stance = next_stance
@@ -738,9 +705,6 @@ func respawn_at(point: Vector3) -> void:
 	_hip_burst_index = 0
 	_hip_burst_reset_remaining = 0.0
 	_pending_authoritative_shot_plan.clear()
-	lean = 0
-	if head != null:
-		head.position.x = 0.0
 	if _body_visual_root != null:
 		_body_visual_root.rotation = Vector3.ZERO
 		_body_visual_root.position = Vector3.ZERO
@@ -833,10 +797,10 @@ func _fire_knife(origin: Vector3, direction: Vector3) -> void:
 	knife_strike.emit(actor_id, origin, end, team, hit_target, target_id)
 
 func _team_color() -> Color:
-	return Color("ef6b3f") if team == Team.SUN else Color("4ba9ff")
+	return Color("e0463c") if team == Team.RED else Color("4ba9ff")
 
 func _team_glow() -> Color:
-	return Color("ffb15c") if team == Team.SUN else Color("7bdbff")
+	return Color("ff7a68") if team == Team.RED else Color("7bdbff")
 
 func _build_character_silhouette() -> void:
 	# Broad value groups and one asymmetric expedition tool make the adult frame readable without armor language.
@@ -860,7 +824,7 @@ func _build_character_silhouette() -> void:
 	_add_head_part(_cylinder(0.33, 0.33, 0.08), Vector3(0.0, 0.22, 0.0), cloth)
 	_add_head_part(_box(Vector3(0.38, 0.1, 0.08)), Vector3(0.0, 0.0, -0.24), brass)
 
-	if team == Team.SUN:
+	if team == Team.RED:
 		_build_signal_hauler(cloth, dark, brass, glow)
 	else:
 		_build_storm_surveyor(cloth, dark, brass, glow)

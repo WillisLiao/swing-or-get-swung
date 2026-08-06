@@ -13,7 +13,7 @@ const VIEW_SECTION := "display"
 const LAYOUT_VERSION := 3
 const SNAP_POINTS := 8.0
 const DRAG_THRESHOLD := 10.0
-const MOVABLE_KEYS := ["move", "left_fire", "right_fire", "ads", "jump", "crouch", "prone", "swap", "seed_pass", "lean_left", "lean_right"]
+const MOVABLE_KEYS := ["move", "left_fire", "right_fire", "ads", "jump", "crouch", "prone", "swap", "seed_pass"]
 
 var movement := Vector2.ZERO
 var fire_held := false
@@ -27,7 +27,7 @@ var hit_confirm := 0.0
 var primary_fire_bloom := 0.0
 var damage_direction := Vector2.ZERO
 var damage_direction_intensity := 0.0
-var damage_enemy_team := int(Duelist.Team.VOID)
+var damage_enemy_team := int(Duelist.Team.BLUE)
 var objective_feedback_pulse := 0.0
 var objective_feedback_team := -1
 var camera_sensitivity := 1.0
@@ -73,21 +73,14 @@ var _crouch_touch := -1
 var _prone_touch := -1
 var _switch_touch := -1
 var _seed_pass_touch := -1
-var _lean_left_touch := -1
-var _lean_right_touch := -1
-var _lean_toggle_state := 0
-var _hold_lean := 0
-var lean_hold_mode := true
-var lean_auto_ads := true
-# Optional drag-look: holding the ADS or a lean button and dragging that same
+# Optional drag-look: holding the ADS button and dragging that same
 # finger can also steer the camera.  Off by default.
 var ads_button_look := false
-var lean_button_look := false
 var _settings_owner_touch := -1
-var _sun_score := 0
-var _void_score := 0
+var _red_score := 0
+var _blue_score := 0
 var _roster_state: Array[Dictionary] = []
-var _roster_local_team := int(Duelist.Team.SUN)
+var _roster_local_team := int(Duelist.Team.RED)
 var _squad_readability := false
 var _objective_state: Dictionary = {"mode": int(RiftlineMatch.GameMode.DEATHMATCH)}
 var _objective_message := ""
@@ -202,42 +195,6 @@ func interact_held() -> bool:
 	# The context use button (plant/defuse) is a held action.
 	return _seed_pass_touch >= 0
 
-func lean_value() -> int:
-	# Hold mode follows the finger; tap mode latches until tapped again.
-	if lean_hold_mode:
-		return _hold_lean
-	return _lean_toggle_state
-
-func effective_aim(for_lean: int) -> bool:
-	# Lean can optionally aim on its own; the ADS button always aims while held.
-	return aim_held or (lean_auto_ads and for_lean != 0)
-
-func _apply_lean_press(side: int, index: int) -> void:
-	if side == -1:
-		_lean_left_touch = index
-	else:
-		_lean_right_touch = index
-	if lean_hold_mode:
-		_hold_lean = side
-	else:
-		_lean_toggle_state = 0 if _lean_toggle_state == side else side
-
-func _apply_lean_release(side: int, index: int) -> void:
-	if side == -1:
-		if _lean_left_touch != index:
-			return
-		_lean_left_touch = -1
-	else:
-		if _lean_right_touch != index:
-			return
-		_lean_right_touch = -1
-	if not lean_hold_mode:
-		return
-	if side == -1 and _hold_lean == -1:
-		_hold_lean = 1 if _lean_right_touch >= 0 else 0
-	elif side == 1 and _hold_lean == 1:
-		_hold_lean = -1 if _lean_left_touch >= 0 else 0
-
 func set_coach_cue(cue: Dictionary) -> void:
 	_coach_cue = cue.duplicate(true)
 	if _coach_cue.is_empty():
@@ -274,9 +231,9 @@ func set_touch_preview(preview: String) -> void:
 	elif preview == "coach-fire":
 		set_coach_cue({"key": "fire", "text": "HOLD FIRE TO ENGAGE", "region": "fire"})
 
-func set_score(sun: int, void_score: int) -> void:
-	_sun_score = clampi(sun, 0, 3)
-	_void_score = clampi(void_score, 0, 3)
+func set_score(red_score: int, blue_score: int) -> void:
+	_red_score = clampi(red_score, 0, 3)
+	_blue_score = clampi(blue_score, 0, 3)
 	queue_redraw()
 
 func set_roster_state(records: Array[Dictionary], local_team: int, squad_readability: bool) -> void:
@@ -522,12 +479,6 @@ func _handle_touch(index: int, point: Vector2, pressed: bool) -> void:
 		_seed_pass_touch = index
 		_seed_pass_requested = true
 		return
-	if key == "lean_left":
-		_apply_lean_press(-1, index)
-		return
-	if key == "lean_right":
-		_apply_lean_press(1, index)
-		return
 	if not _safe_rect().has_point(point):
 		return
 	_touch_router.configure(_stick_mode, _control_center("move"), _stick_radius())
@@ -537,10 +488,8 @@ func _handle_touch(index: int, point: Vector2, pressed: bool) -> void:
 		_stick_visual_target = 1.0
 
 func _handle_drag(index: int, point: Vector2, relative: Vector2) -> void:
-	# Drag-look lets the finger holding ADS or a lean button also steer the view.
+	# Drag-look lets the finger holding ADS also steer the view.
 	if index == _aim_touch and ads_button_look:
-		_look_delta += relative
-	if (index == _lean_left_touch or index == _lean_right_touch) and lean_button_look:
 		_look_delta += relative
 	_touch_router.drag(index, point, relative)
 	movement = _touch_router.movement()
@@ -570,8 +519,6 @@ func _release_touch(index: int) -> void:
 		_switch_touch = -1
 	if index == _seed_pass_touch:
 		_seed_pass_touch = -1
-	_apply_lean_release(-1, index)
-	_apply_lean_release(1, index)
 	if index == _settings_owner_touch:
 		_settings_owner_touch = -1
 
@@ -585,10 +532,6 @@ func _release_all_touch_ownership() -> void:
 	_prone_touch = -1
 	_switch_touch = -1
 	_seed_pass_touch = -1
-	_lean_left_touch = -1
-	_lean_right_touch = -1
-	_hold_lean = 0
-	_lean_toggle_state = 0
 	_settings_owner_touch = -1
 	_editor_touch = -1
 	movement = Vector2.ZERO
@@ -666,8 +609,6 @@ func _draw_gameplay_hud() -> void:
 	_draw_button("crouch", friendly, _stance == Duelist.Stance.CROUCH)
 	_draw_button("prone", friendly, _stance == Duelist.Stance.PRONE)
 	_draw_button("swap", Color("c292ff"), _switch_touch >= 0)
-	_draw_button("lean_left", friendly, lean_value() == -1)
-	_draw_button("lean_right", friendly, lean_value() == 1)
 	if _seed_relay_available:
 		_draw_button("seed_pass", friendly, _seed_pass_touch >= 0)
 	if _weapon == Duelist.Weapon.PULSE:
@@ -710,7 +651,7 @@ func _friendly_color() -> Color:
 	return _team_color(_roster_local_team)
 
 func _enemy_color() -> Color:
-	return _team_color(Duelist.Team.VOID if _roster_local_team == int(Duelist.Team.SUN) else Duelist.Team.SUN)
+	return _team_color(Duelist.Team.BLUE if _roster_local_team == int(Duelist.Team.RED) else Duelist.Team.RED)
 
 func _draw_vitality_strip(safe: Rect2, friendly: Color) -> void:
 	var plate_size := Vector2(20.0, 10.0)
@@ -727,13 +668,13 @@ func _draw_vitality_strip(safe: Rect2, friendly: Color) -> void:
 
 
 func _team_color(team: int) -> Color:
-	return Color("ffad5d") if team == int(Duelist.Team.SUN) else Color("71cfff")
+	return Color("ff6a57") if team == int(Duelist.Team.RED) else Color("71cfff")
 
 func _draw_objective_strip(safe: Rect2, friendly: Color, enemy: Color) -> void:
 	var center := Vector2(size.x * 0.5, safe.position.y + 18.0)
 	var font := get_theme_font("font", "Label")
-	draw_string(font, center + Vector2(-56.0, 6.0), str(_sun_score), HORIZONTAL_ALIGNMENT_CENTER, -1, 20, friendly)
-	draw_string(font, center + Vector2(56.0, 6.0), str(_void_score), HORIZONTAL_ALIGNMENT_CENTER, -1, 20, enemy)
+	draw_string(font, center + Vector2(-56.0, 6.0), str(_red_score), HORIZONTAL_ALIGNMENT_CENTER, -1, 20, friendly)
+	draw_string(font, center + Vector2(56.0, 6.0), str(_blue_score), HORIZONTAL_ALIGNMENT_CENTER, -1, 20, enemy)
 	var mode := int(_objective_state.get("mode", int(RiftlineMatch.GameMode.DEATHMATCH)))
 	if mode == int(RiftlineMatch.GameMode.BOMB):
 		var bomb_state := int(_objective_state.get("bomb_state", -1))
@@ -759,21 +700,21 @@ func _draw_bomb_glyph(center: Vector2, color: Color, bomb_state: int) -> void:
 
 func _draw_team_life_strip(safe: Rect2, friendly: Color, enemy: Color) -> void:
 	var center := Vector2(size.x * 0.5, safe.position.y + 45.0)
-	var sun_index := 0
-	var void_index := 0
+	var red_index := 0
+	var blue_index := 0
 	for record in _roster_state:
 		var team := int(record.get("team", -1))
 		var eliminated := bool(record.get("eliminated", false))
 		var is_local_team := team == _roster_local_team
-		var color := friendly if team == int(Duelist.Team.SUN) else enemy
-		var slot := sun_index if team == int(Duelist.Team.SUN) else void_index
-		var direction := -1.0 if team == int(Duelist.Team.SUN) else 1.0
+		var color := friendly if team == int(Duelist.Team.RED) else enemy
+		var slot := red_index if team == int(Duelist.Team.RED) else blue_index
+		var direction := -1.0 if team == int(Duelist.Team.RED) else 1.0
 		var point := center + Vector2(direction * (34.0 + slot * 15.0), 0.0)
 		_draw_team_marker(point, color, not eliminated, is_local_team)
-		if team == int(Duelist.Team.SUN):
-			sun_index += 1
+		if team == int(Duelist.Team.RED):
+			red_index += 1
 		else:
-			void_index += 1
+			blue_index += 1
 
 func _draw_team_marker(center: Vector2, color: Color, living: bool, friendly_marker: bool) -> void:
 	var half_width := 5.0 if friendly_marker else 4.0
@@ -829,17 +770,6 @@ func _draw_control_glyph(center: Vector2, radius: float, color: Color, key: Stri
 			draw_circle(center + Vector2(-radius * 0.28, -radius * 0.1), radius * 0.12, glyph_color)
 			draw_line(center + Vector2(-radius * 0.18, 0), center + Vector2(radius * 0.34, 0), glyph_color, weight)
 			draw_line(center + Vector2(radius * 0.2, 0), center + Vector2(radius * 0.38, radius * 0.22), glyph_color, weight)
-		"lean_left", "lean_right":
-			# A tilted body with a direction chevron reads as "lean" at button scale.
-			var direction := -1.0 if key == "lean_left" else 1.0
-			var head_point := center + Vector2(direction * radius * 0.14, -radius * 0.30)
-			draw_circle(head_point, radius * 0.12, glyph_color)
-			draw_line(head_point + Vector2(-direction * radius * 0.05, radius * 0.12), center + Vector2(-direction * radius * 0.16, radius * 0.34), glyph_color, weight)
-			draw_polyline(PackedVector2Array([
-				center + Vector2(direction * radius * 0.05, -radius * 0.12),
-				center + Vector2(direction * radius * 0.34, 0.0),
-				center + Vector2(direction * radius * 0.05, radius * 0.12),
-			]), glyph_color, weight)
 		"swap":
 			draw_line(center + Vector2(-radius * 0.34, -5), center + Vector2(radius * 0.3, -5), glyph_color, weight)
 			draw_line(center + Vector2(radius * 0.3, -5), center + Vector2(radius * 0.14, -radius * 0.18), glyph_color, weight)
@@ -1051,22 +981,8 @@ func _handle_settings_touch(index: int, point: Vector2, pressed: bool) -> void:
 		_touch_router.configure(_stick_mode, _control_center("move"), _stick_radius())
 		_save_control_settings()
 		return
-	if _lean_mode_rect(panel).has_point(point):
-		lean_hold_mode = not lean_hold_mode
-		_hold_lean = 0
-		_lean_toggle_state = 0
-		_save_control_settings()
-		return
-	if _lean_ads_rect(panel).has_point(point):
-		lean_auto_ads = not lean_auto_ads
-		_save_control_settings()
-		return
 	if _ads_look_rect(panel).has_point(point):
 		ads_button_look = not ads_button_look
-		_save_control_settings()
-		return
-	if _lean_look_rect(panel).has_point(point):
-		lean_button_look = not lean_button_look
 		_save_control_settings()
 		return
 	if _hud_layout_rect(panel).has_point(point):
@@ -1100,11 +1016,7 @@ func _draw_settings_panel(friendly: Color, enemy: Color) -> void:
 	_draw_setting_chip(Rect2(panel.position + Vector2(344, 188), Vector2(142, 44)), "QUICK SWAP", Color("c292ff"), true)
 	_draw_setting_chip(_effects_rect(panel), "EFFECTS %s" % ("ON" if effects_enabled else "OFF"), friendly, effects_enabled)
 	_draw_setting_chip(_stick_mode_rect(panel), "STICK %s" % ("FLOAT" if _stick_mode == MobileTouchRouter.StickMode.FLOATING else "FIXED"), friendly, _stick_mode == MobileTouchRouter.StickMode.FLOATING)
-	draw_string(font, panel.position + Vector2(24, 299), "LEAN", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, enemy)
-	_draw_setting_chip(_lean_mode_rect(panel), "LEAN %s" % ("TAP" if not lean_hold_mode else "HOLD"), friendly, not lean_hold_mode)
-	_draw_setting_chip(_lean_ads_rect(panel), "LEAN ADS %s" % ("ON" if lean_auto_ads else "OFF"), friendly, lean_auto_ads)
 	_draw_setting_chip(_ads_look_rect(panel), "ADS LOOK %s" % ("ON" if ads_button_look else "OFF"), Color("c292ff"), ads_button_look)
-	_draw_setting_chip(_lean_look_rect(panel), "LEAN LOOK %s" % ("ON" if lean_button_look else "OFF"), Color("c292ff"), lean_button_look)
 	_draw_setting_chip(_hud_layout_rect(panel), "HUD LAYOUT", enemy, true)
 	_draw_setting_chip(_reset_training_rect(panel), "RESET TRAINING", Color("e57c70"), false)
 	_draw_setting_chip(_rift_link_rect(panel), "RIFT LINK", Color("71cfff"), false)
@@ -1301,20 +1213,11 @@ func _rift_link_rect(panel: Rect2) -> Rect2:
 func _stick_mode_rect(panel: Rect2) -> Rect2:
 	return Rect2(panel.position + Vector2(184, 250), Vector2(142, 44))
 
-func _lean_mode_rect(panel: Rect2) -> Rect2:
+func _ads_look_rect(panel: Rect2) -> Rect2:
 	return Rect2(panel.position + Vector2(24, 306), Vector2(142, 44))
 
-func _lean_ads_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(184, 306), Vector2(142, 44))
-
-func _ads_look_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(344, 306), Vector2(142, 44))
-
-func _lean_look_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(24, 362), Vector2(142, 44))
-
 func _hud_layout_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(184, 362), Vector2(210, 44))
+	return Rect2(panel.position + Vector2(184, 306), Vector2(210, 44))
 
 func _reset_training_rect(panel: Rect2) -> Rect2:
 	return Rect2(panel.position + Vector2(24, 418), Vector2(210, 44))
@@ -1354,8 +1257,6 @@ func _control_specs() -> Dictionary:
 		"prone": {"radius": 37.0, "label": "P"},
 		"swap": {"radius": 37.0, "label": "SWAP"},
 		"seed_pass": {"radius": 44.0, "label": "SEND"},
-		"lean_left": {"radius": 37.0, "label": "LEAN L"},
-		"lean_right": {"radius": 37.0, "label": "LEAN R"},
 	}
 
 func _default_layout() -> Dictionary:
@@ -1372,8 +1273,6 @@ func _two_thumb_layout() -> Dictionary:
 		"prone": _layout_entry(Vector2(0.64, 0.80), 1.0, 0.78),
 			"swap": _layout_entry(Vector2(0.70, 0.57), 1.0, 0.78),
 			"seed_pass": _layout_entry(Vector2(0.87, 0.37), 1.0, 0.82),
-			"lean_left": _layout_entry(Vector2(0.44, 0.30), 1.0, 0.78),
-			"lean_right": _layout_entry(Vector2(0.54, 0.30), 1.0, 0.78),
 	}
 
 func _four_finger_layout() -> Dictionary:
@@ -1387,8 +1286,6 @@ func _four_finger_layout() -> Dictionary:
 		"prone": _layout_entry(Vector2(0.58, 0.79), 1.0, 0.78),
 			"swap": _layout_entry(Vector2(0.64, 0.56), 1.0, 0.78),
 			"seed_pass": _layout_entry(Vector2(0.86, 0.37), 1.0, 0.82),
-			"lean_left": _layout_entry(Vector2(0.42, 0.22), 1.0, 0.82),
-			"lean_right": _layout_entry(Vector2(0.52, 0.22), 1.0, 0.82),
 	}
 
 func _layout_entry(center: Vector2, scale: float, opacity: float) -> Dictionary:
@@ -1478,10 +1375,7 @@ func _load_control_settings() -> void:
 	horizontal_fov = _config_float(config, VIEW_SECTION, "horizontal_fov", Duelist.DEFAULT_HORIZONTAL_FOV, Duelist.MIN_HORIZONTAL_FOV, Duelist.MAX_HORIZONTAL_FOV)
 	gyro_enabled = bool(config.get_value("controls", "gyro", gyro_enabled))
 	_aim_toggle = bool(config.get_value("controls", "aim_toggle", _aim_toggle))
-	lean_hold_mode = bool(config.get_value("controls", "lean_hold", lean_hold_mode))
-	lean_auto_ads = bool(config.get_value("controls", "lean_auto_ads", lean_auto_ads))
 	ads_button_look = bool(config.get_value("controls", "ads_button_look", ads_button_look))
-	lean_button_look = bool(config.get_value("controls", "lean_button_look", lean_button_look))
 	var feedback_preferences := load_feedback_preferences(config, effects_enabled, haptics_enabled)
 	effects_enabled = bool(feedback_preferences.effects_enabled)
 	haptics_enabled = false
@@ -1514,8 +1408,6 @@ func _legacy_default_layout() -> Dictionary:
 		"prone": _layout_entry(Vector2(0.56, 0.79), 1.0, 0.78),
 		"swap": _layout_entry(Vector2(0.67, 0.53), 1.0, 0.78),
 		"seed_pass": _layout_entry(Vector2(0.87, 0.37), 1.0, 0.82),
-		"lean_left": _layout_entry(Vector2(0.44, 0.30), 1.0, 0.78),
-		"lean_right": _layout_entry(Vector2(0.54, 0.30), 1.0, 0.78),
 	}
 
 func _saved_layout_matches(expected: Dictionary, config: ConfigFile) -> bool:
@@ -1549,10 +1441,7 @@ func _save_control_settings() -> void:
 	config.set_value(VIEW_SECTION, "horizontal_fov", horizontal_fov)
 	config.set_value("controls", "gyro", gyro_enabled)
 	config.set_value("controls", "aim_toggle", _aim_toggle)
-	config.set_value("controls", "lean_hold", lean_hold_mode)
-	config.set_value("controls", "lean_auto_ads", lean_auto_ads)
 	config.set_value("controls", "ads_button_look", ads_button_look)
-	config.set_value("controls", "lean_button_look", lean_button_look)
 	config.set_value("controls", "stick_mode", "fixed" if _stick_mode == MobileTouchRouter.StickMode.FIXED else "floating")
 	save_feedback_preferences(config, effects_enabled, haptics_enabled)
 	config.set_value(LAYOUT_SECTION, "version", LAYOUT_VERSION)
