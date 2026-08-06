@@ -1,0 +1,2447 @@
+class_name RiftlineArena
+extends Node3D
+
+const PULP_LIT := preload("res://shaders/pulp_lit.gdshader")
+const SNAPSHOT_BUFFER := preload("res://scripts/riftline_snapshot_buffer.gd")
+const PRACTICE_PANEL := preload("res://scripts/riftline_practice_panel.gd")
+const OPENING_HOLD_SECONDS := 2.5
+
+var ballistics: RiftBallistics
+var hud: DuelHud
+var coach: RiftlineFirstMatchCoach
+var director: RiftlineMatch
+var network: RiftlineNetwork
+var arena_map: RiftlineMap
+var rift_link: RiftLinkPanel
+var practice_panel: Control
+var _game_mode: RiftlineMatch.GameMode = RiftlineMatch.GameMode.DEATHMATCH
+var _mouse_captured := false
+var _lan_active := false
+var _lan_host := false
+var _dedicated_server := false
+var _presentation_enabled := true
+var _lan_peer_ready := false
+var _authority_match_started := false
+var _lobby_arming_remaining := 0.0
+var _lobby_revision := -1
+var _lobby_generation := -1
+var _lan_phase: RiftlineMatch.Phase = RiftlineMatch.Phase.OPENING
+var _lan_tick := 0
+var _local_input_sequence := 0
+var _authoritative_duelists: Dictionary = {}
+var _replica_duelists: Dictionary = {}
+var _remote_snapshot_buffers: Dictionary = {}
+var _continuous_inputs: Dictionary = {}
+var _edge_queues: Dictionary = {}
+var _last_sequences: Dictionary = {}
+var _actor_for_peer: Dictionary = {}
+var _ready_peers: Dictionary = {}
+var _pending_inputs: Array[Dictionary] = []
+var _local_duelist: Duelist
+var combat_feedback: RiftlineCombatFeedback
+var _local_actor_id := ""
+var _pending_actor_snapshots: Dictionary = {}
+var _snapshot_remaining := 0.0
+var _join_discovery_started := false
+var _session_ready_for_snapshots := true
+var _local_team: Duelist.Team = Duelist.Team.SUN
+var _capture_path := ""
+var _capture_after := 2.0
+var _capture_settings := false
+var _capture_hud_layout := false
+var _capture_character := false
+var _capture_overview := false
+var _capture_rift_link := false
+var _offline_squad_size := 0
+var _squad_preview := ""
+var _tactics_preview := ""
+var _practice_preview := ""
+var _practice_drill := "solo"
+var _practice_panel_active := false
+var _capture_fixture_only := false
+var _arena_preview := ""
+var _relay_preview := ""
+var _feedback_preview := ""
+var _feedback_preview_elapsed := 0.0
+var _arena_perf_sample := false
+var _feedback_perf_sample := false
+var _perf_elapsed := 0.0
+var _perf_frame_times: Array[float] = []
+var _perf_logged := false
+var _objective_preview := ""
+var _weapon_preview := ""
+var _ballistics_preview := ""
+var _motion_preview := ""
+var _touch_preview := ""
+var _rift_link_preview := ""
+var _view_fov_preview := -1.0
+var _reload_preview := ""
+var _hud_preview := ""
+var _loadout_preview := ""
+var _relay_cue_shown := false
+var _presentation_effects: Node3D
+var _seen_projectile_fires: Dictionary = {}
+var _seen_projectile_impacts: Dictionary = {}
+var _last_projectile_fire_id := -1
+var _last_projectile_impact_id := -1
+var _pending_local_primary_predictions := 0
+var _reload_was_active := false
+var _reload_stage_played := false
+var _knife_event_sequence := 0
+var _projectile_presentation_pool: Node3D
+var _bomb_presentation_root: Node3D
+var _bomb_model: Node3D
+var _bomb_blink_light: OmniLight3D
+var _bomb_site_markers: Array[Node3D] = []
+var _tracer_pool: Array[MeshInstance3D] = []
+var _impact_pool: Array[Node3D] = []
+var _projectile_tracers: Dictionary = {}
+var _tracer_cursor := 0
+var _impact_cursor := 0
+var _preview_ballistics_bodies: Array[Node] = []
+
+func _ready() -> void:
+	_build_network()
+	var command_line_lan := network.start_command_line_mode()
+	if not network.configuration_valid():
+		push_error("Riftline rejected invalid command-line configuration")
+		get_tree().quit()
+		return
+	_read_capture_arguments()
+	_dedicated_server = network.is_dedicated_server()
+	_presentation_enabled = not _dedicated_server
+	if _dedicated_server:
+		_build_arena()
+		_enter_lan_runtime(true, false)
+	else:
+		_build_environment()
+		_capture_fixture_only = _capture_settings or _capture_hud_layout or _view_fov_preview >= 0.0 or not _reload_preview.is_empty() or not _hud_preview.is_empty() or not _loadout_preview.is_empty() or not _squad_preview.is_empty() or not _arena_preview.is_empty() or not _feedback_preview.is_empty() or not _rift_link_preview.is_empty() or not _practice_preview.is_empty() or not _relay_preview.is_empty() or not _motion_preview.is_empty()
+		var show_practice := not command_line_lan and _should_show_practice_panel()
+		_build_hud()
+		if _capture_settings:
+			hud.open_settings()
+		elif _capture_hud_layout:
+			hud.open_hud_layout()
+		_build_first_match_coach()
+		_build_rift_link()
+		if not _rift_link_preview.is_empty() and rift_link != null:
+			hud.set_connection_flow_active(true)
+			rift_link.apply_preview(_rift_link_preview)
+		if show_practice:
+			_practice_panel_active = true
+			_build_practice_panel()
+			if _practice_preview.is_empty():
+				practice_panel.show_entry(_load_practice_drill())
+			else:
+				practice_panel.apply_preview(_practice_preview)
+		else:
+			_build_arena()
+			_build_match()
+			if command_line_lan:
+				_enter_lan_runtime(network.multiplayer.is_server(), false)
+			else:
+				if _squad_preview.is_empty() and _arena_preview.is_empty() and _feedback_preview.is_empty():
+					coach.begin_offline_match()
+				else:
+					coach.hide()
+					if not _touch_preview.is_empty():
+						hud.set_touch_preview(_touch_preview)
+				if not _arena_preview.is_empty():
+					_apply_arena_preview()
+				if not _capture_fixture_only:
+					director.begin()
+			_apply_weapon_preview()
+			_apply_ballistics_preview()
+			_apply_motion_preview()
+			_apply_feedback_preview()
+			_apply_contract_previews()
+	if not _capture_path.is_empty():
+		_capture_after_delay()
+
+func _physics_process(delta: float) -> void:
+	if _dedicated_server:
+		_tick_dedicated_server(delta)
+		return
+	if _local_duelist == null:
+		return
+	_tick_perf_sample(delta)
+	_sync_objective_presentation()
+	_sync_squad_hud()
+	_tick_feedback_preview(delta)
+	if _lan_active:
+		_tick_lobby_arming(delta)
+		_tick_lan_duel(delta)
+		return
+	if hud.take_rematch():
+		director.take_rematch()
+	var wants_reload := hud.take_reload() or Input.is_action_just_pressed("reload")
+	var look_delta := hud.take_look_delta()
+	_local_duelist.apply_look(look_delta)
+	if hud.take_reset_training() and coach != null and not _lan_active:
+		coach.reset_training()
+	if hud.gyro_enabled:
+		var gyroscope := Input.get_gyroscope()
+		_local_duelist.apply_look(Vector2(gyroscope.y, -gyroscope.x) * 2.4)
+	if not director.is_live() or not hud.can_drive_combat():
+		# Non-live beats can still show the arena and accept camera look, but no combat intent survives into the next phase.
+		hud.take_jump()
+		hud.take_crouch()
+		hud.take_prone()
+		hud.take_weapon_switch()
+		if _motion_preview.is_empty():
+			_local_duelist.set_lean(0)
+			_local_duelist.set_combat_pose(false, delta)
+		_local_duelist.drive(Vector2.ZERO, false, false, delta)
+		hud.show_ammo(_local_duelist.magazine_rounds, _local_duelist.reserve_ammo, _local_duelist.reload_remaining)
+		return
+	var keyboard := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	var movement := hud.movement if hud.movement.length_squared() > 0.001 else keyboard
+	if coach != null and not _lan_active:
+		coach.observe_movement(movement)
+		coach.observe_look(look_delta)
+		if hud.fire_held or Input.is_action_pressed("fire"):
+			coach.observe_fire()
+	if hud.take_crouch():
+		_local_duelist.toggle_crouch()
+	if hud.take_prone():
+		_local_duelist.toggle_prone()
+	if hud.take_weapon_switch():
+		_local_duelist.switch_weapon()
+	if wants_reload:
+		_local_duelist.reload_weapon()
+	director.set_interact(_local_duelist.actor_id, hud.interact_held() or Input.is_action_pressed("interact"))
+	var lean_intent := _combined_lean_intent()
+	_local_duelist.set_lean(lean_intent)
+	_local_duelist.set_combat_pose(hud.effective_aim(lean_intent), delta)
+	_local_duelist.drive(movement, hud.fire_held or Input.is_action_pressed("fire"), hud.take_jump() or Input.is_action_just_pressed("jump"), delta)
+	_tick_authority_ballistics(delta)
+	hud.set_stance(_local_duelist.stance)
+	hud.set_weapon(_local_duelist.weapon)
+	hud.show_ammo(_local_duelist.magazine_rounds, _local_duelist.reserve_ammo, _local_duelist.reload_remaining)
+	_sync_reload_feedback()
+	_sync_objective_presentation()
+	_sync_squad_hud()
+
+func _combined_lean_intent() -> int:
+	if hud == null:
+		return 0
+	var intent := hud.lean_value()
+	if Input.is_action_pressed("lean_left"):
+		intent = -1
+	if Input.is_action_pressed("lean_right"):
+		intent = 1
+	return intent
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _local_duelist == null:
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
+		_mouse_captured = event.pressed
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if _mouse_captured else Input.MOUSE_MODE_VISIBLE
+	elif event is InputEventMouseMotion and _mouse_captured:
+		_local_duelist.apply_look(event.relative)
+
+func _build_environment() -> void:
+	var environment := Environment.new()
+	environment.background_mode = Environment.BG_COLOR
+	environment.background_color = Color("0d1b30")
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color("8ea5b3")
+	environment.ambient_light_energy = 0.56
+	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	var world_environment := WorldEnvironment.new()
+	world_environment.environment = environment
+	add_child(world_environment)
+
+	var key := DirectionalLight3D.new()
+	key.rotation_degrees = Vector3(-56, -28, 0)
+	key.light_color = Color("ffe0bd")
+	key.light_energy = 1.18
+	key.shadow_enabled = true
+	add_child(key)
+
+	var rim := OmniLight3D.new()
+	rim.position = Vector3(10, 5, -4)
+	rim.light_color = Color("c8795e")
+	rim.light_energy = 1.25
+	rim.omni_range = 22.0
+	add_child(rim)
+
+	var fill := OmniLight3D.new()
+	fill.position = Vector3(-10, 5, 4)
+	fill.light_color = Color("78a9c7")
+	fill.light_energy = 1.15
+	fill.omni_range = 24.0
+	add_child(fill)
+
+func _build_arena() -> void:
+	arena_map = RiftlineMap.new()
+	arena_map.name = "RiftlineMap"
+	add_child(arena_map)
+	var selected_map := RiftlineMap.Id.CONCOURSE if _offline_squad_size > 1 else RiftlineMap.Id.DUEL_YARD
+	if network != null and (_offline_squad_size <= 1 or network.arena_override_set):
+		selected_map = network.arena_id as RiftlineMap.Id
+	arena_map.configure(selected_map, _presentation_enabled)
+	if _presentation_enabled:
+		_presentation_effects = Node3D.new()
+		_presentation_effects.name = "PresentationEffects"
+		add_child(_presentation_effects)
+
+func _build_match() -> void:
+	director = RiftlineMatch.new()
+	add_child(director)
+	director.configure(_bomb_site_points(), _presentation_enabled, _game_mode)
+	_add_spawn_points()
+	var offline_roster := RiftlineRoster.new()
+	offline_roster.configure(maxi(1, _offline_squad_size), false, _offline_squad_size > 1)
+	offline_roster.add_host()
+	if _offline_squad_size > 1:
+		for index in range(1, _offline_squad_size):
+			offline_roster.add_bot("offline_actor_%d" % index, Duelist.Team.SUN)
+		for index in range(_offline_squad_size):
+			offline_roster.add_bot("offline_actor_%d" % (_offline_squad_size + index), Duelist.Team.VOID)
+	else:
+		offline_roster.add_bot("offline_actor_1", Duelist.Team.VOID)
+	for record in offline_roster.records():
+		_ensure_actor(record, str(record.actor_id) == "host", not _capture_fixture_only)
+
+	for duelist in _all_authority_actors():
+		if duelist is BotDuelist:
+			(duelist as BotDuelist).hold_opening_position(OPENING_HOLD_SECONDS)
+	_populate_bot_opponents()
+
+	_ensure_ballistics()
+	director.score_changed.connect(_on_score_changed)
+	director.phase_changed.connect(_on_phase_changed)
+	director.match_finished.connect(_on_match_finished)
+	director.objective_changed.connect(_on_objective_changed)
+	director.objective_event.connect(_on_objective_event)
+	_build_combat_feedback()
+
+func _bomb_site_points() -> Array:
+	var gates: Dictionary = arena_map.gate_positions()
+	var sites: Array = []
+	for key in gates.keys():
+		sites.append(gates[key] as Vector3)
+	if sites.is_empty():
+		sites.append(arena_map.seed_position())
+	return sites
+
+func _add_spawn_points() -> void:
+	var points := arena_map.spawn_points(Duelist.Team.SUN)
+	if _offline_squad_size <= 1:
+		points = [points[0]]
+	for point in points:
+		director.add_spawn(Duelist.Team.SUN, point)
+	points = arena_map.spawn_points(Duelist.Team.VOID)
+	if _offline_squad_size <= 1:
+		points = [points[0]]
+	for point in points:
+		director.add_spawn(Duelist.Team.VOID, point)
+
+func _populate_bot_opponents() -> void:
+	if director == null:
+		return
+	var sun_roster: Array = director.rosters[Duelist.Team.SUN]
+	var void_roster: Array = director.rosters[Duelist.Team.VOID]
+	for duelist in _all_authority_actors():
+		if duelist is BotDuelist:
+			var enemies: Array[Duelist] = []
+			var enemy_roster: Array = sun_roster if duelist.team == int(Duelist.Team.VOID) else void_roster
+			for candidate in enemy_roster:
+				if candidate is Duelist:
+					enemies.append(candidate as Duelist)
+			(duelist as BotDuelist).set_opponents(enemies)
+
+func _ensure_actor(record: Dictionary, local_controlled: bool, authoritative_collision: bool) -> Duelist:
+	var actor_id := str(record.get("actor_id", ""))
+	var team_value := int(record.get("team", -1))
+	if actor_id.is_empty() or team_value < int(Duelist.Team.SUN) or team_value > int(Duelist.Team.VOID):
+		return null
+	var authority_registry := not _lan_active or _lan_host or _dedicated_server
+	var registry: Dictionary = _authoritative_duelists if authority_registry else _replica_duelists
+	var existing: Variant = registry.get(actor_id, null)
+	if existing is Duelist and is_instance_valid(existing):
+		if existing.team == team_value as Duelist.Team:
+			if local_controlled and hud != null:
+				existing.set_horizontal_fov(hud.horizontal_fov)
+			if local_controlled:
+				_local_duelist = existing
+				_local_actor_id = actor_id
+			return existing
+		_remove_actor(actor_id)
+	var is_bot := not bool(record.get("human", true)) and not _lan_active
+	var duelist: Duelist = BotDuelist.new() if is_bot else Duelist.new()
+	duelist.name = "Actor_%s" % actor_id
+	var should_render := _presentation_enabled and not _dedicated_server
+	duelist.build(team_value as Duelist.Team, local_controlled and should_render, should_render, authoritative_collision)
+	duelist.set_friendly_presenter(not local_controlled and team_value == int(_local_team))
+	var spawn := _spawn_for_actor(team_value as Duelist.Team, registry)
+	duelist.position = spawn
+	duelist.rotation.y = -PI * 0.5 if team_value == int(Duelist.Team.SUN) else PI * 0.5
+	duelist.set_actor_id(actor_id)
+	if local_controlled and hud != null:
+		duelist.set_horizontal_fov(hud.horizontal_fov)
+	add_child(duelist)
+	registry[actor_id] = duelist
+	if director != null and not _capture_fixture_only:
+		director.register_duelist(duelist, actor_id)
+		if not authority_registry:
+			duelist.set_match_active(director.is_live())
+	if authoritative_collision:
+		duelist.fire_requested.connect(_on_authority_fire_requested)
+		if _lan_active:
+			duelist.defeated.connect(_on_lan_defeat)
+	elif local_controlled:
+		duelist.fire_requested.connect(_on_local_fire_requested)
+	duelist.knife_strike.connect(_on_knife_strike)
+	if local_controlled:
+		duelist.damaged.connect(_on_player_damaged)
+		_local_duelist = duelist
+		_local_actor_id = actor_id
+	if not authority_registry and not local_controlled:
+		_remote_snapshot_buffers[actor_id] = SNAPSHOT_BUFFER.new()
+	return duelist
+
+func _remove_actor(actor_id: String) -> void:
+	if actor_id.is_empty():
+		return
+	if director != null:
+		director.unregister_duelist(actor_id)
+	for registry in [_authoritative_duelists, _replica_duelists]:
+		var candidate: Variant = registry.get(actor_id, null)
+		if candidate is Duelist and is_instance_valid(candidate):
+			candidate.queue_free()
+		registry.erase(actor_id)
+	_remote_snapshot_buffers.erase(actor_id)
+	_pending_actor_snapshots.erase(actor_id)
+	_continuous_inputs.erase(actor_id)
+	_edge_queues.erase(actor_id)
+	_last_sequences.erase(actor_id)
+	if _local_actor_id == actor_id:
+		_local_actor_id = ""
+		_local_duelist = null
+
+func _actor(actor_id: String) -> Duelist:
+	var candidate: Variant = _authoritative_duelists.get(actor_id, null)
+	if candidate is Duelist and is_instance_valid(candidate):
+		return candidate
+	candidate = _replica_duelists.get(actor_id, null)
+	return candidate if candidate is Duelist and is_instance_valid(candidate) else null
+
+func _all_authority_actors() -> Array[Duelist]:
+	var result: Array[Duelist] = []
+	for candidate in _authoritative_duelists.values():
+		if candidate is Duelist and is_instance_valid(candidate):
+			result.append(candidate)
+	return result
+
+func _all_replica_actors() -> Array[Duelist]:
+	var result: Array[Duelist] = []
+	for candidate in _replica_duelists.values():
+		if candidate is Duelist and is_instance_valid(candidate):
+			result.append(candidate)
+	return result
+
+func _spawn_for_actor(team: Duelist.Team, registry: Dictionary) -> Vector3:
+	var points: Array[Vector3] = arena_map.spawn_points(team)
+	if _offline_squad_size <= 1:
+		points = [points[0]]
+	var slot := 0
+	for candidate in registry.values():
+		if candidate is Duelist and candidate.team == team:
+			slot += 1
+	return points[posmod(slot, points.size())]
+
+func _preview_actor() -> Duelist:
+	for candidate in _all_authority_actors():
+		if candidate != _local_duelist:
+			return candidate
+	return _local_duelist
+
+func _actor_for_team(team: Duelist.Team) -> Duelist:
+	for actor in _all_authority_actors():
+		if actor.team == team:
+			return actor
+	for actor in _all_replica_actors():
+		if actor.team == team:
+			return actor
+	return _local_duelist
+
+func _sync_roster_records(records: Variant) -> void:
+	var now_msec := Time.get_ticks_msec()
+	for pending_actor_id in _pending_actor_snapshots.keys().duplicate():
+		var pending_snapshot: Dictionary = _pending_actor_snapshots[pending_actor_id]
+		if now_msec - int(pending_snapshot.get("arrival", now_msec)) > 1000:
+			_pending_actor_snapshots.erase(pending_actor_id)
+	var desired := {}
+	var entries: Array = records if records is Array else []
+	for raw_record in entries:
+		if not raw_record is Dictionary:
+			continue
+		var record: Dictionary = raw_record
+		var actor_id := str(record.get("actor_id", ""))
+		if actor_id.is_empty():
+			continue
+		desired[actor_id] = true
+		var is_local := actor_id == _local_actor_id
+		_ensure_actor(record, is_local, _lan_host or _dedicated_server or is_local)
+	for actor_id in _authoritative_duelists.keys().duplicate():
+		if not desired.has(actor_id):
+			_remove_actor(actor_id)
+	for actor_id in _replica_duelists.keys().duplicate():
+		if not desired.has(actor_id):
+			_remove_actor(actor_id)
+	_sync_squad_hud()
+	for actor_id in _pending_actor_snapshots.keys().duplicate():
+		if _actor(str(actor_id)) != null:
+			var pending: Dictionary = _pending_actor_snapshots[actor_id]
+			_update_remote_snapshot(str(actor_id), pending.get("state", {}), int(pending.get("tick", -1)))
+			_pending_actor_snapshots.erase(actor_id)
+
+func _authority_records() -> Array[Dictionary]:
+	if network != null and network.roster != null:
+		return network.roster.records()
+	return []
+
+func _build_hud() -> void:
+	var layer := CanvasLayer.new()
+	add_child(layer)
+	hud = DuelHud.new()
+	layer.add_child(hud)
+	hud.rift_link_requested.connect(_on_rift_link_requested)
+	hud.feedback_preferences_changed.connect(_on_feedback_preferences_changed)
+	hud.view_fov_changed.connect(_on_view_fov_changed)
+	_build_combat_feedback()
+
+func _build_combat_feedback() -> void:
+	if not _presentation_enabled:
+		return
+	if combat_feedback == null:
+		combat_feedback = RiftlineCombatFeedback.new()
+		combat_feedback.name = "RiftlineCombatFeedback"
+		add_child(combat_feedback)
+		combat_feedback.damage_feedback.connect(_on_feedback_damage)
+		combat_feedback.hit_confirm_feedback.connect(_on_feedback_hit_confirm)
+	if not combat_feedback.objective_feedback.is_connected(_on_feedback_objective):
+		combat_feedback.objective_feedback.connect(_on_feedback_objective)
+	var listener := _local_duelist.camera if _local_duelist != null else null
+	combat_feedback.configure(true, _local_actor_id, listener)
+	if hud != null:
+		combat_feedback.set_preferences(hud.effects_enabled, hud.haptics_enabled)
+
+func _build_first_match_coach() -> void:
+	coach = RiftlineFirstMatchCoach.new()
+	coach.cue_changed.connect(hud.set_coach_cue)
+
+func _build_network() -> void:
+	network = RiftlineNetwork.new()
+	add_child(network)
+	network.session_status.connect(_on_network_status)
+	network.host_discovered.connect(_on_host_discovered)
+	network.peer_joined.connect(_on_network_peer_joined)
+	network.peer_left.connect(_on_network_peer_left)
+	network.input_received.connect(_on_network_input)
+	network.snapshot_received.connect(_on_network_snapshot)
+	network.reliable_event_received.connect(_on_network_event)
+	network.team_assigned.connect(_on_team_assigned)
+	network.actor_assigned.connect(_on_actor_assigned)
+	network.roster_received.connect(_on_roster_received)
+	network.session_descriptor_received.connect(_on_session_descriptor)
+	network.lobby_state_received.connect(_on_lobby_state_received)
+	network.lobby_live_received.connect(_on_lobby_live_received)
+	network.lobby_abandoned_received.connect(_on_lobby_abandoned_received)
+
+func _build_rift_link() -> void:
+
+	var layer := CanvasLayer.new()
+	add_child(layer)
+	rift_link = RiftLinkPanel.new()
+	layer.add_child(rift_link)
+	rift_link.set_squad_mode(_offline_squad_size > 1 or network.team_size > 1)
+	rift_link.host_requested.connect(_on_host_requested)
+	rift_link.join_requested.connect(_on_join_requested)
+	rift_link.cancel_requested.connect(_on_rift_link_cancelled)
+	rift_link.retry_requested.connect(_on_join_retry_requested)
+	rift_link.ready_requested.connect(_on_lobby_ready_requested)
+	rift_link.rematch_requested.connect(_on_lobby_rematch_requested)
+
+func _build_practice_panel() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 20
+	add_child(layer)
+	practice_panel = PRACTICE_PANEL.new()
+	layer.add_child(practice_panel)
+	practice_panel.drill_requested.connect(_on_practice_drill_requested)
+	practice_panel.local_rift_requested.connect(_on_practice_local_rift_requested)
+	practice_panel.mode_requested.connect(_on_practice_mode_requested)
+
+func _should_show_practice_panel() -> bool:
+	if not _practice_preview.is_empty():
+		return true
+	if not _capture_path.is_empty() or _offline_squad_size > 1:
+		return false
+	return _squad_preview.is_empty() and _arena_preview.is_empty() and _feedback_preview.is_empty() and _rift_link_preview.is_empty() and _objective_preview.is_empty() and _weapon_preview.is_empty() and _ballistics_preview.is_empty() and _motion_preview.is_empty() and _touch_preview.is_empty() and _relay_preview.is_empty() and _view_fov_preview < 0.0 and _reload_preview.is_empty() and _hud_preview.is_empty() and _loadout_preview.is_empty()
+
+func _load_practice_drill() -> String:
+	var config := ConfigFile.new()
+	if config.load("user://riftline_practice.cfg") == OK:
+		var stored := str(config.get_value("practice", "last_drill", "solo"))
+		if stored in ["solo", "wing", "full"]:
+			return stored
+	return "solo"
+
+func _save_practice_drill(drill: String) -> void:
+	var config := ConfigFile.new()
+	config.set_value("practice", "version", 1)
+	config.set_value("practice", "last_drill", drill)
+	config.save("user://riftline_practice.cfg")
+
+func _on_practice_drill_requested(drill: String) -> void:
+	_start_practice_drill(drill)
+
+func _on_practice_mode_requested(mode: String) -> void:
+	_game_mode = RiftlineMatch.GameMode.BOMB if mode == "bomb" else RiftlineMatch.GameMode.DEATHMATCH
+	if not _lan_active and director != null:
+		_clear_match_nodes()
+		_build_match()
+
+func _on_practice_local_rift_requested() -> void:
+	if hud != null:
+		hud.set_connection_flow_active(true)
+	if rift_link != null:
+		rift_link.open_menu()
+
+func _start_practice_drill(drill: String) -> void:
+	if drill not in ["solo", "wing", "full"]:
+		drill = "solo"
+	_practice_drill = drill
+	_offline_squad_size = {"solo": 1, "wing": 3, "full": 5}.get(drill, 1)
+	_save_practice_drill(drill)
+	_practice_panel_active = false
+	if practice_panel != null:
+		practice_panel.visible = false
+	_build_arena()
+	_build_match()
+	if coach != null:
+		if drill == "solo" and _practice_preview.is_empty():
+			coach.begin_offline_match()
+		else:
+			coach.hide()
+	if director != null:
+		director.begin()
+	if hud != null:
+		hud.set_connection_flow_active(false)
+		if drill == "wing":
+			hud.show_practice_cue("TAKE THE RELAY")
+		elif drill == "full":
+			hud.show_practice_cue("SCREEN THE CARRIER")
+
+func _on_player_damaged(_amount: float, remaining: float, attacker_id: String, source_position: Vector3, enemy_team: int) -> void:
+	if hud != null:
+		hud.show_damage(remaining)
+	if combat_feedback != null:
+		combat_feedback.set_local_health(remaining)
+		combat_feedback.local_damage_received(source_position if not attacker_id.is_empty() else null, enemy_team, _local_duelist.global_position if _local_duelist != null else Vector3.ZERO)
+
+func _on_feedback_damage(direction: Vector2, intensity: float, enemy_team: int) -> void:
+	if hud != null:
+		hud.show_damage_direction(direction, intensity, enemy_team)
+
+func _on_feedback_hit_confirm() -> void:
+	if hud != null:
+		hud.show_hit_confirm()
+
+func _on_feedback_objective(event_type: String, scoring_team: int) -> void:
+	if hud != null:
+		hud.show_objective_feedback(event_type, scoring_team)
+
+func _on_feedback_preferences_changed(effects_enabled: bool, haptics_enabled: bool) -> void:
+	if combat_feedback != null:
+		combat_feedback.set_preferences(effects_enabled, haptics_enabled)
+
+func _on_score_changed(sun: int, void_score: int) -> void:
+	if hud != null:
+		hud.set_score(sun, void_score)
+	if _lan_host:
+		network.publish_event({"type": "score", "sun": sun, "void": void_score})
+
+func _on_objective_changed(state: Dictionary) -> void:
+	if hud != null:
+		hud.set_objective_state(state)
+	_update_use_control(state)
+
+func _on_objective_event(event_type: String, state: Dictionary) -> void:
+	if hud != null:
+		hud.show_objective_event(event_type, state)
+	if combat_feedback != null:
+		var local_event := str(state.get("bomb_carrier_id", "")) == _local_actor_id
+		combat_feedback.objective_event(event_type, state, local_event)
+	if _lan_host:
+		network.publish_event({"type": event_type, "state": state})
+
+# The context use button (plant/defuse) is available only when it would do something.
+func _update_use_control(state: Dictionary) -> void:
+	if hud == null or _local_duelist == null or director == null:
+		return
+	if int(state.get("mode", 0)) != int(RiftlineMatch.GameMode.BOMB):
+		hud.set_seed_relay_available(false)
+		return
+	var bomb_state := int(state.get("bomb_state", -1))
+	var local_id := _local_duelist.actor_id
+	var usable := false
+	if bomb_state == int(RiftlineMatch.BombState.CARRIED) and str(state.get("bomb_carrier_id", "")) == local_id:
+		usable = _near_site(_local_duelist.global_position)
+	elif bomb_state == int(RiftlineMatch.BombState.PLANTED) and int(state.get("bomb_team", -1)) != int(_local_duelist.team):
+		usable = (_local_duelist.global_position - (state.get("bomb_position", Vector3.ZERO) as Vector3)).length() <= 2.2
+	hud.set_seed_relay_available(usable)
+
+func _near_site(point: Vector3) -> bool:
+	if director == null:
+		return false
+	for site in director.bomb_sites:
+		if (point - (site as Vector3)).length() <= 2.6:
+			return true
+	return false
+
+func _on_match_finished(winner: Duelist.Team) -> void:
+	_clear_ballistics()
+	_clear_presentation_effects()
+	if combat_feedback != null:
+		combat_feedback.stop_all()
+	if hud != null:
+		hud.show_match_result(winner)
+	if _lan_host:
+		_authority_match_started = false
+		network.publish_event({"type": "finished", "winner": int(winner)})
+		network.publish_lobby_finished()
+
+func _on_phase_changed(phase: RiftlineMatch.Phase) -> void:
+	if phase != RiftlineMatch.Phase.LIVE:
+		_clear_ballistics()
+		_clear_presentation_effects()
+		if combat_feedback != null:
+			combat_feedback.stop_all()
+	_lan_phase = phase
+	if phase != RiftlineMatch.Phase.LIVE:
+		_continuous_inputs.clear()
+		_edge_queues.clear()
+	if hud != null:
+		hud.set_match_phase(phase)
+		hud.set_combat_input_enabled(phase == RiftlineMatch.Phase.LIVE)
+	if _lan_host:
+		network.publish_event({"type": "phase", "phase": int(phase)})
+
+func _ensure_ballistics() -> void:
+	if ballistics != null:
+		return
+	ballistics = RiftBallistics.new()
+	ballistics.name = "RiftBallistics"
+	add_child(ballistics)
+	ballistics.projectile_fired.connect(_on_projectile_fired)
+	ballistics.projectile_impacted.connect(_on_projectile_impacted)
+	_build_projectile_presentation_pool()
+
+func _tick_authority_ballistics(delta: float) -> void:
+	if ballistics == null or director == null or not director.is_live():
+		return
+	ballistics.tick_authority(delta)
+
+func _clear_ballistics() -> void:
+	if ballistics != null:
+		ballistics.clear()
+	_pending_local_primary_predictions = 0
+	for tracer in _tracer_pool:
+		if is_instance_valid(tracer):
+			tracer.set_meta("token", int(tracer.get_meta("token", 0)) + 1)
+			tracer.visible = false
+	for impact in _impact_pool:
+		if is_instance_valid(impact):
+			impact.set_meta("token", int(impact.get_meta("token", 0)) + 1)
+			impact.visible = false
+
+func _on_authority_fire_requested(shooter: Duelist, fired_weapon: Duelist.Weapon, _origin: Vector3, _direction: Vector3) -> void:
+	if ballistics != null:
+		ballistics.fire(shooter, fired_weapon)
+
+func _on_local_fire_requested(shooter: Duelist, fired_weapon: Duelist.Weapon, origin: Vector3, _direction: Vector3) -> void:
+	if fired_weapon != Duelist.Weapon.PULSE or not _presentation_enabled:
+		return
+	# Joining clients predict only local presentation.  Combat remains authority-owned.
+	_pending_local_primary_predictions = mini(_pending_local_primary_predictions + 1, 8)
+	_play_shooter_fire(_local_team, fired_weapon)
+	if combat_feedback != null:
+		combat_feedback.weapon_fired(_local_actor_id, fired_weapon, origin, true)
+	if hud != null:
+		hud.show_primary_fire_feedback(shooter.last_shot_was_hip_followup)
+
+func _sync_reload_feedback() -> void:
+	if _local_duelist == null or combat_feedback == null:
+		return
+	var active := _local_duelist.reload_remaining > 0.0
+	if active and not _reload_was_active:
+		_reload_stage_played = false
+		combat_feedback.reload_started(true)
+	elif active and not _reload_stage_played and _local_duelist.reload_remaining <= Duelist.M4_RELOAD_SECONDS * 0.5:
+		_reload_stage_played = true
+		combat_feedback.reload_stage(true)
+	elif _reload_was_active and not active:
+		combat_feedback.reload_completed(true)
+	_reload_was_active = active
+
+func _on_projectile_fired(fact: Dictionary) -> void:
+	var projectile_id := int(fact.get("id", -1))
+	var projectile_key := "%s:%d" % [str(fact.get("session_id", "legacy")), projectile_id]
+	if projectile_id < 0 or _seen_projectile_fires.has(projectile_key):
+		return
+	_last_projectile_fire_id = maxi(_last_projectile_fire_id, projectile_id)
+	_seen_projectile_fires[projectile_key] = Time.get_ticks_msec()
+	_trim_projectile_cache(_seen_projectile_fires)
+	var shooter_id := str(fact.get("shooter_id", ""))
+	var local_prediction := _local_duelist != null and shooter_id == _local_duelist.actor_id and _pending_local_primary_predictions > 0
+	if local_prediction:
+		_pending_local_primary_predictions -= 1
+	if _presentation_enabled:
+		if not local_prediction:
+			_play_shooter_fire_by_id(shooter_id, Duelist.Weapon.PULSE)
+			if combat_feedback != null:
+				combat_feedback.weapon_fired(shooter_id, Duelist.Weapon.PULSE, fact.get("origin", Vector3.ZERO), shooter_id == _local_actor_id)
+			if _local_duelist != null and shooter_id == _local_duelist.actor_id and hud != null:
+				hud.show_primary_fire_feedback(bool(fact.get("hip_burst_followup", false)))
+		_spawn_projectile_tracer(fact)
+	if _lan_host:
+		network.publish_event(fact)
+
+func _on_projectile_impacted(fact: Dictionary) -> void:
+	var projectile_id := int(fact.get("id", -1))
+	var projectile_key := "%s:%d" % [str(fact.get("session_id", "legacy")), projectile_id]
+	if projectile_id < 0 or _seen_projectile_impacts.has(projectile_key):
+		return
+	_last_projectile_impact_id = maxi(_last_projectile_impact_id, projectile_id)
+	_seen_projectile_impacts[projectile_key] = Time.get_ticks_msec()
+	_trim_projectile_cache(_seen_projectile_impacts)
+	_cancel_projectile_tracer(fact)
+	if _presentation_enabled:
+		var team := int(fact.get("team", int(Duelist.Team.SUN))) as Duelist.Team
+		_spawn_projectile_impact(fact.get("position", Vector3.ZERO), fact.get("normal", Vector3.UP), team, bool(fact.get("hit_duelist", false)))
+		if bool(fact.get("obstructed", false)):
+			_play_shooter_obstruction(str(fact.get("shooter_id", "")))
+		if combat_feedback != null:
+			combat_feedback.projectile_impacted(fact, _local_duelist.global_position if _local_duelist != null else Vector3.ZERO)
+	if _lan_host:
+		network.publish_event(fact)
+
+func _trim_projectile_cache(cache: Dictionary) -> void:
+	while cache.size() > 128:
+		cache.erase(cache.keys()[0])
+
+func _on_knife_strike(shooter_id: String, origin: Vector3, end: Vector3, team: Duelist.Team, hit_target: bool, target_id: String) -> void:
+	_knife_event_sequence += 1
+	var event_id := "%s:%d" % [shooter_id, _knife_event_sequence]
+	if _presentation_enabled:
+		_show_knife_strike(shooter_id, origin, end, team, hit_target)
+		if combat_feedback != null:
+			combat_feedback.knife_struck(shooter_id, origin, end, team, shooter_id == _local_actor_id, hit_target, target_id, origin, event_id, _local_duelist.global_position if _local_duelist != null else Vector3.ZERO)
+	if _lan_host:
+		network.publish_event({"type": "knife_strike", "shooter_id": shooter_id, "origin": origin, "end": end, "team": int(team), "hit": hit_target, "target_id": target_id, "event_id": event_id})
+
+func _show_knife_strike(shooter_id: String, origin: Vector3, end: Vector3, team: Duelist.Team, hit_target: bool) -> void:
+	if not _presentation_enabled:
+		return
+	_play_shooter_fire_by_id(shooter_id, Duelist.Weapon.KNIFE)
+	var accent := Color("ffb15c") if team == Duelist.Team.SUN else Color("75dbff")
+	_spawn_beam(origin, end, accent.lerp(Color("f4e3ff"), 0.35), 0.024, 0.07)
+	_spawn_impact(end, accent, 0.12 if hit_target else 0.08, 0.1)
+
+func _on_rift_link_requested() -> void:
+	hud.set_connection_flow_active(true)
+	rift_link.open_menu()
+
+func _on_host_requested() -> void:
+	_join_discovery_started = false
+	rift_link.show_host()
+	var error := network.host_lan()
+	if error != OK:
+		rift_link.set_status("LINK ERROR")
+		return
+	_enter_lan_runtime(true, true)
+
+func _on_join_requested() -> void:
+	hud.set_connection_flow_active(true)
+	if not _join_discovery_started:
+		_join_discovery_started = true
+		rift_link.show_join()
+		network.begin_lan_discovery()
+		return
+	var error := network.join_discovered_host()
+	if error != OK:
+		rift_link.set_status("NO RIFT FOUND")
+	else:
+		_enter_lan_runtime(false, true)
+		rift_link.set_status("LINKING")
+
+func _on_join_retry_requested() -> void:
+	_join_discovery_started = true
+	rift_link.show_join()
+	rift_link.show_join()
+	network.begin_lan_discovery()
+
+func _on_rift_link_cancelled() -> void:
+	_join_discovery_started = false
+	if _lan_active:
+		if not _lan_host:
+			network.submit_client_lobby_leave()
+		_restore_offline_training("RIFT CLOSED")
+	else:
+		network.stop()
+		rift_link.hide_panel()
+		hud.set_connection_flow_active(false)
+
+func _on_network_status(status: String) -> void:
+	if rift_link != null and rift_link.visible:
+		rift_link.set_status(status)
+	if status in ["LINK LOST", "LINK FAILED"] and _lan_active and not _dedicated_server:
+		_show_severed_state("RIFT SEVERED")
+
+func _on_host_discovered(session: Dictionary) -> void:
+	_join_discovery_started = true
+	if rift_link != null and rift_link.visible:
+		rift_link.set_squad_mode(str(session.get("mode", "duel")) == "squad")
+		rift_link.set_discovered_session(true)
+
+func _on_network_peer_joined(peer_id: int) -> void:
+	if not _lan_active:
+		return
+	if not _lan_host:
+		_lan_peer_ready = false
+		return
+	var actor_id := network.peer_actor_id(peer_id)
+	if actor_id.is_empty():
+		return
+	_actor_for_peer[peer_id] = actor_id
+	_continuous_inputs[actor_id] = {}
+	_edge_queues[actor_id] = []
+	_last_sequences[actor_id] = -1
+	if _lan_host:
+		_sync_roster_records(_authority_records())
+
+
+func _on_network_peer_left(peer_id: int) -> void:
+	_clear_ballistics()
+	var actor_id := str(_actor_for_peer.get(peer_id, network.peer_actor_id(peer_id)))
+	_actor_for_peer.erase(peer_id)
+	if not actor_id.is_empty():
+		_remove_actor(actor_id)
+	if _dedicated_server:
+		_authority_match_started = false
+		_ready_peers.erase(peer_id)
+		_continuous_inputs.erase(actor_id)
+		_edge_queues.erase(actor_id)
+		_last_sequences.erase(actor_id)
+		if director != null:
+			_sync_roster_records(_authority_records())
+		return
+	if _lan_active and not _lan_host:
+		_restore_offline_training("LINK LOST")
+
+func _on_network_input(peer_id: int, frame: Dictionary) -> void:
+	if not _lan_active or not _lan_host or director == null or not director.is_live():
+		return
+	var actor_id := str(_actor_for_peer.get(peer_id, network.peer_actor_id(peer_id)))
+	if actor_id.is_empty() or _actor(actor_id) == null:
+		return
+	_continuous_inputs[actor_id] = _continuous_input(frame)
+	var edges: Array = _edge_queues.get(actor_id, [])
+	edges.append(_discrete_input(frame))
+	_edge_queues[actor_id] = edges
+	_last_sequences[actor_id] = int(frame.get("sequence", -1))
+
+func _on_network_snapshot(snapshot: Dictionary) -> void:
+	if not _lan_active or _lan_host or not _session_ready_for_snapshots or snapshot.is_empty():
+		return
+	if director != null:
+		var replica_match: Dictionary = snapshot.get("match", snapshot).duplicate(true)
+		replica_match["tick"] = int(snapshot.get("tick", -1))
+		director.apply_replica_state(replica_match)
+	var players: Dictionary = snapshot.get("players", {})
+	var local_state: Dictionary = players.get(_local_actor_id, {})
+	if not local_state.is_empty():
+		var acknowledged := int(local_state.get("last_input", -1))
+		var remaining: Array[Dictionary] = []
+		for frame in _pending_inputs:
+			if int(frame.get("sequence", -1)) > acknowledged:
+				remaining.append(frame)
+		_pending_inputs = remaining
+		if _local_duelist != null:
+			_local_duelist.reconcile_from_authority(local_state, _pending_inputs, 1.0 / 60.0)
+	for actor_id in players.keys():
+		if str(actor_id) == _local_actor_id:
+			continue
+		var remote_state: Dictionary = players[actor_id]
+		if _actor(str(actor_id)) == null:
+			_pending_actor_snapshots[str(actor_id)] = {"state": remote_state.duplicate(true), "tick": int(snapshot.get("tick", -1)), "arrival": Time.get_ticks_msec()}
+		else:
+			_update_remote_snapshot(str(actor_id), remote_state, int(snapshot.get("tick", -1)))
+	if hud != null:
+		var match_state: Dictionary = snapshot.get("match", snapshot)
+		hud.set_score(int(match_state.get("sun_score", 0)), int(match_state.get("void_score", 0)))
+	_sync_squad_hud()
+
+func _on_network_event(event: Dictionary, sender_id: int) -> void:
+	if event.is_empty():
+		return
+	var event_type := str(event.get("type", ""))
+	if event_type in ["lobby_state", "lobby_live", "lobby_abandoned"]:
+		var state: Dictionary = event.get("state", {})
+		if not state.is_empty():
+			_apply_lobby_state(state)
+		if event_type == "lobby_state" and int(state.get("phase", -1)) == RiftlineLobby.Phase.ARMING and _lan_host:
+			_begin_lobby_launch()
+		elif event_type == "lobby_live":
+			_on_lobby_live_state(state)
+		elif event_type == "lobby_abandoned":
+			if _dedicated_server:
+				_clear_match_nodes()
+				_authority_match_started = false
+				_replace_match_for_lan(true)
+			else:
+				_show_severed_state(str(state.get("reason", "RIFT SEVERED")))
+		return
+	if _lan_host:
+		return
+	match event_type:
+		"session":
+			_on_session_descriptor({"map_id": int(event.get("map_id", int(RiftlineMap.Id.DUEL_YARD))), "team_size": int(event.get("team_size", 1))})
+		"phase":
+			_apply_client_phase(int(event.get("phase", int(RiftlineMatch.Phase.OPENING))))
+		"score":
+			if hud != null:
+				hud.set_score(int(event.get("sun", 0)), int(event.get("void", 0)))
+		"finished":
+			_clear_ballistics()
+			if hud != null:
+				hud.show_match_result(int(event.get("winner", int(Duelist.Team.SUN))) as Duelist.Team)
+		"defeat":
+			_apply_client_defeat(str(event.get("victim_id", "")))
+		"projectile_fired":
+			_on_projectile_fired(event)
+		"projectile_impacted":
+			_on_projectile_impacted(event)
+		"knife_strike":
+			var shot_id := str(event.get("shooter_id", ""))
+			var shot_origin: Vector3 = event.get("origin", Vector3.ZERO)
+			var shot_end: Vector3 = event.get("end", Vector3.ZERO)
+			var shot_team := int(event.get("team", int(Duelist.Team.SUN))) as Duelist.Team
+			var shot_hit := bool(event.get("hit", false))
+			var shot_target_id := str(event.get("target_id", ""))
+			var shot_event_id := str(event.get("event_id", ""))
+			_show_knife_strike(shot_id, shot_origin, shot_end, shot_team, shot_hit)
+			if combat_feedback != null:
+				combat_feedback.knife_struck(shot_id, shot_origin, shot_end, shot_team, shot_id == _local_actor_id, shot_hit, shot_target_id, shot_origin, shot_event_id, _local_duelist.global_position if _local_duelist != null else Vector3.ZERO)
+		"spawn":
+			_apply_client_spawn(str(event.get("actor_id", "")), event.get("position", null), float(event.get("yaw", 0.0)))
+		"roster":
+			_sync_roster_records(event.get("records", []))
+		"objective_claimed", "objective_dropped", "objective_returned", "objective_delivered", "objective_relay_launched", "objective_relay_caught", "objective_relay_disrupted", "bomb_planted", "bomb_dropped", "round_won":
+			var objective_event_state: Dictionary = event.get("state", {})
+			_on_objective_event(str(event.get("type", "")), objective_event_state)
+
+func _enter_lan_runtime(host: bool, from_player_flow: bool) -> void:
+	if _lan_active:
+		return
+	if coach != null:
+		coach.hide()
+	_lan_active = true
+	_lan_host = host
+	_dedicated_server = network.is_dedicated_server()
+	_lan_phase = RiftlineMatch.Phase.OPENING
+	_lan_tick = 0
+	_local_input_sequence = 0
+	_pending_inputs.clear()
+	_pending_actor_snapshots.clear()
+	_clear_ballistics()
+	_continuous_inputs.clear()
+	_edge_queues.clear()
+	_last_sequences.clear()
+	_actor_for_peer.clear()
+	_ready_peers.clear()
+	_authority_match_started = false
+	_lobby_arming_remaining = 0.0
+	_session_ready_for_snapshots = host or _dedicated_server
+	_local_actor_id = network.local_actor_id
+	_local_team = network.local_team as Duelist.Team if network.local_team >= 0 else Duelist.Team.SUN
+	if rift_link != null:
+		rift_link.set_local_actor(_local_actor_id, host)
+	_replace_match_for_lan(host)
+	if rift_link != null and not network.lobby_state.is_empty():
+		rift_link.set_lobby_state(network.lobby_state)
+	if hud != null:
+		hud.set_connection_flow_active(false if not from_player_flow else true)
+	if from_player_flow:
+		# The panel remains up until the second human is ready, so the arena cannot consume stale touches.
+		if hud != null:
+			hud.set_combat_input_enabled(false)
+
+func _on_session_descriptor(descriptor: Dictionary) -> void:
+	if descriptor.is_empty() or not _lan_active or _lan_host or _dedicated_server:
+		return
+	_session_ready_for_snapshots = false
+	var descriptor_map := int(descriptor.get("map_id", int(RiftlineMap.Id.DUEL_YARD))) as RiftlineMap.Id
+	if network != null:
+		network.arena_id = descriptor_map
+		network.team_size = clampi(int(descriptor.get("team_size", network.team_size)), RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE)
+		network.game_mode = clampi(int(descriptor.get("game_mode", int(_game_mode))), 0, 1)
+	_game_mode = clampi(int(network.game_mode), 0, 1) as RiftlineMatch.GameMode
+	if arena_map == null or arena_map.map_id() != descriptor_map:
+		_clear_match_nodes()
+		_rebuild_map(descriptor_map)
+		_replace_match_for_lan(false)
+	_session_ready_for_snapshots = true
+
+func _replace_match_for_lan(host: bool) -> void:
+	_clear_match_nodes()
+	if host:
+		_ensure_ballistics()
+	elif ballistics != null:
+		ballistics.queue_free()
+		ballistics = null
+	director = RiftlineMatch.new()
+	add_child(director)
+	if arena_map == null or arena_map.map_id() != network.arena_id:
+		_rebuild_map(network.arena_id as RiftlineMap.Id)
+	director.configure(_bomb_site_points(), _presentation_enabled, _game_mode)
+	var team_points := arena_map.spawn_points(Duelist.Team.SUN)
+	if network.team_size <= 1:
+		team_points = [team_points[0]]
+	for point in team_points:
+		director.add_spawn(Duelist.Team.SUN, point)
+	team_points = arena_map.spawn_points(Duelist.Team.VOID)
+	if network.team_size <= 1:
+		team_points = [team_points[0]]
+	for point in team_points:
+		director.add_spawn(Duelist.Team.VOID, point)
+	director.score_changed.connect(_on_score_changed)
+	director.phase_changed.connect(_on_phase_changed)
+	director.match_finished.connect(_on_match_finished)
+	director.respawn_started.connect(_on_lan_respawn_started)
+	director.objective_changed.connect(_on_objective_changed)
+	director.objective_event.connect(_on_objective_event)
+	if host:
+		_sync_roster_records(_authority_records())
+	elif not _local_actor_id.is_empty():
+		var local_record := {"actor_id": _local_actor_id, "team": int(_local_team), "human": true}
+		_sync_roster_records([local_record])
+
+func _clear_match_nodes() -> void:
+	_clear_ballistics()
+	_clear_ballistics_preview_bodies()
+	if director != null:
+		director.queue_free()
+	for actor in _all_authority_actors():
+		if is_instance_valid(actor):
+			actor.queue_free()
+	for actor in _all_replica_actors():
+		if is_instance_valid(actor):
+			actor.queue_free()
+	_authoritative_duelists.clear()
+	_replica_duelists.clear()
+	_remote_snapshot_buffers.clear()
+	_continuous_inputs.clear()
+	_edge_queues.clear()
+	_last_sequences.clear()
+	director = null
+	_local_duelist = null
+
+func _start_host_match() -> void:
+	if _authority_match_started or director == null:
+		return
+	_authority_match_started = true
+	if director.phase == RiftlineMatch.Phase.FINISHED:
+		director.take_rematch()
+	else:
+		director.begin()
+	print("Riftline authoritative match started")
+	for actor in _all_authority_actors():
+		network.publish_event({"type": "spawn", "actor_id": actor.actor_id, "position": actor.global_position, "yaw": actor.rotation.y})
+
+func _on_lobby_ready_requested(ready: bool) -> void:
+	if not _lan_active or network == null:
+		return
+	if _lan_host:
+		network.submit_lobby_ready(ready)
+	elif not network.lobby_state.is_empty():
+		network.submit_client_lobby_ready(ready, int(network.lobby_state.get("revision", 0)))
+
+func _on_lobby_rematch_requested() -> void:
+	if not _lan_active or network == null:
+		return
+	if _lan_host:
+		network.submit_lobby_rematch_ready(true)
+	elif not network.lobby_state.is_empty():
+		network.submit_client_lobby_rematch_ready(true, int(network.lobby_state.get("revision", 0)))
+
+func _apply_lobby_state(state: Dictionary) -> void:
+	if state.is_empty() or not _lan_active:
+		return
+	var revision := int(state.get("revision", -1))
+	var generation := int(state.get("launch_generation", _lobby_generation))
+	if revision < _lobby_revision or generation < _lobby_generation:
+		return
+	_lobby_revision = revision
+	_lobby_generation = maxi(_lobby_generation, generation)
+	if network != null and not _lan_host:
+		network.lobby_state = state.duplicate(true)
+		_sync_roster_records(state.get("records", []))
+	if rift_link != null and rift_link.visible:
+		rift_link.set_lobby_state(state)
+	var phase := int(state.get("phase", RiftlineLobby.Phase.STAGING))
+	if hud != null and phase != RiftlineLobby.Phase.LIVE:
+		hud.set_connection_flow_active(true)
+		hud.set_combat_input_enabled(false)
+	if phase == RiftlineLobby.Phase.ARMING:
+		_session_ready_for_snapshots = false
+	elif phase == RiftlineLobby.Phase.STAGING or phase == RiftlineLobby.Phase.REMATCH:
+		_session_ready_for_snapshots = false
+
+func _on_lobby_state_received(state: Dictionary) -> void:
+	_apply_lobby_state(state)
+	if int(state.get("phase", -1)) == RiftlineLobby.Phase.ARMING and _lan_host:
+		_begin_lobby_launch()
+
+func _on_lobby_live_received(state: Dictionary) -> void:
+	_apply_lobby_state(state)
+	_on_lobby_live_state(state)
+
+func _on_lobby_abandoned_received(state: Dictionary) -> void:
+	_apply_lobby_state(state)
+	_show_severed_state(str(state.get("reason", "RIFT SEVERED")))
+
+func _on_lobby_live_state(_state: Dictionary) -> void:
+	if not _lan_active:
+		return
+	if not _lan_host and director != null and director.phase == RiftlineMatch.Phase.FINISHED:
+		director.take_rematch()
+	_session_ready_for_snapshots = true
+
+func _begin_lobby_launch() -> void:
+	if not _lan_host or director == null or _lobby_arming_remaining > 0.0:
+		return
+	_lobby_arming_remaining = 0.72
+	if hud != null:
+		hud.set_combat_input_enabled(false)
+
+func _tick_lobby_arming(delta: float) -> void:
+	if not _lan_host or _lobby_arming_remaining <= 0.0:
+		return
+	_lobby_arming_remaining = maxf(0.0, _lobby_arming_remaining - delta)
+	if _lobby_arming_remaining <= 0.0:
+		_start_host_match()
+		network.publish_lobby_live()
+
+func _show_severed_state(reason: String) -> void:
+	if not _lan_active:
+		return
+	_clear_ballistics()
+	_clear_presentation_effects()
+	if combat_feedback != null:
+		combat_feedback.stop_all()
+	_clear_match_nodes()
+	if hud != null:
+		hud.set_connection_flow_active(true)
+		hud.set_combat_input_enabled(false)
+	if rift_link != null:
+		rift_link.show_severed(reason)
+	network.stop()
+	_lan_host = false
+	_lan_peer_ready = false
+
+func _tick_lan_duel(delta: float) -> void:
+	if _local_duelist == null:
+		return
+	_local_duelist.apply_look(hud.take_look_delta())
+	if hud.gyro_enabled:
+		var gyroscope := Input.get_gyroscope()
+		_local_duelist.apply_look(Vector2(gyroscope.y, -gyroscope.x) * 2.4)
+	var live := director != null and director.is_live() if _lan_host else _lan_phase == RiftlineMatch.Phase.LIVE
+	var wants_reload := hud.take_reload() or Input.is_action_just_pressed("reload")
+	var interact_held := hud.interact_held() or Input.is_action_pressed("interact")
+	var lean_intent := _combined_lean_intent()
+	if not live or not hud.can_drive_combat():
+		hud.take_jump()
+		hud.take_crouch()
+		hud.take_prone()
+		hud.take_weapon_switch()
+		_local_duelist.set_combat_pose(false, delta)
+		_local_duelist.apply_input_frame({}, delta, false)
+	else:
+		var keyboard := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+		var movement := hud.movement if hud.movement.length_squared() > 0.001 else keyboard
+		var frame := _local_duelist.make_input_frame(
+			_local_input_sequence,
+			movement,
+			hud.effective_aim(lean_intent),
+			hud.fire_held or Input.is_action_pressed("fire"),
+			hud.take_jump() or Input.is_action_just_pressed("jump"),
+			hud.take_crouch(),
+			hud.take_prone(),
+			hud.take_weapon_switch(),
+			wants_reload,
+			false,
+			lean_intent,
+			interact_held)
+		frame["protocol"] = RiftlineNetwork.PROTOCOL_VERSION
+		_local_input_sequence += 1
+		_local_duelist.set_combat_pose(bool(frame.aim), delta)
+		if _lan_host:
+			_local_duelist.apply_input_frame(frame, delta, true)
+			director.set_interact(_local_actor_id, bool(frame.interact))
+			for actor_id in _authoritative_duelists.keys():
+				if str(actor_id) == _local_actor_id:
+					continue
+				var target := _actor(str(actor_id))
+				if target == null:
+					continue
+				for edge in _edge_queues.get(actor_id, []):
+					target.apply_discrete_input(edge)
+				_edge_queues[actor_id] = []
+				var continuous: Dictionary = _continuous_inputs.get(actor_id, {})
+				target.apply_continuous_input(continuous, delta, true)
+				director.set_interact(str(actor_id), bool(continuous.get("interact", false)))
+		else:
+			_local_duelist.apply_input_frame(frame, delta, false)
+			if _local_duelist.weapon == Duelist.Weapon.PULSE and bool(frame.fire):
+				# The joining client predicts only local presentation.  Damage remains authority-owned.
+				_local_duelist.fire_forward()
+			_pending_inputs.append(frame)
+			network.send_input(frame)
+	hud.set_stance(_local_duelist.stance)
+	hud.set_weapon(_local_duelist.weapon)
+	hud.show_ammo(_local_duelist.magazine_rounds, _local_duelist.reserve_ammo, _local_duelist.reload_remaining)
+	_sync_reload_feedback()
+	hud.show_damage(_local_duelist.health)
+	if not _lan_host:
+		_smooth_remote_presentation()
+	if _lan_host:
+		_lan_tick += 1
+		_tick_authority_ballistics(delta)
+		_snapshot_remaining -= delta
+		if _snapshot_remaining <= 0.0:
+			_snapshot_remaining = 0.05
+			_publish_lan_snapshot()
+
+func _smooth_remote_presentation() -> void:
+	for actor_id in _remote_snapshot_buffers.keys():
+		var actor := _actor(str(actor_id))
+		var buffer: RefCounted = _remote_snapshot_buffers[actor_id]
+		if actor == null or buffer == null:
+			continue
+		var presented: Dictionary = buffer.sample(network.simulation_clock)
+		if not presented.is_empty():
+			actor.apply_presentation_state(presented)
+
+func _update_remote_snapshot(actor_id: String, remote_state: Dictionary, host_tick: int) -> void:
+	var actor := _actor(actor_id)
+	var buffer: RefCounted = _remote_snapshot_buffers.get(actor_id, null)
+	if actor == null or buffer == null or remote_state.is_empty():
+		return
+	var next_eliminated := bool(remote_state.get("eliminated", false))
+	var previous: Dictionary = buffer.sample(network.simulation_clock)
+	var should_reset := not previous.is_empty() and next_eliminated != bool(previous.get("eliminated", false))
+	var incoming_position: Vector3 = remote_state.get("position", actor.global_position)
+	if actor.global_position.distance_to(incoming_position) > 3.0:
+		should_reset = true
+	if should_reset:
+		buffer.clear()
+		actor.apply_presentation_state(remote_state)
+	buffer.push(remote_state, host_tick, network.simulation_clock)
+
+func _tick_dedicated_server(delta: float) -> void:
+	if not _lan_active or director == null:
+		return
+	_tick_lobby_arming(delta)
+	var applied: Dictionary = {}
+	for actor_id in _authoritative_duelists.keys():
+		var target: Duelist = _authoritative_duelists[actor_id]
+		if target == null:
+			continue
+		if _continuous_inputs.has(actor_id):
+			applied[actor_id] = true
+		var edges: Array = _edge_queues.get(actor_id, [])
+		_edge_queues[actor_id] = []
+		if director.is_live():
+			for edge in edges:
+				target.apply_discrete_input(edge)
+			var continuous: Dictionary = _continuous_inputs.get(actor_id, {})
+			target.apply_continuous_input(continuous, delta, true)
+			director.set_interact(str(actor_id), bool(continuous.get("interact", false)))
+		else:
+			target.apply_continuous_input({}, delta, false)
+	for actor_id in _authoritative_duelists.keys():
+		if not applied.has(actor_id):
+			(_authoritative_duelists[actor_id] as Duelist).apply_continuous_input({}, delta, false)
+	_tick_authority_ballistics(delta)
+	_lan_tick += 1
+	_snapshot_remaining -= delta
+	if _snapshot_remaining <= 0.0:
+		_snapshot_remaining = 0.05
+		_publish_lan_snapshot()
+
+func _publish_lan_snapshot() -> void:
+	if director == null:
+		return
+	var match_state := director.authoritative_state()
+	var players := {}
+	for actor_id in _authoritative_duelists.keys():
+		var duelist: Duelist = _authoritative_duelists[actor_id]
+		players[actor_id] = duelist.authoritative_state(_lan_tick, _last_sequence_for(duelist))
+	var snapshot := {
+		"tick": _lan_tick,
+		"match": match_state,
+		"phase": int(match_state.get("phase", int(director.phase))),
+		"sun_score": int(match_state.get("sun_score", 0)),
+		"void_score": int(match_state.get("void_score", 0)),
+		"objective": match_state.get("objective", {}),
+		"players": players,
+	}
+	network.publish_snapshot(snapshot)
+
+func _last_sequence_for(duelist: Duelist) -> int:
+	return _local_input_sequence - 1 if duelist.actor_id == _local_actor_id else int(_last_sequences.get(duelist.actor_id, -1))
+
+func _apply_client_phase(next_phase: int) -> void:
+	_lan_phase = next_phase as RiftlineMatch.Phase
+	if _lan_phase != RiftlineMatch.Phase.LIVE:
+		_clear_ballistics()
+	for buffer in _remote_snapshot_buffers.values():
+		(buffer as RefCounted).clear()
+	if hud != null:
+		hud.set_match_phase(_lan_phase)
+		hud.set_combat_input_enabled(_lan_phase == RiftlineMatch.Phase.LIVE)
+	for actor in _all_replica_actors():
+		actor.set_match_active(_lan_phase == RiftlineMatch.Phase.LIVE)
+	if _lan_phase == RiftlineMatch.Phase.LIVE:
+		if rift_link != null:
+			rift_link.hide_panel()
+		if hud != null:
+			hud.set_connection_flow_active(false)
+
+func _on_team_assigned(team_value: int) -> void:
+	if team_value < int(Duelist.Team.SUN) or team_value > int(Duelist.Team.VOID):
+		return
+	_local_team = team_value as Duelist.Team
+
+func _on_view_fov_changed(horizontal_degrees: float) -> void:
+	if _local_duelist != null:
+		_local_duelist.set_horizontal_fov(horizontal_degrees)
+
+func _on_actor_assigned(actor_id: String, team_value: int) -> void:
+	if actor_id.is_empty() or team_value < int(Duelist.Team.SUN) or team_value > int(Duelist.Team.VOID):
+		return
+	_local_actor_id = actor_id
+	_local_team = team_value as Duelist.Team
+	if _lan_active and not _lan_host and not _dedicated_server:
+		_sync_roster_records([{"actor_id": actor_id, "team": team_value, "human": true}])
+
+func _on_roster_received(records: Array[Dictionary]) -> void:
+	if not _lan_active or _lan_host:
+		return
+	_sync_roster_records(records)
+
+func _authority_roster_ready() -> bool:
+	return network != null and network.lobby != null and network.lobby.can_launch()
+
+func _on_lan_defeat(victim: Duelist, killer: Duelist) -> void:
+	if _lan_host:
+		network.publish_event({"type": "defeat", "victim_id": victim.actor_id, "killer_id": killer.actor_id})
+
+func _on_lan_respawn_started(victim: Duelist) -> void:
+	_clear_presentation_effects()
+	if _lan_host:
+		network.publish_event({"type": "spawn", "actor_id": victim.actor_id, "position": victim.global_position, "yaw": victim.rotation.y})
+
+func _apply_client_defeat(actor_id: String) -> void:
+	var victim := _actor(actor_id)
+	if victim != null:
+		victim.apply_presentation_state({"health": 0.0, "eliminated": true})
+
+func _apply_client_spawn(actor_id: String, position: Variant = null, yaw: float = 0.0) -> void:
+	_clear_ballistics()
+	_clear_presentation_effects()
+	var target := _actor(actor_id)
+	if target == null:
+		return
+	if position == null or not position is Vector3:
+		return
+	target.apply_presentation_state({
+		"position": position,
+		"velocity": Vector3.ZERO,
+		"yaw": yaw,
+		"pitch": 0.0,
+		"health": Duelist.HEALTH,
+		"stance": int(Duelist.Stance.STAND),
+		"weapon": int(Duelist.Weapon.PULSE),
+		"eliminated": false,
+	})
+	if target == _local_duelist:
+		_pending_inputs.clear()
+
+func _restore_offline_training(message: String) -> void:
+	_clear_ballistics()
+	_clear_presentation_effects()
+	if combat_feedback != null:
+		combat_feedback.stop_all()
+	if coach != null:
+		coach.hide()
+	_lan_active = false
+	_lan_host = false
+	_lan_peer_ready = false
+	network.stop()
+	rift_link.hide_panel()
+	hud.set_connection_flow_active(false)
+	_clear_match_nodes()
+	_build_match()
+	director.begin()
+	hud.show_connection_message(message)
+
+func _rebuild_map(next_map_id: RiftlineMap.Id) -> void:
+	if arena_map != null:
+		arena_map.queue_free()
+		arena_map = null
+	arena_map = RiftlineMap.new()
+	arena_map.name = "RiftlineMap"
+	add_child(arena_map)
+	arena_map.configure(next_map_id, _presentation_enabled)
+
+func _sync_objective_presentation() -> void:
+	if director == null or not _objective_preview.is_empty():
+		return
+	var state := director.objective_state()
+	if hud != null:
+		hud.set_objective_state(state)
+		_update_use_control(state)
+	_sync_bomb_presentation()
+	_sync_bomb_site_markers()
+	_sync_interact_progress()
+
+func _sync_bomb_presentation() -> void:
+	if not _presentation_enabled or director == null:
+		return
+	var bomb_state := int(director.bomb_state)
+	var is_bomb_mode := int(director.mode) == int(RiftlineMatch.GameMode.BOMB)
+	var show_bomb := is_bomb_mode and (bomb_state == int(RiftlineMatch.BombState.PLANTED) or bomb_state == int(RiftlineMatch.BombState.PLANTING))
+	if show_bomb:
+		if _bomb_presentation_root == null:
+			_build_bomb_presentation()
+		if _bomb_presentation_root != null:
+			_bomb_presentation_root.visible = true
+			_bomb_presentation_root.global_position = director.bomb_position
+			if _bomb_blink_light != null:
+				var blink := (sin(Time.get_ticks_msec() * 0.006) * 0.5 + 0.5)
+				_bomb_blink_light.light_energy = 0.4 + blink * 1.8
+	elif _bomb_presentation_root != null:
+		_bomb_presentation_root.visible = false
+
+func _sync_bomb_site_markers() -> void:
+	if not _presentation_enabled or director == null:
+		return
+	var is_bomb_mode := int(director.mode) == int(RiftlineMatch.GameMode.BOMB)
+	if is_bomb_mode and _bomb_site_markers.is_empty() and not director.bomb_sites.is_empty():
+		_build_bomb_site_markers()
+	if _bomb_site_markers.is_empty():
+		return
+	for marker in _bomb_site_markers:
+		if is_instance_valid(marker):
+			marker.visible = is_bomb_mode
+
+func _sync_interact_progress() -> void:
+	if director == null or _local_duelist == null:
+		return
+	if int(director.mode) != int(RiftlineMatch.GameMode.BOMB):
+		_local_duelist.set_interact_progress(0.0)
+		return
+	var bomb_state := int(director.bomb_state)
+	var progress := 0.0
+	if bomb_state == int(RiftlineMatch.BombState.PLANTING):
+		progress = float(director.bomb_plant_progress)
+	elif bomb_state == int(RiftlineMatch.BombState.DEFUSING):
+		progress = float(director.bomb_defuse_progress)
+	_local_duelist.set_interact_progress(progress)
+
+func _build_bomb_presentation() -> void:
+	if _bomb_presentation_root != null:
+		return
+	_bomb_presentation_root = Node3D.new()
+	_bomb_presentation_root.name = "BombPresentation"
+	add_child(_bomb_presentation_root)
+	# Bomb body: small dark box.
+	var bomb_body := MeshInstance3D.new()
+	var body_mesh := BoxMesh.new()
+	body_mesh.size = Vector3(0.32, 0.18, 0.24)
+	bomb_body.mesh = body_mesh
+	var body_mat := StandardMaterial3D.new()
+	body_mat.albedo_color = Color("1a1a2e")
+	body_mat.roughness = 0.9
+	bomb_body.material_override = body_mat
+	bomb_body.position.y = 0.09
+	_bomb_presentation_root.add_child(bomb_body)
+	# Bomb top detail: small cylinder.
+	var bomb_cap := MeshInstance3D.new()
+	var cap_mesh := CylinderMesh.new()
+	cap_mesh.top_radius = 0.04
+	cap_mesh.bottom_radius = 0.06
+	cap_mesh.height = 0.08
+	bomb_cap.mesh = cap_mesh
+	var cap_mat := StandardMaterial3D.new()
+	cap_mat.albedo_color = Color("2a2a3e")
+	cap_mat.roughness = 0.7
+	bomb_cap.material_override = cap_mat
+	bomb_cap.position.y = 0.22
+	_bomb_presentation_root.add_child(bomb_cap)
+	# Blinking emissive indicator light.
+	var bomb_indicator := MeshInstance3D.new()
+	var indicator_mesh := SphereMesh.new()
+	indicator_mesh.radius = 0.03
+	indicator_mesh.height = 0.06
+	bomb_indicator.mesh = indicator_mesh
+	var indicator_mat := StandardMaterial3D.new()
+	indicator_mat.albedo_color = Color("ff3030")
+	indicator_mat.emission_enabled = true
+	indicator_mat.emission = Color("ff2020")
+	indicator_mat.emission_energy_multiplier = 3.0
+	bomb_indicator.material_override = indicator_mat
+	bomb_indicator.position = Vector3(0.08, 0.2, 0.0)
+	_bomb_presentation_root.add_child(bomb_indicator)
+	# OmniLight for the blink effect.
+	_bomb_blink_light = OmniLight3D.new()
+	_bomb_blink_light.light_color = Color("ff3030")
+	_bomb_blink_light.omni_range = 2.5
+	_bomb_blink_light.light_energy = 1.0
+	_bomb_blink_light.position = Vector3(0.0, 0.3, 0.0)
+	_bomb_presentation_root.add_child(_bomb_blink_light)
+
+func _build_bomb_site_markers() -> void:
+	if director == null or director.bomb_sites.is_empty():
+		return
+	var site_colors: Array[Color] = [Color("ff8c20"), Color("3090ff")]
+	var site_labels: Array[String] = ["A", "B"]
+	for index in range(mini(2, director.bomb_sites.size())):
+		var site_pos: Vector3 = director.bomb_sites[index] as Vector3
+		var marker_root := Node3D.new()
+		marker_root.name = "BombSite_%s" % site_labels[index]
+		marker_root.global_position = site_pos
+		add_child(marker_root)
+		var accent: Color = site_colors[index] if index < site_colors.size() else Color("ffffff")
+		# Glowing pillar.
+		var pillar := MeshInstance3D.new()
+		var pillar_mesh := CylinderMesh.new()
+		pillar_mesh.top_radius = 0.15
+		pillar_mesh.bottom_radius = 0.25
+		pillar_mesh.height = 3.2
+		pillar.mesh = pillar_mesh
+		var pillar_mat := StandardMaterial3D.new()
+		pillar_mat.albedo_color = accent.lerp(Color("0d1b30"), 0.5)
+		pillar_mat.emission_enabled = true
+		pillar_mat.emission = accent
+		pillar_mat.emission_energy_multiplier = 0.8
+		pillar_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		pillar_mat.albedo_color.a = 0.35
+		pillar.material_override = pillar_mat
+		pillar.position.y = 1.6
+		marker_root.add_child(pillar)
+		# Colored label box at the top.
+		var label := MeshInstance3D.new()
+		var label_mesh := BoxMesh.new()
+		label_mesh.size = Vector3(0.5, 0.25, 0.08)
+		label.mesh = label_mesh
+		var label_mat := StandardMaterial3D.new()
+		label_mat.albedo_color = accent
+		label_mat.emission_enabled = true
+		label_mat.emission = accent
+		label_mat.emission_energy_multiplier = 1.5
+		label.material_override = label_mat
+		label.position.y = 3.4
+		marker_root.add_child(label)
+		# Site base ring.
+		var base := MeshInstance3D.new()
+		var base_mesh := CylinderMesh.new()
+		base_mesh.top_radius = 1.2
+		base_mesh.bottom_radius = 1.2
+		base_mesh.height = 0.05
+		base.mesh = base_mesh
+		var base_mat := StandardMaterial3D.new()
+		base_mat.albedo_color = accent
+		base_mat.emission_enabled = true
+		base_mat.emission = accent
+		base_mat.emission_energy_multiplier = 0.5
+		base_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		base_mat.albedo_color.a = 0.25
+		base.material_override = base_mat
+		base.position.y = 0.025
+		marker_root.add_child(base)
+		_bomb_site_markers.append(marker_root)
+
+func _tick_perf_sample(delta: float) -> void:
+	if (not _arena_perf_sample and not _feedback_perf_sample) or _perf_logged:
+		return
+	_perf_elapsed += delta
+	if _perf_elapsed < 2.0:
+		return
+	_perf_frame_times.append(delta)
+	if _perf_frame_times.size() < 120:
+		return
+	var total := 0.0
+	var minimum := INF
+	var maximum := 0.0
+	for frame_time in _perf_frame_times:
+		total += frame_time
+		minimum = minf(minimum, frame_time)
+		maximum = maxf(maximum, frame_time)
+	if _feedback_perf_sample:
+		var diagnostics := combat_feedback.diagnostics() if combat_feedback != null else {}
+		print("Riftline feedback perf sample: map=%s frames=%d avg_ms=%.2f min_ms=%.2f max_ms=%.2f active_voices=%d world_pool=%d local_pool=%d seen_events=%d skipped_low_priority=%d" % [arena_map.map_id(), _perf_frame_times.size(), total / _perf_frame_times.size() * 1000.0, minimum * 1000.0, maximum * 1000.0, int(diagnostics.get("active_voices", 0)), int(diagnostics.get("world_pool", 0)), int(diagnostics.get("local_pool", 0)), int(diagnostics.get("seen_events", 0)), int(diagnostics.get("skipped_low_priority", 0))])
+	else:
+		print("Riftline arena perf sample: map=%s frames=%d avg_ms=%.2f min_ms=%.2f max_ms=%.2f" % [arena_map.map_id(), _perf_frame_times.size(), total / _perf_frame_times.size() * 1000.0, minimum * 1000.0, maximum * 1000.0])
+	_perf_logged = true
+
+func _sync_squad_hud() -> void:
+	if hud == null:
+		return
+	var actors := _all_replica_actors() if _lan_active and not _lan_host else _all_authority_actors()
+	var records: Array[Dictionary] = []
+	for actor in actors:
+		records.append({"actor_id": actor.actor_id, "team": int(actor.team), "eliminated": actor.eliminated})
+	var squad := _offline_squad_size > 1 or (network != null and network.team_size > 1) or records.size() > 2
+	var hud_team := Duelist.Team.VOID if _feedback_preview == "hud-void" else _local_team
+	hud.set_roster_state(records, int(hud_team), squad)
+
+func _continuous_input(frame: Dictionary) -> Dictionary:
+	return {
+		"sequence": int(frame.get("sequence", -1)),
+		"move_x": float(frame.get("move_x", 0.0)),
+		"move_y": float(frame.get("move_y", 0.0)),
+		"yaw": float(frame.get("yaw", 0.0)),
+		"pitch": float(frame.get("pitch", 0.0)),
+		"aim": bool(frame.get("aim", false)),
+		"fire": bool(frame.get("fire", false)),
+		"interact": bool(frame.get("interact", false)),
+		"lean": clampi(int(frame.get("lean", 0)), -1, 1),
+	}
+
+func _discrete_input(frame: Dictionary) -> Dictionary:
+	return {
+		"sequence": int(frame.get("sequence", -1)),
+		"jump": bool(frame.get("jump", false)),
+		"crouch": bool(frame.get("crouch", false)),
+		"prone": bool(frame.get("prone", false)),
+		"weapon_switch": bool(frame.get("weapon_switch", false)),
+		"reload": bool(frame.get("reload", false)),
+		"pass_seed": bool(frame.get("pass_seed", false)),
+	}
+
+func _play_shooter_fire(team: Duelist.Team, fired_weapon: Duelist.Weapon) -> void:
+	for actor in _all_authority_actors():
+		if actor.team == team:
+			actor.play_local_weapon_fire(fired_weapon) if actor == _local_duelist else actor.play_remote_weapon_fire(fired_weapon)
+			return
+	for actor in _all_replica_actors():
+		if actor.team == team:
+			actor.play_local_weapon_fire(fired_weapon) if actor == _local_duelist else actor.play_remote_weapon_fire(fired_weapon)
+			return
+
+func _play_shooter_fire_by_id(actor_id: String, fired_weapon: Duelist.Weapon) -> void:
+	var actor := _actor(actor_id)
+	if actor == null:
+		return
+	actor.play_local_weapon_fire(fired_weapon) if actor == _local_duelist else actor.play_remote_weapon_fire(fired_weapon)
+
+func _play_shooter_obstruction(actor_id: String) -> void:
+	var actor := _actor(actor_id)
+	if actor != null:
+		actor.play_weapon_obstruction()
+
+func _build_projectile_presentation_pool() -> void:
+	if not _presentation_enabled or _projectile_presentation_pool != null:
+		return
+	_projectile_presentation_pool = Node3D.new()
+	_projectile_presentation_pool.name = "ProjectilePresentationPool"
+	add_child(_projectile_presentation_pool)
+	for _index in 12:
+		var tracer := MeshInstance3D.new()
+		var tracer_mesh := BoxMesh.new()
+		tracer_mesh.size = Vector3(0.032, 0.032, 1.2)
+		tracer.mesh = tracer_mesh
+		tracer.material_override = _pulp_material(Color("fff0b0"), 6.0)
+		tracer.visible = false
+		_projectile_presentation_pool.add_child(tracer)
+		_tracer_pool.append(tracer)
+	for _index in 8:
+		var impact := Node3D.new()
+		impact.name = "CarbineImpact"
+		impact.visible = false
+		var vertical := MeshInstance3D.new()
+		var vertical_mesh := BoxMesh.new()
+		vertical_mesh.size = Vector3(0.055, 0.48, 0.025)
+		vertical.mesh = vertical_mesh
+		vertical.material_override = _pulp_material(Color("fff0b0"), 5.0)
+		impact.add_child(vertical)
+		var horizontal := MeshInstance3D.new()
+		var horizontal_mesh := BoxMesh.new()
+		horizontal_mesh.size = Vector3(0.48, 0.055, 0.025)
+		horizontal.mesh = horizontal_mesh
+		horizontal.material_override = _pulp_material(Color("fff0b0"), 5.0)
+		impact.add_child(horizontal)
+		var ring := MeshInstance3D.new()
+		var ring_mesh := TorusMesh.new()
+		ring_mesh.inner_radius = 0.18
+		ring_mesh.outer_radius = 0.22
+		ring_mesh.rings = 12
+		ring_mesh.ring_segments = 8
+		ring.mesh = ring_mesh
+		ring.rotation.x = PI * 0.5
+		ring.material_override = _pulp_material(Color("fff0b0"), 4.0)
+		impact.add_child(ring)
+		_projectile_presentation_pool.add_child(impact)
+		_impact_pool.append(impact)
+
+func _spawn_projectile_tracer(fact: Dictionary) -> void:
+	if _tracer_pool.is_empty():
+		return
+	var tracer := _tracer_pool[_tracer_cursor]
+	_tracer_cursor = (_tracer_cursor + 1) % _tracer_pool.size()
+	var previous_projectile_key := str(tracer.get_meta("projectile_key", ""))
+	if not previous_projectile_key.is_empty() and _projectile_tracers.get(previous_projectile_key) == tracer:
+		_projectile_tracers.erase(previous_projectile_key)
+	var token := int(tracer.get_meta("token", 0)) + 1
+	tracer.set_meta("token", token)
+	var origin: Vector3 = fact.get("presentation_origin", fact.get("origin", Vector3.ZERO))
+	var velocity: Vector3 = fact.get("velocity", Vector3.ZERO)
+	if velocity.length_squared() < 0.0001:
+		return
+	var direction := velocity.normalized()
+	tracer.global_position = origin + direction * 0.55
+	tracer.look_at(tracer.global_position + direction, Vector3.UP)
+	tracer.scale = Vector3.ONE
+	tracer.visible = true
+	var team := int(fact.get("team", int(Duelist.Team.SUN))) as Duelist.Team
+	_set_projectile_color(tracer, Color("ffb15c") if team == Duelist.Team.SUN else Color("75dbff"), 4.0)
+	var projectile_id := int(fact.get("id", -1))
+	var projectile_key := "%s:%d" % [str(fact.get("session_id", "legacy")), projectile_id]
+	tracer.set_meta("projectile_id", projectile_id)
+	tracer.set_meta("projectile_key", projectile_key)
+	if projectile_id >= 0:
+		_projectile_tracers[projectile_key] = tracer
+	_animate_projectile_tracer(tracer, origin, velocity, projectile_key, token)
+
+func _animate_projectile_tracer(tracer: MeshInstance3D, origin: Vector3, velocity: Vector3, projectile_key: String, token: int) -> void:
+	var elapsed := 0.0
+	while elapsed < 0.07 and is_instance_valid(tracer) and int(tracer.get_meta("token", -1)) == token:
+		await get_tree().process_frame
+		elapsed += get_process_delta_time()
+		var direction := velocity.normalized()
+		tracer.global_position = origin + direction * velocity.length() * elapsed
+		tracer.look_at(tracer.global_position + direction, Vector3.UP)
+	if is_instance_valid(tracer) and int(tracer.get_meta("token", -1)) == token:
+		tracer.visible = false
+	if _projectile_tracers.get(projectile_key) == tracer:
+		_projectile_tracers.erase(projectile_key)
+
+func _cancel_projectile_tracer(fact: Dictionary) -> void:
+	var projectile_key := "%s:%d" % [str(fact.get("session_id", "legacy")), int(fact.get("id", -1))]
+	var tracer: MeshInstance3D = _projectile_tracers.get(projectile_key)
+	if is_instance_valid(tracer):
+		tracer.set_meta("token", int(tracer.get_meta("token", 0)) + 1)
+		tracer.visible = false
+	_projectile_tracers.erase(projectile_key)
+
+func _spawn_projectile_impact(point: Vector3, normal: Vector3, team: Duelist.Team, hit_duelist: bool) -> void:
+	if _impact_pool.is_empty():
+		return
+	var impact := _impact_pool[_impact_cursor]
+	_impact_cursor = (_impact_cursor + 1) % _impact_pool.size()
+	var token := int(impact.get_meta("token", 0)) + 1
+	impact.set_meta("token", token)
+	impact.global_position = point
+	var safe_normal := normal.normalized() if normal.length_squared() > 0.0001 else Vector3.UP
+	impact.look_at(point + safe_normal, Vector3.RIGHT if absf(safe_normal.dot(Vector3.UP)) > 0.92 else Vector3.UP)
+	impact.scale = Vector3.ONE * (0.8 if hit_duelist else 0.5)
+	var ring := impact.get_child(2) as MeshInstance3D
+	if ring != null:
+		ring.visible = hit_duelist
+	for child in impact.get_children():
+		_set_projectile_color(child as MeshInstance3D, Color("ffb15c") if team == Duelist.Team.SUN else Color("75dbff"), 3.8 if hit_duelist else 2.8)
+	impact.visible = true
+	_animate_projectile_impact(impact, token)
+
+func _animate_projectile_impact(impact: Node3D, token: int) -> void:
+	var elapsed := 0.0
+	while elapsed < 0.16 and is_instance_valid(impact) and int(impact.get_meta("token", -1)) == token:
+		await get_tree().process_frame
+		elapsed += get_process_delta_time()
+		impact.scale = Vector3.ONE * (1.0 + elapsed * 2.0)
+	if is_instance_valid(impact) and int(impact.get_meta("token", -1)) == token:
+		impact.visible = false
+
+func _set_projectile_color(instance: MeshInstance3D, color: Color, glow: float) -> void:
+	if instance == null or not (instance.material_override is ShaderMaterial):
+		return
+	var material := instance.material_override as ShaderMaterial
+	material.set_shader_parameter("base_tint", color)
+	material.set_shader_parameter("rim_tint", color)
+	material.set_shader_parameter("glow_strength", glow)
+
+func _spawn_beam(origin: Vector3, end: Vector3, color: Color, radius: float, lifetime: float) -> void:
+	if _presentation_effects == null or origin.distance_squared_to(end) < 0.0001:
+		return
+	var beam := MeshInstance3D.new()
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = radius
+	mesh.bottom_radius = radius
+	mesh.height = origin.distance_to(end)
+	beam.mesh = mesh
+	beam.material_override = _pulp_material(color, 5.5)
+	beam.position = origin.lerp(end, 0.5)
+	_presentation_effects.add_child(beam)
+	beam.look_at(end, Vector3.UP)
+	beam.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+	_remove_presentation_node(beam, lifetime)
+
+func _spawn_impact(point: Vector3, color: Color, radius: float, lifetime: float) -> void:
+	if _presentation_effects == null:
+		return
+	var impact := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	impact.mesh = mesh
+	impact.material_override = _pulp_material(color, 5.0)
+	impact.position = point
+	impact.scale = Vector3(1.0, 1.0, 0.42)
+	_presentation_effects.add_child(impact)
+	_remove_presentation_node(impact, lifetime)
+
+func _spawn_delivery_pulse(gate_position: Vector3, color: Color) -> void:
+	if _presentation_effects == null:
+		return
+	var pulse := MeshInstance3D.new()
+	var pulse_mesh := TorusMesh.new()
+	pulse_mesh.inner_radius = 0.28
+	pulse_mesh.outer_radius = 0.36
+	pulse_mesh.rings = 20
+	pulse_mesh.ring_segments = 10
+	pulse.mesh = pulse_mesh
+	pulse.position = gate_position + Vector3.UP * 1.35
+	pulse.material_override = _pulp_material(color, 4.2)
+	_presentation_effects.add_child(pulse)
+	_animate_delivery_pulse(pulse)
+	for side in [-1.0, 1.0]:
+		var flare := MeshInstance3D.new()
+		flare.mesh = _box_mesh(Vector3(0.08, 2.8, 0.08))
+		flare.position = gate_position + Vector3(side * 0.72, 1.4, 0.0)
+		flare.material_override = _pulp_material(color, 4.0)
+		_presentation_effects.add_child(flare)
+		_remove_presentation_node(flare, 0.24)
+
+func _animate_delivery_pulse(pulse: MeshInstance3D) -> void:
+	var elapsed := 0.0
+	while elapsed < 0.42 and is_instance_valid(pulse):
+		await get_tree().process_frame
+		var delta := get_process_delta_time()
+		elapsed += delta
+		var progress := clampf(elapsed / 0.42, 0.0, 1.0)
+		pulse.scale = Vector3.ONE * (1.0 + progress * 2.4)
+		if pulse.material_override is ShaderMaterial:
+			(pulse.material_override as ShaderMaterial).set_shader_parameter("glow_strength", 4.2 * (1.0 - progress))
+	if is_instance_valid(pulse):
+		pulse.queue_free()
+
+func _remove_presentation_node(node: Node, lifetime: float) -> void:
+	await get_tree().create_timer(lifetime).timeout
+	if is_instance_valid(node):
+		node.queue_free()
+
+func _clear_presentation_effects() -> void:
+	if _presentation_effects == null:
+		return
+	for child in _presentation_effects.get_children():
+		child.queue_free()
+	if _bomb_presentation_root != null and is_instance_valid(_bomb_presentation_root):
+		_bomb_presentation_root.queue_free()
+		_bomb_presentation_root = null
+		_bomb_model = null
+		_bomb_blink_light = null
+	for marker in _bomb_site_markers:
+		if is_instance_valid(marker):
+			marker.queue_free()
+	_bomb_site_markers.clear()
+
+func _box_mesh(dimensions: Vector3) -> BoxMesh:
+	var mesh := BoxMesh.new()
+	mesh.size = dimensions
+	return mesh
+
+func _cylinder_mesh(top_radius: float, bottom_radius: float, height: float) -> CylinderMesh:
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = top_radius
+	mesh.bottom_radius = bottom_radius
+	mesh.height = height
+	return mesh
+
+func _pulp_material(color: Color, glow: float) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = PULP_LIT
+	material.set_shader_parameter("base_tint", color)
+	material.set_shader_parameter("shadow_tint", Color("10213d").lerp(color, 0.2))
+	material.set_shader_parameter("rim_tint", Color("dce9ef") if glow <= 0.0 else color)
+	material.set_shader_parameter("rim_strength", 0.14 if glow <= 0.0 else 0.28)
+	material.set_shader_parameter("glow_strength", glow)
+	material.set_shader_parameter("brush_scale", 1.3)
+	return material
+
+func _read_capture_arguments() -> void:
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--capture="):
+			_capture_path = argument.trim_prefix("--capture=")
+		elif argument.begins_with("--after="):
+			_capture_after = maxf(0.2, argument.trim_prefix("--after=").to_float())
+		elif argument == "--settings":
+			_capture_settings = true
+		elif argument == "--hud-layout":
+			_capture_hud_layout = true
+		elif argument == "--character":
+			_capture_character = true
+		elif argument == "--overview":
+			_capture_overview = true
+		elif argument == "--rift-link":
+			_capture_rift_link = true
+		elif argument.begins_with("--offline-squad="):
+			var requested_size := argument.trim_prefix("--offline-squad=")
+			if requested_size.is_valid_int() and requested_size.to_int() in [3, 5]:
+				_offline_squad_size = requested_size.to_int()
+		elif argument.begins_with("--mode="):
+			var requested_mode := argument.trim_prefix("--mode=").to_lower()
+			if requested_mode == "bomb":
+				_game_mode = RiftlineMatch.GameMode.BOMB
+			elif requested_mode == "deathmatch":
+				_game_mode = RiftlineMatch.GameMode.DEATHMATCH
+		elif argument.begins_with("--squad-preview="):
+			_squad_preview = argument.trim_prefix("--squad-preview=")
+			if _squad_preview == "three-versus-three":
+				_offline_squad_size = 3
+		elif argument.begins_with("--practice-preview="):
+			_practice_preview = argument.trim_prefix("--practice-preview=")
+		elif argument.begins_with("--tactics-preview="):
+			_tactics_preview = argument.trim_prefix("--tactics-preview=")
+			_offline_squad_size = 5
+			_squad_preview = "tactics"
+		elif argument.begins_with("--arena-preview="):
+			_arena_preview = argument.trim_prefix("--arena-preview=")
+			if _arena_preview in ["sun-dock", "relay-basin", "windwalk", "service-run", "void-dock", "carrier-gate", "first-person", "overview", "sun-bay", "void-bay"] and _offline_squad_size < 3:
+				_offline_squad_size = 3
+		elif argument.begins_with("--feedback-preview="):
+			_feedback_preview = argument.trim_prefix("--feedback-preview=")
+			if _feedback_preview == "squad-motion":
+				_offline_squad_size = 3
+		elif argument == "--arena-perf-sample":
+			_arena_perf_sample = true
+			_offline_squad_size = 5
+		elif argument == "--feedback-perf-sample":
+			_feedback_perf_sample = true
+			_offline_squad_size = 5
+		elif argument.begins_with("--objective-preview="):
+			_objective_preview = argument.trim_prefix("--objective-preview=")
+		elif argument.begins_with("--weapon-preview="):
+			_weapon_preview = argument.trim_prefix("--weapon-preview=")
+		elif argument.begins_with("--view-fov="):
+			var requested_fov := argument.trim_prefix("--view-fov=").to_float()
+			_view_fov_preview = clampf(requested_fov, Duelist.MIN_HORIZONTAL_FOV, Duelist.MAX_HORIZONTAL_FOV) if is_finite(requested_fov) else Duelist.DEFAULT_HORIZONTAL_FOV
+		elif argument.begins_with("--reload-preview="):
+			_reload_preview = argument.trim_prefix("--reload-preview=")
+		elif argument.begins_with("--hud-preview="):
+			_hud_preview = argument.trim_prefix("--hud-preview=")
+		elif argument.begins_with("--loadout-preview="):
+			_loadout_preview = argument.trim_prefix("--loadout-preview=")
+		elif argument.begins_with("--ballistics-preview="):
+			_ballistics_preview = argument.trim_prefix("--ballistics-preview=")
+		elif argument.begins_with("--motion-preview="):
+			_motion_preview = argument.trim_prefix("--motion-preview=")
+			if _motion_preview in ["world-locomotion", "relay-machinery"]:
+				_offline_squad_size = 3
+		elif argument.begins_with("--touch-preview="):
+			_touch_preview = argument.trim_prefix("--touch-preview=")
+		elif argument.begins_with("--rift-link-preview="):
+			_rift_link_preview = argument.trim_prefix("--rift-link-preview=")
+		elif argument.begins_with("--relay-preview="):
+			_relay_preview = argument.trim_prefix("--relay-preview=")
+			_offline_squad_size = 5 if _relay_preview in ["bot-relay", "full-crew"] else 3
+	if _capture_settings and hud != null:
+		hud.open_settings()
+	if _capture_hud_layout and hud != null:
+		hud.open_hud_layout()
+	if _capture_character and hud != null and _local_duelist != null:
+		# This is a renderer-only inspection hook for silhouette review, not an alternate gameplay state.
+		var preview_actor := _preview_actor()
+		preview_actor.position = Vector3(-2.0, 0.1, 0.0)
+		preview_actor.rotation.y = PI * 0.5
+		_local_duelist.camera.cull_mask = 1
+		_local_duelist.camera.global_position = Vector3(-8.0, 1.65, 0.0)
+		_local_duelist.camera.look_at(preview_actor.global_position + Vector3.UP * 0.9)
+		preview_actor.set_physics_process(false)
+	if _capture_overview and hud != null and _local_duelist != null:
+		# A renderer-only inspection hook that lets captures verify both spawn halves at once.
+		_local_duelist.camera.cull_mask = 1
+		_local_duelist.camera.global_position = Vector3(0.0, 31.0, 27.0)
+		_local_duelist.camera.look_at(Vector3(0.0, 0.0, 0.0))
+	if _capture_rift_link and hud != null:
+		hud.set_connection_flow_active(true)
+		rift_link.open_menu()
+	if not _rift_link_preview.is_empty() and rift_link != null:
+		hud.set_connection_flow_active(true)
+		rift_link.apply_preview(_rift_link_preview)
+	if not _touch_preview.is_empty():
+		hud.set_touch_preview(_touch_preview)
+
+func _apply_arena_preview() -> void:
+	if _local_duelist == null or _local_duelist.camera == null:
+		return
+	_local_duelist.camera.cull_mask = 1
+	var camera_position := Vector3(0.0, 31.0, 27.0)
+	var look_target := Vector3.ZERO
+	match _arena_preview:
+		"overview":
+			camera_position = Vector3(0.0, 31.0, 27.0)
+			look_target = Vector3(0.0, 0.0, 0.0)
+		"first-person":
+			camera_position = Vector3(0.0, 1.65, 18.0)
+			look_target = Vector3(0.0, 1.45, 0.0)
+			_local_duelist.position = Vector3(0.0, 0.1, 18.0)
+			_local_duelist.rotation.y = -PI * 0.5
+		"windwalk":
+			camera_position = Vector3(-18.0, 10.0, 40.0)
+			look_target = Vector3(-8.0, 0.5, 24.0)
+		"relay-basin":
+			camera_position = Vector3(0.0, 8.5, 16.0)
+			look_target = Vector3(0.0, 0.8, 0.0)
+		"service-run":
+			camera_position = Vector3(18.0, 10.0, -40.0)
+			look_target = Vector3(8.0, 0.6, -24.0)
+		"sun-dock", "sun-bay":
+			camera_position = Vector3(-51.0, 5.5, 10.0)
+			look_target = Vector3(-43.0, 1.2, 0.0)
+		"void-dock", "void-bay":
+			camera_position = Vector3(51.0, 5.5, -10.0)
+			look_target = Vector3(43.0, 1.2, 0.0)
+		"carrier-gate":
+			camera_position = Vector3(35.0, 4.0, 7.0)
+			look_target = Vector3(55.0, 1.4, 0.0)
+			_local_duelist.position = Vector3(38.0, 0.1, 5.0)
+			_local_duelist.rotation.y = -0.9
+	_local_duelist.camera.global_position = camera_position
+	_local_duelist.camera.look_at(look_target)
+	for actor in _all_authority_actors():
+		actor.set_physics_process(false)
+
+
+func _apply_weapon_preview() -> void:
+	if _local_duelist == null or _weapon_preview.is_empty():
+		return
+	# Freeze only the capture fixture in a clean live HUD state; it does not alter match authority.
+	if director != null:
+		director.set_physics_process(false)
+	if hud != null:
+		hud.set_match_phase(RiftlineMatch.Phase.LIVE)
+		hud.set_combat_input_enabled(true)
+	var preview := _weapon_preview
+	if preview in ["m4-hip", "m4-world"]:
+		preview = "carbine-hip" if preview == "m4-hip" else "carbine-world"
+	elif preview in ["m4-ads", "m4-ads-sight"]:
+		preview = "carbine-ads"
+	elif preview in ["knife-hip", "knife-world"]:
+		preview = "knife"
+	match preview:
+		"carbine-hip":
+			_local_duelist.set_weapon_presentation(Duelist.Weapon.PULSE)
+			_local_duelist.set_combat_pose(false, 1.0)
+			if hud != null:
+				hud.aim_held = false
+		"carbine-ads":
+			_local_duelist.set_weapon_presentation(Duelist.Weapon.PULSE)
+			_local_duelist.set_combat_pose(true, 1.0)
+			if hud != null:
+				hud.aim_held = true
+		"carbine-world":
+			var preview_actor := _preview_actor()
+			_local_duelist.camera.cull_mask = 1
+			preview_actor.position = Vector3(-2.5, 0.1, 0.0)
+			preview_actor.rotation.y = PI * 0.5
+			_local_duelist.camera.global_position = Vector3(-6.0, 1.7, 0.0)
+			_local_duelist.camera.look_at(preview_actor.global_position + Vector3.UP * 0.95)
+			preview_actor.set_physics_process(false)
+		"knife":
+			_local_duelist.set_weapon_presentation(Duelist.Weapon.KNIFE)
+			_local_duelist.set_combat_pose(false, 1.0)
+			if hud != null:
+				hud.aim_held = false
+
+func _apply_contract_previews() -> void:
+	if hud == null:
+		return
+	if _view_fov_preview >= 0.0:
+		hud.set_view_fov(_view_fov_preview, false)
+		if _local_duelist != null:
+			_local_duelist.set_horizontal_fov(_view_fov_preview)
+	if not _reload_preview.is_empty():
+		if director != null:
+			director.set_physics_process(false)
+		hud.set_weapon(Duelist.Weapon.PULSE)
+		if _local_duelist != null:
+			_local_duelist.set_weapon_presentation(Duelist.Weapon.PULSE)
+		var reload_remaining := Duelist.M4_RELOAD_SECONDS
+		match _reload_preview:
+			"half":
+				reload_remaining = Duelist.M4_RELOAD_SECONDS * 0.5
+			"near-complete":
+				reload_remaining = 0.04
+			_:
+				reload_remaining = Duelist.M4_RELOAD_SECONDS
+		hud.show_ammo(4, 24, reload_remaining)
+	if not _hud_preview.is_empty():
+		match _hud_preview:
+			"bottom-vitals-mid":
+				hud.health = 60.0
+			"bottom-vitals-low":
+				hud.health = 20.0
+			_:
+				hud.health = 100.0
+		hud.queue_redraw()
+	if _loadout_preview in ["m4", "knife"]:
+		var preview_weapon := Duelist.Weapon.PULSE if _loadout_preview == "m4" else Duelist.Weapon.KNIFE
+		hud.set_weapon(preview_weapon)
+		if _local_duelist != null:
+			_local_duelist.set_weapon_presentation(preview_weapon)
+
+func _apply_ballistics_preview() -> void:
+	if _ballistics_preview.is_empty() or not _presentation_enabled or _local_duelist == null:
+		return
+	if director != null:
+		director.set_physics_process(false)
+	if hud != null:
+		hud.set_match_phase(RiftlineMatch.Phase.LIVE)
+		hud.set_combat_input_enabled(true)
+		hud.set_coach_cue({})
+	if coach != null:
+		coach.hide()
+	# Preview fixtures use the real authority path so captures can prove the
+	# crosshair contract.  The fixtures are static presentation targets and never
+	# become part of the map or gameplay state.
+	_local_duelist.set_match_active(true)
+	_local_duelist.position = Vector3.ZERO
+	_local_duelist.rotation = Vector3.ZERO
+	_local_duelist.head.rotation = Vector3.ZERO
+	_clear_ballistics_preview_bodies()
+	_spawn_ballistics_preview_solid(Vector3(0.0, 1.2, -9.0), Vector3(0.8, 2.4, 0.8), Color("bd7254"))
+	match _ballistics_preview:
+		"crosshair-clear-near-wall":
+			_spawn_ballistics_preview_solid(Vector3(0.42, 1.2, -2.0), Vector3(0.22, 2.4, 0.24), Color("496f8e"))
+			_local_duelist.set_combat_pose(false, 1.0)
+			_local_duelist._fire_remaining = 0.0
+			_local_duelist.fire_forward()
+			ballistics.tick_authority(1.0 / 60.0)
+		"muzzle-embedded":
+			_spawn_ballistics_preview_solid(_local_duelist.physical_muzzle_position(), Vector3(0.4, 0.4, 0.4), Color("496f8e"))
+			_local_duelist.set_combat_pose(false, 1.0)
+			_local_duelist._fire_remaining = 0.0
+			_local_duelist.fire_forward()
+		"hip-burst":
+			_local_duelist.set_combat_pose(false, 1.0)
+			for _index in 3:
+				_local_duelist._fire_remaining = 0.0
+				_local_duelist.fire_forward()
+				ballistics.tick_authority(1.0 / 60.0)
+		"ads-burst":
+			_local_duelist.set_combat_pose(true, 1.0)
+			for _index in 3:
+				_local_duelist._fire_remaining = 0.0
+				_local_duelist.fire_forward()
+				ballistics.tick_authority(1.0 / 60.0)
+		"single-fire":
+			_local_duelist.set_combat_pose(false, 1.0)
+			_local_duelist._fire_remaining = 0.0
+			_local_duelist.fire_forward()
+
+func _spawn_ballistics_preview_solid(position: Vector3, dimensions: Vector3, color: Color) -> void:
+	var body := StaticBody3D.new()
+	body.position = position
+	var collision := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = dimensions
+	collision.shape = shape
+	body.add_child(collision)
+	var mesh := MeshInstance3D.new()
+	mesh.mesh = _box_mesh(dimensions)
+	mesh.material_override = _pulp_material(color, 0.18)
+	body.add_child(mesh)
+	add_child(body)
+	_preview_ballistics_bodies.append(body)
+
+func _clear_ballistics_preview_bodies() -> void:
+	for body in _preview_ballistics_bodies:
+		if is_instance_valid(body):
+			body.queue_free()
+	_preview_ballistics_bodies.clear()
+
+func _apply_motion_preview() -> void:
+	if _motion_preview.is_empty() or _local_duelist == null or _local_duelist.camera == null:
+		return
+	if director != null:
+		director.set_physics_process(false)
+	if coach != null:
+		coach.hide()
+	if hud != null:
+		hud.set_match_phase(RiftlineMatch.Phase.LIVE)
+		hud.set_combat_input_enabled(true)
+		hud.set_coach_cue({})
+	_local_duelist.set_match_active(true)
+	match _motion_preview:
+		"first-person-reload":
+			_local_duelist.set_weapon_presentation(Duelist.Weapon.PULSE)
+			_local_duelist.magazine_rounds = 4
+			_local_duelist.reserve_ammo = 24
+			_local_duelist.reload_weapon()
+		"lean-left", "lean-right", "lean-ads":
+			_local_duelist.set_weapon_presentation(Duelist.Weapon.PULSE)
+			_local_duelist.set_match_active(true)
+			if _motion_preview == "lean-ads":
+				_local_duelist.set_combat_pose(true, 1.0)
+			_local_duelist.set_lean(-1 if _motion_preview == "lean-left" else 1)
+		"weapon-tuck":
+			_clear_ballistics_preview_bodies()
+			_spawn_ballistics_preview_solid(_local_duelist.physical_muzzle_position(), Vector3(0.4, 0.4, 0.4), Color("496f8e"))
+			_local_duelist.set_weapon_presentation(Duelist.Weapon.PULSE)
+			_local_duelist.set_combat_pose(false, 1.0)
+		"world-locomotion":
+			_local_duelist.camera.cull_mask = 1
+			_local_duelist.camera.global_position = Vector3(-7.0, 3.2, 8.0)
+			_local_duelist.camera.look_at(Vector3(0.0, 1.0, 1.0))
+			var preview_actor := _preview_actor()
+			preview_actor.position = Vector3(0.0, 0.1, 1.0)
+			preview_actor.velocity = Vector3(1.8, 0.0, 0.4)
+			preview_actor.set_match_active(true)
+		"relay-machinery":
+			_local_duelist.camera.cull_mask = 1
+			_local_duelist.camera.global_position = Vector3(0.0, 15.0, 22.0)
+			_local_duelist.camera.look_at(Vector3(0.0, 1.0, 0.0))
+			for actor in _all_authority_actors():
+				actor.set_match_active(true)
+
+func _apply_feedback_preview() -> void:
+	if _feedback_preview.is_empty() or _local_duelist == null or hud == null:
+		return
+	if director != null and _feedback_preview != "squad-motion":
+		director.set_physics_process(false)
+	hud.set_match_phase(RiftlineMatch.Phase.LIVE)
+	hud.set_combat_input_enabled(true)
+	if _feedback_preview == "squad-motion":
+		_local_duelist.camera.cull_mask = 1
+		_local_duelist.camera.global_position = Vector3(0.0, 7.5, 14.0)
+		_local_duelist.camera.look_at(Vector3(0.0, 1.0, 2.0))
+		var preview_positions := [Vector3(-4.0, 0.1, 2.0), Vector3(3.5, 0.1, 4.0), Vector3(0.0, 0.1, 7.0)]
+		var preview_index := 0
+		for actor in _all_authority_actors():
+			if actor == _local_duelist:
+				continue
+			actor.global_position = preview_positions[mini(preview_index, preview_positions.size() - 1)]
+			actor.velocity = Vector3(1.6 if actor.team == Duelist.Team.SUN else -1.6, 0.0, 0.0)
+			preview_index += 1
+	elif _feedback_preview == "hud-void":
+		_local_team = Duelist.Team.VOID
+		_sync_squad_hud()
+	elif _feedback_preview == "coach-move":
+		hud.set_touch_preview("coach-move")
+	_tick_feedback_preview(0.0)
+
+func _tick_feedback_preview(delta: float) -> void:
+	if _feedback_preview.is_empty() or _local_duelist == null or hud == null:
+		return
+	_feedback_preview_elapsed += delta
+	var repeat_interval := 0.18 if _feedback_preview in ["damage-left", "damage-right", "low-health", "hit-confirm"] else 0.42
+	if _feedback_preview_elapsed < repeat_interval and delta > 0.0:
+		return
+	_feedback_preview_elapsed = 0.0
+	var enemy_team := Duelist.Team.VOID if _local_team == Duelist.Team.SUN else Duelist.Team.SUN
+	match _feedback_preview:
+		"carbine-fire":
+			_local_duelist.set_weapon_presentation(Duelist.Weapon.PULSE)
+			_local_duelist.play_local_weapon_fire(Duelist.Weapon.PULSE)
+			combat_feedback.weapon_fired(_local_actor_id, Duelist.Weapon.PULSE, _local_duelist.global_position, true)
+			hud.show_primary_fire_feedback()
+		"knife-fire":
+			_local_duelist.set_weapon_presentation(Duelist.Weapon.KNIFE)
+			_local_duelist.play_local_weapon_fire(Duelist.Weapon.KNIFE)
+			combat_feedback.weapon_fired(_local_actor_id, Duelist.Weapon.KNIFE, _local_duelist.global_position, true)
+		"reload":
+			hud.set_weapon(Duelist.Weapon.PULSE)
+			hud.set_touch_preview("reloading")
+			hud.show_ammo(4, 24, Duelist.M4_RELOAD_SECONDS * 0.5)
+			combat_feedback.reload_started(true)
+		"hit-confirm":
+			hud.show_hit_confirm()
+			combat_feedback.hit_confirm_feedback.emit()
+		"damage-left":
+			hud.show_damage(22.0)
+			hud.show_damage_direction(Vector2.LEFT, 1.0, int(enemy_team))
+		"damage-right":
+			hud.show_damage(22.0)
+			hud.show_damage_direction(Vector2.RIGHT, 1.0, int(enemy_team))
+		"low-health":
+			hud.show_damage(22.0)
+		"seed-claimed":
+			hud.show_objective_event("objective_claimed", {})
+			hud.show_objective_feedback("objective_claimed", int(_local_team))
+			combat_feedback.objective_event("objective_claimed", {"event_id": "preview-claimed", "position": _local_duelist.global_position}, true)
+		"seed-delivered":
+			hud.show_objective_event("objective_delivered", {"scoring_team": int(_local_team)})
+			hud.show_objective_feedback("objective_delivered", int(_local_team))
+			combat_feedback.objective_event("objective_delivered", {"event_id": "preview-delivered", "scoring_team": int(_local_team), "position": _local_duelist.global_position}, true)
+		"hud-default", "hud-void", "squad-motion", "coach-move":
+			pass
+
+func _show_capture_tracer(position: Vector3, direction: Vector3, team_value: int) -> void:
+	if _tracer_pool.is_empty():
+		return
+	var tracer := _tracer_pool[_tracer_cursor]
+	_tracer_cursor = (_tracer_cursor + 1) % _tracer_pool.size()
+	tracer.set_meta("token", int(tracer.get_meta("token", 0)) + 1)
+	tracer.global_position = position
+	tracer.look_at(position + direction, Vector3.UP)
+	tracer.scale = Vector3(0.35, 0.35, 0.65)
+	tracer.visible = true
+	_set_projectile_color(tracer, Color("ffb15c") if team_value == int(Duelist.Team.SUN) else Color("75dbff"), 3.2)
+
+func _show_capture_impact(point: Vector3, normal: Vector3, team: Duelist.Team, hit_duelist: bool) -> void:
+	if _impact_pool.is_empty():
+		return
+	var impact := _impact_pool[_impact_cursor]
+	_impact_cursor = (_impact_cursor + 1) % _impact_pool.size()
+	impact.set_meta("token", int(impact.get_meta("token", 0)) + 1)
+	impact.global_position = point
+	impact.look_at(point + normal, Vector3.UP)
+	impact.scale = Vector3.ONE * (0.8 if hit_duelist else 0.5)
+	var ring := impact.get_child(2) as MeshInstance3D
+	if ring != null:
+		ring.visible = hit_duelist
+	for child in impact.get_children():
+		_set_projectile_color(child as MeshInstance3D, Color("ffb15c") if team == Duelist.Team.SUN else Color("75dbff"), 2.8)
+	impact.visible = true
+
+func _capture_after_delay() -> void:
+	await get_tree().create_timer(_capture_after).timeout
+	var viewport_texture := get_viewport().get_texture()
+	if viewport_texture == null:
+		push_error("Could not capture Riftline: viewport texture is unavailable")
+		get_tree().quit()
+		return
+	var image := viewport_texture.get_image()
+	var error := image.save_png(_capture_path)
+	if error != OK:
+		push_error("Could not write Riftline capture: %s" % _capture_path)
+	get_tree().quit()

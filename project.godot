@@ -1,0 +1,92 @@
+; Engine configuration file.
+; Riftline is intentionally portrait-free: a competitive shooter needs a stable landscape grip.
+config_version=5
+
+[application]
+
+config/name="WhoYouPeekin"
+run/main_scene="res://main.tscn"
+config/icon="res://icons/icon_1024.png"
+config/features=PackedStringArray("4.7", "Mobile")
+; Competitive target: render and simulate at 120 Hz where the display allows.
+run/max_fps=120
+
+[display]
+
+[display/window]
+size/viewport_width=1280
+size/viewport_height=588
+size/window_width_override=1280
+size/window_height_override=588
+size/resizable=true
+stretch/mode="canvas_items"
+stretch/aspect="expand"
+; Follow the device sensor while remaining landscape-only, including reverse landscape grip.
+handheld/orientation=4
+
+[display/window/ios]
+
+; Let ProMotion displays run the game above 60 Hz instead of clamping to it.
+enable_high_refresh_rate=true
+
+[physics]
+
+common/physics_ticks_per_second=120
+
+[input]
+
+move_forward={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":87)]
+}
+move_back={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":83)]
+}
+move_left={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":65)]
+}
+move_right={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":68)]
+}
+fire={
+"deadzone": 0.5,
+"events": [Object(InputEventMouseButton,"button_index":1)]
+}
+jump={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":32)]
+}
+reload={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":82)]
+}
+lean_left={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":81)]
+}
+lean_right={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":69)]
+}
+interact={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":70)]
+}
+
+[input_devices]
+
+; Touches already arrive as ScreenTouch events for the custom HUD.
+; Emulating a mouse click as well turns any movement touch into a held fire input.
+pointing/emulate_mouse_from_touch=false
+
+[rendering]
+
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+; iOS accepts only projects that prepare portable ETC2/ASTC texture data.
+textures/vram_compression/import_etc2_astc=true
+textures/default_filters/use_nearest_mipmap_filter=false
+environment/defaults/default_clear_color=Color(0.0196078, 0.027451, 0.0705882, 1)

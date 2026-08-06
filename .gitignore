@@ -1,0 +1,11 @@
+# Godot
+.godot/
+build/
+*.translation
+
+# macOS
+.DS_Store
+
+# Exports / secrets
+export_credentials.cfg
+*.pck
