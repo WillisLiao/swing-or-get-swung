@@ -17,10 +17,19 @@ var _last_seen_position := Vector3.ZERO
 var _last_seen_remaining := 0.0
 var _stuck_elapsed := 0.0
 var _last_motion_position := Vector3.ZERO
+var _objective_context: Dictionary = {}
 
 func set_opponents(enemies: Array[Duelist]) -> void:
 	_enemies = enemies.duplicate()
 	_select_target()
+
+## Objective awareness for Nuclear Rush, pushed by the arena every time the
+## authoritative objective state changes.  Expected keys: `core_state`,
+## `core_position`, `core_carrier_id`, `core_carrier_team`, `installed_team`,
+## `own_pad`, `enemy_pad`.  Combat-only bots ignore it, so this is safe to call
+## before objective behaviour exists.
+func set_objective_context(context: Dictionary) -> void:
+	_objective_context = context.duplicate(true)
 
 func _ready() -> void:
 	_random.randomize()

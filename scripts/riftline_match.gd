@@ -1,67 +1,72 @@
 class_name RiftlineMatch
 extends Node
 
-# Authoritative rules for the two live modes: team deathmatch and bomb defuse.
-# It mirrors the round/phase/respawn/score surface the arena and network expect,
-# but has no seed objective.  Deathmatch respawns at the safest own-team point;
-# bomb is round-based with plant/defuse progress, a fuse, and side swaps.
+# Authoritative rules for Nuclear Rush, the only game mode.  A single core
+# spawns at the map center; each team must carry it back to their OWN launch
+# pad and hold a launch countdown against a hold-to-cancel defense.  The
+# match is one continuous clock with no rounds and no base swap.  The host
+# runs this simulation; clients receive authoritative_state() snapshots and
+# feed them through apply_replica_state().
 
-signal score_changed(red_score: int, blue_score: int)
+signal score_changed(red: int, blue: int)
 signal phase_changed(phase: Phase)
 signal match_finished(winner: Duelist.Team)
-signal respawn_started(victim: Duelist)
 signal objective_changed(state: Dictionary)
 signal objective_event(event_type: String, state: Dictionary)
+signal respawn_started(victim: Duelist)
 
-enum Phase { OPENING, LIVE, INTERMISSION, FINISHED }
-enum GameMode { DEATHMATCH, BOMB }
-enum BombState { ARMING, CARRIED, PLANTING, PLANTED, DEFUSING, DETONATED, DEFUSED }
+enum Phase { OPENING, LIVE, SUDDEN_DEATH, FINISHED }
+enum GameMode { NUCLEAR_RUSH }
+enum CoreState { AT_CENTER, CARRIED, DROPPED, INSTALLED, RESPAWNING }
 
 const OPENING_HOLD_SECONDS := 2.5
-const INTERMISSION_SECONDS := 1.5
-const RESPAWN_DELAY_SECONDS := 1.1
+const RESPAWN_DELAY_SECONDS := 3.0
+const SAFE_SPAWN_RADIUS := 9.0
+const MATCH_SECONDS := 600.0
+const POINTS_TO_WIN := 3
+const CORE_PICKUP_RADIUS := 2.0
+const CORE_INSTALL_RADIUS := 3.0
+const CORE_INSTALL_SECONDS := 2.5
+const LAUNCH_COUNTDOWN_SECONDS := 25.0
+const LAUNCH_CANCEL_SECONDS := 3.0
+const LAUNCH_CANCEL_RADIUS := 3.0
+const CORE_DROP_RETURN_SECONDS := 15.0
+const CORE_RESPAWN_DELAY_SECONDS := 4.0
 
-const DM_SCORE_TO_WIN := 20
-const DM_SAFE_SPAWN_RADIUS := 9.0
-
-const BOMB_ROUNDS_TO_WIN := 2
-const BOMB_PLANT_SECONDS := 3.0
-const BOMB_DEFUSE_SECONDS := 3.0
-const BOMB_FUSE_SECONDS := 40.0
-const BOMB_SITE_RADIUS := 2.6
-const BOMB_DEFUSE_RADIUS := 2.2
-
-var mode: GameMode = GameMode.DEATHMATCH
-
+var mode: GameMode = GameMode.NUCLEAR_RUSH
 var rosters: Dictionary = {Duelist.Team.RED: [], Duelist.Team.BLUE: []}
 var scores: Dictionary = {Duelist.Team.RED: 0, Duelist.Team.BLUE: 0}
 var spawn_points: Dictionary = {Duelist.Team.RED: [], Duelist.Team.BLUE: []}
-var bomb_sites: Array = []
+var launch_pads: Dictionary = {}
+var core_spawn := Vector3.ZERO
 var phase: Phase = Phase.OPENING
-
-var bomb_state: BombState = BombState.CARRIED
-var bomb_team: Duelist.Team = Duelist.Team.RED
-var bomb_carrier_id := ""
-var bomb_position := Vector3.ZERO
-var bomb_plant_progress := 0.0
-var bomb_defuse_progress := 0.0
-var bomb_fuse_remaining := 0.0
+var core_state: CoreState = CoreState.AT_CENTER
+var core_position := Vector3.ZERO
+var core_carrier_id := ""
+var core_carrier_team: Duelist.Team = Duelist.Team.RED
+var installed_team: Duelist.Team = Duelist.Team.RED
+var install_progress := 0.0
+var cancel_progress := 0.0
+var launch_remaining := 0.0
+var drop_return_remaining := 0.0
+var core_respawn_remaining := 0.0
+var match_remaining := MATCH_SECONDS
+var sudden_death := false
 
 var _presentation_enabled := false
 var _duelists_by_id: Dictionary = {}
-var _round_generation := 0
 var _respawn_generation: Dictionary = {}
 var _opening_remaining := 0.0
-var _intermission_remaining := 0.0
 var _started := false
 var _winner: Duelist.Team = Duelist.Team.RED
 var _last_replica_tick := -1
 var _interact_held: Dictionary = {}
 
-func configure(sites: Array, presentation_enabled: bool, game_mode: GameMode) -> void:
-	bomb_sites = sites.duplicate()
+func configure(pads: Dictionary, core_spawn_position: Vector3, presentation_enabled: bool) -> void:
+	launch_pads = pads.duplicate()
+	core_spawn = core_spawn_position
 	_presentation_enabled = presentation_enabled
-	mode = game_mode
+	mode = GameMode.NUCLEAR_RUSH
 
 func add_spawn(team: Duelist.Team, point: Vector3) -> void:
 	spawn_points[team].append(point)
@@ -82,8 +87,10 @@ func unregister_duelist(actor_id: String) -> void:
 	var duelist: Variant = _duelists_by_id.get(actor_id, null)
 	if not duelist is Duelist:
 		return
-	if duelist in rosters[duelist.team]:
-		rosters[duelist.team].erase(duelist)
+	if actor_id == core_carrier_id:
+		_drop_core((duelist as Duelist).global_position)
+	if duelist in rosters[(duelist as Duelist).team]:
+		rosters[(duelist as Duelist).team].erase(duelist)
 	_duelists_by_id.erase(actor_id)
 	_respawn_generation.erase(actor_id)
 	_interact_held.erase(actor_id)
@@ -96,15 +103,15 @@ func begin() -> void:
 	if _started:
 		return
 	_started = true
-	_start_round()
+	_start_match()
 
 func is_live() -> bool:
-	return phase == Phase.LIVE
+	return phase == Phase.LIVE or phase == Phase.SUDDEN_DEATH
 
 func take_rematch() -> bool:
 	if phase != Phase.FINISHED:
 		return false
-	_start_round()
+	_start_match()
 	return true
 
 func set_interact(actor_id: String, held: bool) -> void:
@@ -116,7 +123,7 @@ func authoritative_state() -> Dictionary:
 		"mode": int(mode),
 		"red_score": int(scores[Duelist.Team.RED]),
 		"blue_score": int(scores[Duelist.Team.BLUE]),
-		"objective": _objective_state(),
+		"objective": objective_state(),
 	}
 
 func apply_replica_state(snapshot: Dictionary) -> void:
@@ -130,30 +137,32 @@ func apply_replica_state(snapshot: Dictionary) -> void:
 	var next_phase := clampi(int(snapshot.get("phase", int(phase))), int(Phase.OPENING), int(Phase.FINISHED)) as Phase
 	var phase_changed_locally := next_phase != phase
 	phase = next_phase
-	mode = clampi(int(snapshot.get("mode", int(mode))), int(GameMode.DEATHMATCH), int(GameMode.BOMB)) as GameMode
-	scores[Duelist.Team.RED] = int(snapshot.get("red_score", 0))
-	scores[Duelist.Team.BLUE] = int(snapshot.get("blue_score", 0))
+	mode = clampi(int(snapshot.get("mode", int(mode))), int(GameMode.NUCLEAR_RUSH), int(GameMode.NUCLEAR_RUSH)) as GameMode
+	var next_red := int(snapshot.get("red_score", scores[Duelist.Team.RED]))
+	var next_blue := int(snapshot.get("blue_score", scores[Duelist.Team.BLUE]))
+	var score_changed_locally := next_red != int(scores[Duelist.Team.RED]) or next_blue != int(scores[Duelist.Team.BLUE])
+	scores[Duelist.Team.RED] = next_red
+	scores[Duelist.Team.BLUE] = next_blue
 	var objective: Dictionary = snapshot.get("objective", {})
 	_apply_objective_presentation(objective)
 	if phase_changed_locally:
 		_set_phase(phase)
-	score_changed.emit(scores[Duelist.Team.RED], scores[Duelist.Team.BLUE])
+	if score_changed_locally:
+		score_changed.emit(scores[Duelist.Team.RED], scores[Duelist.Team.BLUE])
 
 func objective_state() -> Dictionary:
-	return _objective_state()
-
-func _objective_state() -> Dictionary:
-	if mode == GameMode.DEATHMATCH:
-		return {"mode": int(mode)}
 	return {
 		"mode": int(mode),
-		"bomb_state": int(bomb_state),
-		"bomb_team": int(bomb_team),
-		"bomb_carrier_id": bomb_carrier_id,
-		"bomb_position": bomb_position,
-		"plant_progress": bomb_plant_progress,
-		"defuse_progress": bomb_defuse_progress,
-		"fuse_remaining": bomb_fuse_remaining,
+		"core_state": int(core_state),
+		"core_position": core_position,
+		"core_carrier_id": core_carrier_id,
+		"core_carrier_team": int(core_carrier_team),
+		"installed_team": int(installed_team),
+		"install_progress": install_progress,
+		"cancel_progress": cancel_progress,
+		"launch_remaining": launch_remaining,
+		"match_remaining": match_remaining,
+		"sudden_death": sudden_death,
 	}
 
 func _physics_process(delta: float) -> void:
@@ -163,42 +172,35 @@ func _physics_process(delta: float) -> void:
 		_opening_remaining = maxf(0.0, _opening_remaining - delta)
 		if _opening_remaining <= 0.0:
 			_set_phase(Phase.LIVE)
-	elif phase == Phase.INTERMISSION:
-		_intermission_remaining = maxf(0.0, _intermission_remaining - delta)
-		if _intermission_remaining <= 0.0:
-			_start_round()
-	elif phase == Phase.LIVE:
-		if mode == GameMode.BOMB:
-			_tick_bomb(delta)
+		return
+	if phase == Phase.LIVE:
+		match_remaining = maxf(0.0, match_remaining - delta)
+	if phase == Phase.LIVE or phase == Phase.SUDDEN_DEATH:
+		_tick_core(delta)
+		if phase == Phase.LIVE and match_remaining <= 0.0:
+			_on_clock_expired()
 
-func _start_round() -> void:
-	_round_generation += 1
+func _start_match() -> void:
 	_opening_remaining = OPENING_HOLD_SECONDS
-	_intermission_remaining = 0.0
+	scores[Duelist.Team.RED] = 0
+	scores[Duelist.Team.BLUE] = 0
+	match_remaining = MATCH_SECONDS
+	sudden_death = false
 	_cancel_respawns()
 	_reset_duelists_to_spawns()
-	if mode == GameMode.BOMB:
-		# Side swap each round; RED opens as the first attacking side.
-		bomb_team = _next_attacking_team()
-		_reset_bomb()
+	_reset_core()
 	_set_phase(Phase.OPENING)
-	objective_changed.emit(_objective_state())
+	objective_changed.emit(objective_state())
 
-func _next_attacking_team() -> Duelist.Team:
-	if _round_generation == 0:
-		return Duelist.Team.RED
-	return Duelist.Team.BLUE if bomb_team == Duelist.Team.RED else Duelist.Team.RED
-
-func _reset_bomb() -> void:
-	bomb_state = BombState.CARRIED
-	bomb_plant_progress = 0.0
-	bomb_defuse_progress = 0.0
-	bomb_fuse_remaining = 0.0
-	var attackers: Array = rosters[bomb_team]
-	bomb_carrier_id = attackers[0].actor_id if not attackers.is_empty() else ""
-	var carrier: Variant = _duelists_by_id.get(bomb_carrier_id, null)
-	if carrier is Duelist:
-		bomb_position = carrier.global_position
+func _reset_core() -> void:
+	core_state = CoreState.AT_CENTER
+	core_position = core_spawn
+	core_carrier_id = ""
+	install_progress = 0.0
+	cancel_progress = 0.0
+	launch_remaining = 0.0
+	drop_return_remaining = 0.0
+	core_respawn_remaining = 0.0
 
 func _reset_duelists_to_spawns() -> void:
 	for team in [Duelist.Team.RED, Duelist.Team.BLUE]:
@@ -206,120 +208,184 @@ func _reset_duelists_to_spawns() -> void:
 		var points: Array = spawn_points[team]
 		for i in roster.size():
 			var duelist: Variant = roster[i]
-			if duelist is Duelist and points.size() > 0:
-				duelist.respawn_at(points[posmod(i, points.size())])
+			if duelist is Duelist:
+				(duelist as Duelist).set_carrying_core(false)
+				if points.size() > 0:
+					(duelist as Duelist).respawn_at(points[posmod(i, points.size())])
 
 func _on_defeated(victim: Duelist, killer: Duelist) -> void:
-	if phase != Phase.LIVE or not _is_registered(victim) or not _is_registered(killer):
+	if not is_live() or not _is_registered(victim):
 		return
-	if killer == victim or killer.team == victim.team:
-		return
-	if mode == GameMode.DEATHMATCH:
-		scores[killer.team] += 1
-		score_changed.emit(scores[Duelist.Team.RED], scores[Duelist.Team.BLUE])
-		_schedule_respawn(victim)
-		if scores[killer.team] >= DM_SCORE_TO_WIN:
-			_finish_match(killer.team)
-	else:
-		_on_bomb_mode_defeat(victim)
+	if victim.actor_id == core_carrier_id and core_state == CoreState.CARRIED:
+		_drop_core(victim.global_position)
+	_schedule_respawn(victim)
 
-func _on_bomb_mode_defeat(victim: Duelist) -> void:
-	# If the carrier falls, the bomb drops at their position for a teammate to pick up.
-	if victim.actor_id == bomb_carrier_id and bomb_state == BombState.CARRIED:
-		bomb_state = BombState.ARMING
-		bomb_carrier_id = ""
-		bomb_position = victim.global_position
-		objective_changed.emit(_objective_state())
-		objective_event.emit("bomb_dropped", _objective_state())
-		_hand_bomb_to_attacker()
-	_check_team_wipe()
+func _tick_core(delta: float) -> void:
+	var changed := false
+	match core_state:
+		CoreState.AT_CENTER:
+			changed = _try_pickup(core_spawn) or changed
+		CoreState.CARRIED:
+			changed = _tick_carried(delta) or changed
+		CoreState.DROPPED:
+			changed = _tick_dropped(delta) or changed
+		CoreState.INSTALLED:
+			changed = _tick_installed(delta) or changed
+		CoreState.RESPAWNING:
+			changed = _tick_respawning(delta) or changed
+	if changed:
+		objective_changed.emit(objective_state())
 
-func _hand_bomb_to_attacker() -> void:
-	var attackers: Array = rosters[bomb_team]
-	for attacker in attackers:
-		if attacker is Duelist and not attacker.eliminated:
-			bomb_carrier_id = attacker.actor_id
-			bomb_state = BombState.CARRIED
-			return
+func _try_pickup(at_point: Vector3) -> bool:
+	var picker: Duelist = _nearest_living_within(at_point, CORE_PICKUP_RADIUS)
+	if picker == null:
+		return false
+	core_state = CoreState.CARRIED
+	core_carrier_id = picker.actor_id
+	core_carrier_team = picker.team
+	core_position = picker.global_position
+	picker.set_carrying_core(true)
+	objective_event.emit("core_picked_up", objective_state())
+	return true
 
-func _check_team_wipe() -> void:
-	if bomb_state == BombState.PLANTED:
-		return
-	var red_alive := _living_count(Duelist.Team.RED)
-	var blue_alive := _living_count(Duelist.Team.BLUE)
-	if red_alive <= 0 and blue_alive <= 0:
-		_end_round(_other(bomb_team))
-	elif red_alive <= 0:
-		_end_round(Duelist.Team.BLUE)
-	elif blue_alive <= 0:
-		_end_round(Duelist.Team.RED)
+func _nearest_living_within(at_point: Vector3, radius: float) -> Duelist:
+	var best: Duelist = null
+	var best_distance := radius
+	for team in [Duelist.Team.RED, Duelist.Team.BLUE]:
+		for duelist in rosters[team]:
+			if not (duelist is Duelist) or (duelist as Duelist).eliminated:
+				continue
+			var d := (duelist as Duelist).global_position
+			var distance := d.distance_to(at_point)
+			if distance > radius:
+				continue
+			if best == null or distance < best_distance or \
+				(is_equal_approx(distance, best_distance) and (duelist as Duelist).actor_id < best.actor_id):
+				best = duelist as Duelist
+				best_distance = distance
+	return best
 
-func _tick_bomb(delta: float) -> void:
-	match bomb_state:
-		BombState.CARRIED:
-			var carrier: Variant = _duelists_by_id.get(bomb_carrier_id, null)
-			if carrier is Duelist:
-				bomb_position = carrier.global_position
-				if bool(_interact_held.get(bomb_carrier_id, false)) and _near_any_site(bomb_position):
-					bomb_state = BombState.PLANTING
-					bomb_plant_progress = 0.0
-		BombState.PLANTING:
-			var carrier: Variant = _duelists_by_id.get(bomb_carrier_id, null)
-			if not (carrier is Duelist and not carrier.eliminated and bool(_interact_held.get(bomb_carrier_id, false)) and _near_any_site(carrier.global_position)):
-				bomb_state = BombState.CARRIED
-				bomb_plant_progress = 0.0
-			else:
-				bomb_plant_progress = minf(1.0, bomb_plant_progress + delta / BOMB_PLANT_SECONDS)
-				if bomb_plant_progress >= 1.0:
-					bomb_state = BombState.PLANTED
-					bomb_fuse_remaining = BOMB_FUSE_SECONDS
-					bomb_position = carrier.global_position
-					objective_event.emit("bomb_planted", _objective_state())
-		BombState.PLANTED:
-			bomb_fuse_remaining = maxf(0.0, bomb_fuse_remaining - delta)
-			_tick_defuse(delta)
-			if bomb_fuse_remaining <= 0.0:
-				bomb_state = BombState.DETONATED
-				_end_round(bomb_team)
-		BombState.ARMING:
-			_hand_bomb_to_attacker()
-	objective_changed.emit(_objective_state())
-
-func _tick_defuse(delta: float) -> void:
-	var defuser_id := _find_defuser()
-	if defuser_id.is_empty():
-		bomb_defuse_progress = 0.0
-		return
-	bomb_state = BombState.DEFUSING
-	bomb_defuse_progress = minf(1.0, bomb_defuse_progress + delta / BOMB_DEFUSE_SECONDS)
-	if bomb_defuse_progress >= 1.0:
-		bomb_state = BombState.DEFUSED
-		_end_round(_other(bomb_team))
-
-func _find_defuser() -> String:
-	var defenders: Array = rosters[_other(bomb_team)]
-	for defender in defenders:
-		if defender is Duelist and not defender.eliminated \
-			and bool(_interact_held.get(defender.actor_id, false)) \
-			and (defender.global_position - bomb_position).length() <= BOMB_DEFUSE_RADIUS:
-			return defender.actor_id
-	return ""
-
-func _near_any_site(point: Vector3) -> bool:
-	for site in bomb_sites:
-		if (point - (site as Vector3)).length() <= BOMB_SITE_RADIUS:
+func _tick_carried(delta: float) -> bool:
+	var carrier: Variant = _duelists_by_id.get(core_carrier_id, null)
+	if not (carrier is Duelist) or (carrier as Duelist).eliminated:
+		_drop_core(core_position)
+		return true
+	var d := carrier as Duelist
+	core_position = d.global_position
+	if not launch_pads.has(core_carrier_team):
+		if install_progress != 0.0:
+			install_progress = 0.0
 			return true
+		return false
+	var own_pad: Vector3 = launch_pads[core_carrier_team]
+	var within := core_position.distance_to(own_pad) <= CORE_INSTALL_RADIUS
+	var holding := bool(_interact_held.get(core_carrier_id, false))
+	if within and holding:
+		install_progress = minf(1.0, install_progress + delta / CORE_INSTALL_SECONDS)
+		if install_progress >= 1.0:
+			_install_core(own_pad)
+		return true
+	if install_progress != 0.0:
+		install_progress = 0.0
+		return true
 	return false
 
-func _end_round(winner: Duelist.Team) -> void:
-	scores[winner] += 1
-	score_changed.emit(scores[Duelist.Team.RED], scores[Duelist.Team.BLUE])
-	objective_event.emit("round_won", _objective_state())
-	if scores[winner] >= BOMB_ROUNDS_TO_WIN:
-		_finish_match(winner)
+func _install_core(pad_position: Vector3) -> void:
+	var d: Variant = _duelists_by_id.get(core_carrier_id, null)
+	if d is Duelist:
+		(d as Duelist).set_carrying_core(false)
+	core_state = CoreState.INSTALLED
+	installed_team = core_carrier_team
+	core_position = pad_position
+	core_carrier_id = ""
+	install_progress = 0.0
+	cancel_progress = 0.0
+	launch_remaining = LAUNCH_COUNTDOWN_SECONDS
+	objective_event.emit("core_installed", objective_state())
+
+func _drop_core(at_point: Vector3) -> void:
+	var d: Variant = _duelists_by_id.get(core_carrier_id, null)
+	if d is Duelist:
+		(d as Duelist).set_carrying_core(false)
+	core_state = CoreState.DROPPED
+	core_position = at_point
+	core_carrier_id = ""
+	install_progress = 0.0
+	drop_return_remaining = CORE_DROP_RETURN_SECONDS
+	objective_event.emit("core_dropped", objective_state())
+
+func _tick_dropped(delta: float) -> bool:
+	if _try_pickup(core_position):
+		return true
+	drop_return_remaining = maxf(0.0, drop_return_remaining - delta)
+	if drop_return_remaining <= 0.0:
+		core_state = CoreState.AT_CENTER
+		core_position = core_spawn
+		objective_event.emit("core_returned", objective_state())
+		return true
+	return false
+
+func _tick_installed(delta: float) -> bool:
+	if not launch_pads.has(installed_team):
+		return false
+	var pad: Vector3 = launch_pads[installed_team]
+	var defending_team := _other(installed_team)
+	var cancelling := false
+	for duelist in rosters[defending_team]:
+		if not (duelist is Duelist) or (duelist as Duelist).eliminated:
+			continue
+		var d := duelist as Duelist
+		if d.global_position.distance_to(pad) <= LAUNCH_CANCEL_RADIUS and bool(_interact_held.get(d.actor_id, false)):
+			cancelling = true
+			break
+	if cancelling:
+		cancel_progress = minf(1.0, cancel_progress + delta / LAUNCH_CANCEL_SECONDS)
+	elif cancel_progress != 0.0:
+		cancel_progress = 0.0
+	if cancel_progress >= 1.0:
+		objective_event.emit("launch_cancelled", objective_state())
+		_begin_respawning()
+		return true
+	launch_remaining = maxf(0.0, launch_remaining - delta)
+	if launch_remaining <= 0.0:
+		var winner := installed_team
+		scores[winner] += 1
+		score_changed.emit(scores[Duelist.Team.RED], scores[Duelist.Team.BLUE])
+		objective_event.emit("launch_complete", objective_state())
+		if scores[winner] >= POINTS_TO_WIN:
+			_finish_match(winner)
+			return true
+		if sudden_death:
+			_finish_match(winner)
+			return true
+		_begin_respawning()
+		return true
+	return true
+
+func _begin_respawning() -> void:
+	core_state = CoreState.RESPAWNING
+	core_respawn_remaining = CORE_RESPAWN_DELAY_SECONDS
+	install_progress = 0.0
+	cancel_progress = 0.0
+	launch_remaining = 0.0
+
+func _tick_respawning(delta: float) -> bool:
+	core_respawn_remaining = maxf(0.0, core_respawn_remaining - delta)
+	if core_respawn_remaining <= 0.0:
+		core_state = CoreState.AT_CENTER
+		core_position = core_spawn
+		objective_event.emit("core_returned", objective_state())
+		return true
+	return false
+
+func _on_clock_expired() -> void:
+	var red: int = scores[Duelist.Team.RED]
+	var blue: int = scores[Duelist.Team.BLUE]
+	if red != blue:
+		_finish_match(Duelist.Team.RED if red > blue else Duelist.Team.BLUE)
 	else:
-		_intermission_remaining = INTERMISSION_SECONDS
-		_set_phase(Phase.INTERMISSION)
+		sudden_death = true
+		_set_phase(Phase.SUDDEN_DEATH)
 
 func _finish_match(winner: Duelist.Team) -> void:
 	_winner = winner
@@ -330,11 +396,10 @@ func _schedule_respawn(victim: Duelist) -> void:
 	var actor_id := victim.actor_id
 	var generation := int(_respawn_generation.get(actor_id, 0)) + 1
 	_respawn_generation[actor_id] = generation
-	var round_generation := _round_generation
 	await get_tree().create_timer(RESPAWN_DELAY_SECONDS).timeout
-	if round_generation != _round_generation or generation != int(_respawn_generation.get(actor_id, -1)):
+	if generation != int(_respawn_generation.get(actor_id, -1)):
 		return
-	if phase != Phase.LIVE or not is_instance_valid(victim) or not victim.eliminated:
+	if not is_live() or not is_instance_valid(victim) or not victim.eliminated:
 		return
 	_respawn_duelist(victim)
 
@@ -343,6 +408,8 @@ func _respawn_duelist(victim: Duelist) -> void:
 	if point == Vector3.INF:
 		return
 	victim.respawn_at(point)
+	# The LAN host turns this into a `spawn` event for remote clients. Without it
+	# a respawn is invisible to every other device in the match.
 	respawn_started.emit(victim)
 
 # Enemy-aware dynamic spawn: prefer the own-team point with the fewest live
@@ -362,7 +429,7 @@ func _pick_safe_spawn(victim: Duelist) -> Vector3:
 		var nearest: float = 1e9
 		for enemy in enemies:
 			var d: float = ((enemy as Duelist).global_position - p).length()
-			if d <= DM_SAFE_SPAWN_RADIUS:
+			if d <= SAFE_SPAWN_RADIUS:
 				nearby += 1
 			nearest = minf(nearest, d)
 		if nearby < best_count or (nearby == best_count and nearest > best_distance):
@@ -378,9 +445,6 @@ func _living_duelists(team: Duelist.Team) -> Array:
 			result.append(duelist)
 	return result
 
-func _living_count(team: Duelist.Team) -> int:
-	return _living_duelists(team).size()
-
 func _other(team: Duelist.Team) -> Duelist.Team:
 	return Duelist.Team.BLUE if team == Duelist.Team.RED else Duelist.Team.RED
 
@@ -395,7 +459,7 @@ func _set_phase(next_phase: Phase) -> void:
 	if phase == next_phase:
 		return
 	phase = next_phase
-	_set_duelists_active(phase == Phase.LIVE)
+	_set_duelists_active(is_live())
 	phase_changed.emit(phase)
 
 func _set_duelists_active(active: bool) -> void:
@@ -406,10 +470,13 @@ func _set_duelists_active(active: bool) -> void:
 func _apply_objective_presentation(objective: Dictionary) -> void:
 	if objective.is_empty():
 		return
-	bomb_state = clampi(int(objective.get("bomb_state", int(bomb_state))), int(BombState.ARMING), int(BombState.DEFUSED)) as BombState
-	bomb_team = int(objective.get("bomb_team", int(bomb_team))) as Duelist.Team
-	bomb_carrier_id = str(objective.get("bomb_carrier_id", bomb_carrier_id))
-	bomb_position = objective.get("bomb_position", bomb_position) as Vector3
-	bomb_plant_progress = float(objective.get("plant_progress", bomb_plant_progress))
-	bomb_defuse_progress = float(objective.get("defuse_progress", bomb_defuse_progress))
-	bomb_fuse_remaining = float(objective.get("fuse_remaining", bomb_fuse_remaining))
+	core_state = clampi(int(objective.get("core_state", int(core_state))), int(CoreState.AT_CENTER), int(CoreState.RESPAWNING)) as CoreState
+	core_position = objective.get("core_position", core_position) as Vector3
+	core_carrier_id = str(objective.get("core_carrier_id", core_carrier_id))
+	core_carrier_team = int(objective.get("core_carrier_team", int(core_carrier_team))) as Duelist.Team
+	installed_team = int(objective.get("installed_team", int(installed_team))) as Duelist.Team
+	install_progress = float(objective.get("install_progress", install_progress))
+	cancel_progress = float(objective.get("cancel_progress", cancel_progress))
+	launch_remaining = float(objective.get("launch_remaining", launch_remaining))
+	match_remaining = float(objective.get("match_remaining", match_remaining))
+	sudden_death = bool(objective.get("sudden_death", sudden_death))

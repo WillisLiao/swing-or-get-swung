@@ -122,6 +122,13 @@ func reload_completed(local: bool) -> void:
 		return
 	_play_local("reload_complete")
 
+## The six objective events RiftlineMatch emits. Kept as one list so the audio
+## bank and the dispatch check cannot drift apart.
+const NUCLEAR_RUSH_EVENTS := [
+	"core_picked_up", "core_dropped", "core_returned",
+	"core_installed", "launch_cancelled", "launch_complete",
+]
+
 func objective_event(event_type: String, state: Dictionary, local: bool) -> void:
 	if not _presentation_enabled:
 		return
@@ -130,23 +137,19 @@ func objective_event(event_type: String, state: Dictionary, local: bool) -> void
 	if _seen_events.has(event_key):
 		return
 	_remember_event(event_key)
-	var sound_name: String = str({
-		"objective_claimed": "seed_claimed",
-		"objective_dropped": "seed_dropped",
-		"objective_returned": "seed_returned",
-		"objective_delivered": "seed_delivered",
-		"objective_relay_launched": "seed_relay_launched",
-		"objective_relay_caught": "seed_relay_caught",
-		"objective_relay_disrupted": "seed_relay_disrupted",
-	}.get(event_type, ""))
-	if sound_name.is_empty():
+	# The event strings are RiftlineMatch's objective_event vocabulary. Anything
+	# outside it is ignored rather than played, so a new rule event stays silent
+	# until a clip is deliberately added for it.
+	if not event_type in NUCLEAR_RUSH_EVENTS:
 		return
-	var position: Vector3 = state.get("position", state.get("gate_position", Vector3.ZERO))
+	var position: Vector3 = state.get("core_position", Vector3.ZERO)
 	if local:
-		_play_local(sound_name)
+		_play_local(event_type)
 	else:
-		_play_world(sound_name, position, 4 if event_type == "objective_delivered" else 3)
-	objective_feedback.emit(event_type, int(state.get("scoring_team", -1)))
+		# A completed launch is the loudest fact in the match and must not be
+		# dropped when the world voice pool is contended.
+		_play_world(event_type, position, 4 if event_type == "launch_complete" else 3)
+	objective_feedback.emit(event_type, int(state.get("installed_team", state.get("core_carrier_team", -1))))
 
 func set_local_health(value: float) -> void:
 	# Health itself remains a HUD concern.  Keeping the last accepted local value
@@ -181,13 +184,15 @@ func _build_audio_bank() -> void:
 		"carbine_fire": _make_clip(0.105, 190.0, 900.0, 0.85, 17),
 		"knife_fire": _make_clip(0.11, 190.0, 520.0, 0.58, 29),
 		"carbine_impact": _make_clip(0.055, 1250.0, 720.0, 0.44, 41),
-		"seed_claimed": _make_clip(0.18, 360.0, 860.0, 0.48, 53),
-		"seed_dropped": _make_clip(0.13, 620.0, 250.0, 0.52, 67),
-		"seed_returned": _make_clip(0.22, 280.0, 780.0, 0.5, 79),
-		"seed_delivered": _make_clip(0.34, 310.0, 1180.0, 0.62, 97),
-		"seed_relay_launched": _make_clip(0.12, 760.0, 430.0, 0.36, 109),
-		"seed_relay_caught": _make_clip(0.16, 430.0, 980.0, 0.4, 127),
-		"seed_relay_disrupted": _make_clip(0.14, 150.0, 70.0, 0.42, 137),
+		# Nuclear Rush core events. Rising sweeps read as gaining the objective,
+		# falling ones as losing it; the launch is the longest and lowest clip so
+		# it carries across the arena.
+		"core_picked_up": _make_clip(0.18, 360.0, 860.0, 0.48, 53),
+		"core_dropped": _make_clip(0.13, 620.0, 250.0, 0.52, 67),
+		"core_returned": _make_clip(0.22, 280.0, 780.0, 0.5, 79),
+		"core_installed": _make_clip(0.26, 300.0, 1020.0, 0.58, 97),
+		"launch_cancelled": _make_clip(0.2, 520.0, 140.0, 0.56, 109),
+		"launch_complete": _make_clip(0.42, 240.0, 1240.0, 0.66, 127),
 	}
 	_local_streams = {
 		"carbine_fire": _make_clip(0.095, 230.0, 1050.0, 0.72, 101),
@@ -198,13 +203,12 @@ func _build_audio_bank() -> void:
 		"reload_start": _make_clip(0.08, 180.0, 360.0, 0.3, 163),
 		"reload_stage": _make_clip(0.075, 270.0, 190.0, 0.25, 169),
 		"reload_complete": _make_clip(0.105, 440.0, 760.0, 0.3, 179),
-		"seed_claimed": _make_clip(0.16, 410.0, 930.0, 0.38, 191),
-		"seed_dropped": _make_clip(0.12, 540.0, 220.0, 0.38, 211),
-		"seed_returned": _make_clip(0.19, 300.0, 820.0, 0.4, 227),
-		"seed_delivered": _make_clip(0.29, 330.0, 1340.0, 0.54, 239),
-		"seed_relay_launched": _make_clip(0.1, 880.0, 520.0, 0.3, 251),
-		"seed_relay_caught": _make_clip(0.14, 500.0, 1080.0, 0.34, 263),
-		"seed_relay_disrupted": _make_clip(0.12, 130.0, 58.0, 0.36, 277),
+		"core_picked_up": _make_clip(0.16, 410.0, 930.0, 0.38, 191),
+		"core_dropped": _make_clip(0.12, 540.0, 220.0, 0.38, 211),
+		"core_returned": _make_clip(0.19, 300.0, 820.0, 0.4, 227),
+		"core_installed": _make_clip(0.24, 320.0, 1120.0, 0.5, 239),
+		"launch_cancelled": _make_clip(0.18, 480.0, 120.0, 0.48, 251),
+		"launch_complete": _make_clip(0.36, 260.0, 1420.0, 0.6, 263),
 	}
 
 func _build_player_pools() -> void:

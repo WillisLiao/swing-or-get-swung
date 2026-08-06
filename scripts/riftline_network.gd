@@ -17,9 +17,10 @@ signal lobby_live_received(state: Dictionary)
 signal lobby_abandoned_received(state: Dictionary)
 
 const PROJECT_ID := "riftline-lan"
-const PROTOCOL_VERSION := 9
-const APP_HOST_DUEL_REMOTE_SLOTS := 1
-const APP_HOST_SQUAD_REMOTE_SLOTS := 9
+const PROTOCOL_VERSION := 10
+const MODE_LABEL := "nuclear-rush"
+const MAP_LABEL := "concourse"
+const APP_HOST_REMOTE_SLOTS := 7
 const DEDICATED_REMOTE_SLOTS := 10
 const ENET_PORT := 34711
 const DISCOVERY_PORT := 34712
@@ -45,10 +46,7 @@ var _last_input_view: Dictionary = {}
 var roster: RiftlineRoster
 var lobby: RiftlineLobby
 var lobby_state: Dictionary = {}
-var team_size := 1
-var game_mode: int = 0
-var arena_id: RiftlineMap.Id = RiftlineMap.Id.DUEL_YARD
-var arena_override_set := false
+var team_size := 4
 var discovered_session: Dictionary = {}
 var session_descriptor: Dictionary = {}
 var _configuration_valid := true
@@ -73,7 +71,7 @@ func _ready() -> void:
 	roster = RiftlineRoster.new()
 	roster.configure(team_size, session_role == SessionRole.DEDICATED_SERVER, false)
 	lobby = RiftlineLobby.new()
-	lobby.configure(team_size, arena_id, session_role == SessionRole.DEDICATED_SERVER)
+	lobby.configure(team_size, session_role == SessionRole.DEDICATED_SERVER)
 	roster = lobby.roster
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
@@ -100,9 +98,8 @@ func host_lan() -> Error:
 	session_role = SessionRole.APP_HOST
 	_configure_roster(false)
 	_configure_lobby(false)
-	var remote_slots := APP_HOST_SQUAD_REMOTE_SLOTS if team_size > 1 else APP_HOST_DUEL_REMOTE_SLOTS
 	_peer = ENetMultiplayerPeer.new()
-	var error := _peer.create_server(ENET_PORT, remote_slots)
+	var error := _peer.create_server(ENET_PORT, APP_HOST_REMOTE_SLOTS)
 	if error != OK:
 		_peer = null
 		session_status.emit("LINK ERROR")
@@ -250,13 +247,11 @@ func is_active() -> bool:
 
 func _join_address(address: String) -> Error:
 	var expected_descriptor := session_descriptor.duplicate(true)
-	var expected_arena := arena_id
 	var expected_team_size := team_size
 	stop()
 	session_role = SessionRole.JOINING_CLIENT
 	if not expected_descriptor.is_empty():
 		session_descriptor = expected_descriptor
-		arena_id = expected_arena
 		team_size = expected_team_size
 	_peer = ENetMultiplayerPeer.new()
 	var error := _peer.create_client(address, ENET_PORT)
@@ -296,10 +291,9 @@ func _advertise_session() -> void:
 		"version": PROTOCOL_VERSION,
 		"marker": _session_marker,
 		"kind": "dedicated" if session_role == SessionRole.DEDICATED_SERVER else "app_host",
-		"mode": "squad" if team_size > 1 else "duel",
+		"mode": MODE_LABEL,
 		"team_size": team_size,
-		"game_mode": game_mode,
-		"map_id": arena_name(arena_id),
+		"map_id": MAP_LABEL,
 		"issued": Time.get_ticks_msec(),
 	}
 	_discovery_socket.put_packet(JSON.stringify(packet).to_utf8_buffer())
@@ -327,10 +321,8 @@ func _poll_discovery() -> void:
 		_discovered_address = _discovery_socket.get_packet_ip()
 		discovered_session = packet.duplicate(true)
 		session_descriptor = _descriptor_from_packet(packet)
-		arena_id = int(session_descriptor.get("map_id", int(arena_id))) as RiftlineMap.Id
 		team_size = int(session_descriptor.get("team_size", team_size))
-		game_mode = clampi(int(session_descriptor.get("game_mode", game_mode)), 0, 1)
-		host_discovered.emit({"marker": marker, "address": _discovered_address, "mode": str(packet.get("mode", "duel")), "team_size": int(packet.get("team_size", 1)), "map_id": str(packet.get("map_id", "duel-yard")), "label": "RIFT FOUND"})
+		host_discovered.emit({"marker": marker, "address": _discovered_address, "mode": MODE_LABEL, "team_size": int(packet.get("team_size", team_size)), "map_id": MAP_LABEL, "label": "RIFT FOUND"})
 		session_status.emit("RIFT FOUND")
 
 func _on_peer_connected(peer_id: int) -> void:
@@ -428,9 +420,7 @@ func _rpc_event(event: Dictionary) -> void:
 			return
 		var descriptor := _descriptor_from_packet(event)
 		session_descriptor = descriptor
-		arena_id = int(descriptor.get("map_id", int(arena_id))) as RiftlineMap.Id
 		team_size = clampi(int(descriptor.get("team_size", team_size)), RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE)
-		game_mode = clampi(int(descriptor.get("game_mode", game_mode)), 0, 1)
 		session_descriptor_received.emit(descriptor)
 	elif event_type == "lobby_state":
 		lobby_state = _validated_lobby_state(event.get("state", {}))
@@ -473,38 +463,16 @@ func is_dedicated_server() -> bool:
 func configuration_valid() -> bool:
 	return _configuration_valid
 
-static func default_arena_for_team_size(requested_team_size: int) -> RiftlineMap.Id:
-	return RiftlineMap.Id.CONCOURSE if requested_team_size > 1 else RiftlineMap.Id.DUEL_YARD
-
-func arena_name(next_arena_id: RiftlineMap.Id) -> String:
-	return "concourse" if next_arena_id == RiftlineMap.Id.CONCOURSE else "duel-yard"
-
-static func arena_id_from_name(value: String) -> int:
-	if value == "duel-yard":
-		return RiftlineMap.Id.DUEL_YARD
-	if value == "concourse":
-		return RiftlineMap.Id.CONCOURSE
-	return -1
-
 func _session_event() -> Dictionary:
 	return {
 		"type": "session",
 		"team_size": team_size,
-		"game_mode": game_mode,
-		"map_id": int(arena_id),
-		"map_name": arena_name(arena_id),
 		"protocol": PROTOCOL_VERSION,
 	}
 
 func _descriptor_from_packet(packet: Dictionary) -> Dictionary:
-	var raw_map: Variant = packet.get("map_id", -1)
-	var map_value := int(raw_map) if raw_map is int else arena_id_from_name(str(raw_map))
-	if map_value < 0:
-		map_value = arena_id_from_name(str(packet.get("map_name", "")))
 	return {
 		"team_size": clampi(int(packet.get("team_size", team_size)), RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE),
-		"game_mode": clampi(int(packet.get("game_mode", game_mode)), 0, 1),
-		"map_id": map_value if map_value in [RiftlineMap.Id.DUEL_YARD, RiftlineMap.Id.CONCOURSE] else int(default_arena_for_team_size(int(packet.get("team_size", team_size)))),
 		"protocol": int(packet.get("protocol", packet.get("version", PROTOCOL_VERSION))),
 	}
 
@@ -570,8 +538,6 @@ func _is_finite_number(value: Variant) -> bool:
 	return (typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT) and is_finite(float(value))
 
 func _read_command_line_options() -> void:
-	var arena_override := -1
-	var arena_preview_requested := false
 	for argument in OS.get_cmdline_user_args():
 		if argument == "--dedicated-server":
 			session_role = SessionRole.DEDICATED_SERVER
@@ -589,23 +555,6 @@ func _read_command_line_options() -> void:
 				_configuration_valid = false
 				continue
 			team_size = requested_size
-		elif argument.begins_with("--mode="):
-			var mode_name := argument.trim_prefix("--mode=")
-			if mode_name == "bomb":
-				game_mode = 1
-			elif mode_name == "deathmatch":
-				game_mode = 0
-			else:
-				_configuration_valid = false
-		elif argument.begins_with("--arena="):
-			var requested_arena := arena_id_from_name(argument.trim_prefix("--arena="))
-			if requested_arena < 0:
-				_configuration_valid = false
-			else:
-				arena_override = requested_arena
-				arena_override_set = true
-		elif argument.begins_with("--arena-preview="):
-			arena_preview_requested = true
 		elif argument.begins_with("--net-sim-latency-ms="):
 			_sim_latency = maxf(0.0, argument.trim_prefix("--net-sim-latency-ms=").to_float() / 1000.0)
 		elif argument.begins_with("--net-sim-jitter-ms="):
@@ -616,7 +565,6 @@ func _read_command_line_options() -> void:
 			_sim_random.seed = int(argument.trim_prefix("--net-sim-seed="))
 		elif argument == "--lobby-auto-ready":
 			_lobby_auto_ready = true
-	arena_id = arena_override as RiftlineMap.Id if arena_override >= 0 else RiftlineMap.Id.CONCOURSE if arena_preview_requested else default_arena_for_team_size(team_size)
 	if _sim_latency > 0.0 or _sim_jitter > 0.0 or _sim_loss_percent > 0.0:
 		print("Riftline network test profile: latency=%dms jitter=%dms loss=%.1f%%" % [_sim_latency * 1000.0, _sim_jitter * 1000.0, _sim_loss_percent])
 
@@ -689,7 +637,7 @@ func _configure_roster(is_dedicated: bool) -> void:
 
 func _configure_lobby(is_dedicated: bool) -> void:
 	lobby = RiftlineLobby.new()
-	lobby.configure(team_size, arena_id, is_dedicated)
+	lobby.configure(team_size, is_dedicated)
 	roster = lobby.roster
 	lobby_state = lobby.public_state()
 
@@ -758,10 +706,7 @@ func _validated_lobby_state(value: Variant) -> Dictionary:
 	var state: Dictionary = value
 	var result := {
 		"phase": clampi(int(state.get("phase", RiftlineLobby.Phase.STAGING)), RiftlineLobby.Phase.STAGING, RiftlineLobby.Phase.ABANDONED),
-		"arena_id": int(state.get("arena_id", int(arena_id))),
-		"arena_name": str(state.get("arena_name", arena_name(arena_id))),
 		"team_size": clampi(int(state.get("team_size", team_size)), RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE),
-		"game_mode": clampi(int(state.get("game_mode", game_mode)), 0, 1),
 		"revision": maxi(0, int(state.get("revision", 0))),
 		"records": _validated_public_records(state.get("records", [])),
 		"complete": bool(state.get("complete", false)),

@@ -358,7 +358,7 @@ func _preview_state(name: String) -> Dictionary:
 			phase = RiftlineLobby.Phase.ABANDONED
 			_local_actor_id = "host"
 		"squad-crew":
-			team_size = 3
+			team_size = 4
 			complete = true
 			_local_actor_id = "peer_1"
 			for index in team_size:
@@ -366,7 +366,9 @@ func _preview_state(name: String) -> Dictionary:
 				records.append({"actor_id": "peer_%d" % (index + team_size), "team": int(Duelist.Team.BLUE), "human": true, "ready": index == 2})
 		_:
 			return {}
-	return {"phase": phase, "arena_id": int(RiftlineMap.Id.CONCOURSE if team_size > 1 else RiftlineMap.Id.DUEL_YARD), "arena_name": "concourse" if team_size > 1 else "duel-yard", "team_size": team_size, "records": records, "revision": 4, "complete": complete, "launchable": false}
+	# No `arena_id`/`arena_name`: there is one map, so the lobby state no longer
+	# carries a map field and nothing downstream reads one.
+	return {"phase": phase, "team_size": team_size, "records": records, "revision": 4, "complete": complete, "launchable": false}
 
 func _host_rect() -> Rect2:
 	var panel := _panel_rect()
