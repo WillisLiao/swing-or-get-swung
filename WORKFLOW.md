@@ -1,17 +1,21 @@
 # Workflow - working on Riftline with two developers + AI assistants
 
-This repo (`WillisLiao/chatgtt`, private) is the standalone home for
+This repo (`WillisLiao/chatgtt`, public) is the standalone home for
 Riftline / WhoYouPeekin. It was split out of a larger personal monorepo
 on 2026-08-06 with fresh history (no old commits carried over).
 
 ## 1. Repo access
 
-- Repo is **private**. Both developers are collaborators with push access.
-- Default branch: `main`. Treat `main` as always-buildable/always-mergeable.
-- Recommended: turn on branch protection on `main` (Settings -> Branches):
-  require a pull request before merging, require at least 1 approval.
-  This matters more with two people than tooling - it stops a bad AI-written
-  change from landing straight on `main` unreviewed.
+- Repo is **public** (needed on a personal GitHub account to get free
+  branch protection - private-repo branch protection requires GitHub Pro).
+- Willis (`WillisLiao`) is the owner/admin. Robert (`robertwu072792`) is a
+  collaborator with **write** access - enough to push branches and open
+  PRs, not enough to merge past branch protection.
+- Default branch: `main`, and it is **protected**: merging requires at
+  least 1 approving review. Only Willis (repo admin) can approve/merge -
+  this is enforced by GitHub, not just convention.
+- Anyone pushing directly to `main` will be rejected by GitHub regardless
+  of write access - always work on a branch and open a PR.
 
 ## 2. Day-to-day git flow
 
