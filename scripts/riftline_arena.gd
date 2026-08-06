@@ -4,6 +4,7 @@ extends Node3D
 const PULP_LIT := preload("res://shaders/pulp_lit.gdshader")
 const SNAPSHOT_BUFFER := preload("res://scripts/riftline_snapshot_buffer.gd")
 const PRACTICE_PANEL := preload("res://scripts/riftline_practice_panel.gd")
+const NUKE_RUSH_ARENA_SCENE := preload("res://nuke_rush_arena.tscn")
 const OPENING_HOLD_SECONDS := 2.5
 
 var ballistics: RiftBallistics
@@ -12,6 +13,7 @@ var coach: RiftlineFirstMatchCoach
 var director: RiftlineMatch
 var network: RiftlineNetwork
 var arena_map: RiftlineMap
+var _arena_scene_root: Node3D
 var rift_link: RiftLinkPanel
 var practice_panel: Control
 var _game_mode: RiftlineMatch.GameMode = RiftlineMatch.GameMode.DEATHMATCH
@@ -275,13 +277,10 @@ func _build_environment() -> void:
 	add_child(fill)
 
 func _build_arena() -> void:
-	arena_map = RiftlineMap.new()
-	arena_map.name = "RiftlineMap"
-	add_child(arena_map)
 	var selected_map := RiftlineMap.Id.CONCOURSE if _offline_squad_size > 1 else RiftlineMap.Id.DUEL_YARD
 	if network != null and (_offline_squad_size <= 1 or network.arena_override_set):
 		selected_map = network.arena_id as RiftlineMap.Id
-	arena_map.configure(selected_map, _presentation_enabled)
+	_install_arena_map(selected_map)
 	if _presentation_enabled:
 		_presentation_effects = Node3D.new()
 		_presentation_effects.name = "PresentationEffects"
@@ -626,7 +625,7 @@ func _start_practice_drill(drill: String) -> void:
 	if drill not in ["solo", "wing", "full"]:
 		drill = "solo"
 	_practice_drill = drill
-	_offline_squad_size = {"solo": 1, "wing": 3, "full": 5}.get(drill, 1)
+	_offline_squad_size = {"solo": 1, "wing": 3, "full": 4}.get(drill, 1)
 	_save_practice_drill(drill)
 	_practice_panel_active = false
 	if practice_panel != null:
@@ -1514,12 +1513,23 @@ func _restore_offline_training(message: String) -> void:
 	hud.show_connection_message(message)
 
 func _rebuild_map(next_map_id: RiftlineMap.Id) -> void:
-	if arena_map != null:
-		arena_map.queue_free()
-		arena_map = null
-	arena_map = RiftlineMap.new()
-	arena_map.name = "RiftlineMap"
-	add_child(arena_map)
+	_install_arena_map(next_map_id)
+
+func _install_arena_map(next_map_id: RiftlineMap.Id) -> void:
+	if _arena_scene_root != null and is_instance_valid(_arena_scene_root):
+		_arena_scene_root.queue_free()
+	_arena_scene_root = null
+	arena_map = null
+	if next_map_id == RiftlineMap.Id.CONCOURSE:
+		var scene_instance := NUKE_RUSH_ARENA_SCENE.instantiate() as Node3D
+		_arena_scene_root = scene_instance
+		add_child(scene_instance)
+		arena_map = scene_instance.get_node("RiftlineMap") as RiftlineMap
+	else:
+		arena_map = RiftlineMap.new()
+		arena_map.name = "RiftlineMap"
+		_arena_scene_root = arena_map
+		add_child(arena_map)
 	arena_map.configure(next_map_id, _presentation_enabled)
 
 func _sync_objective_presentation() -> void:
@@ -2087,7 +2097,7 @@ func _read_capture_arguments() -> void:
 			_capture_rift_link = true
 		elif argument.begins_with("--offline-squad="):
 			var requested_size := argument.trim_prefix("--offline-squad=")
-			if requested_size.is_valid_int() and requested_size.to_int() in [3, 5]:
+			if requested_size.is_valid_int() and requested_size.to_int() in [3, 4, 5]:
 				_offline_squad_size = requested_size.to_int()
 		elif argument.begins_with("--mode="):
 			var requested_mode := argument.trim_prefix("--mode=").to_lower()
@@ -2095,7 +2105,7 @@ func _read_capture_arguments() -> void:
 				_game_mode = RiftlineMatch.GameMode.BOMB
 			elif requested_mode in ["nuke", "nuke-rush"]:
 				_game_mode = RiftlineMatch.GameMode.NUKE_RUSH
-				_offline_squad_size = maxi(_offline_squad_size, 5)
+				_offline_squad_size = 4
 			elif requested_mode == "deathmatch":
 				_game_mode = RiftlineMatch.GameMode.DEATHMATCH
 		elif argument.begins_with("--squad-preview="):
@@ -2148,6 +2158,8 @@ func _read_capture_arguments() -> void:
 		elif argument.begins_with("--relay-preview="):
 			_relay_preview = argument.trim_prefix("--relay-preview=")
 			_offline_squad_size = 5 if _relay_preview in ["bot-relay", "full-crew"] else 3
+	if _game_mode == RiftlineMatch.GameMode.NUKE_RUSH:
+		_offline_squad_size = 4
 	if _capture_settings and hud != null:
 		hud.open_settings()
 	if _capture_hud_layout and hud != null:

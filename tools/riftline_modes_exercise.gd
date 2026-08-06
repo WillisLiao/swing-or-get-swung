@@ -149,3 +149,6 @@ func _test_nuke_rush(root: Node3D) -> void:
 	var network := RiftlineNetwork.new()
 	var descriptor := network._descriptor_from_packet({"team_size": 5, "game_mode": 2, "map_id": int(RiftlineMap.Id.CONCOURSE)})
 	assert(int(descriptor.game_mode) == int(RiftlineMatch.GameMode.NUKE_RUSH))
+	assert(int(descriptor.team_size) == 4)
+	var deathmatch_descriptor := network._descriptor_from_packet({"team_size": 5, "game_mode": 0, "map_id": int(RiftlineMap.Id.CONCOURSE)})
+	assert(int(deathmatch_descriptor.team_size) == 5)

@@ -501,10 +501,14 @@ func _descriptor_from_packet(packet: Dictionary) -> Dictionary:
 	var map_value := int(raw_map) if raw_map is int else arena_id_from_name(str(raw_map))
 	if map_value < 0:
 		map_value = arena_id_from_name(str(packet.get("map_name", "")))
+	var descriptor_mode := clampi(int(packet.get("game_mode", game_mode)), 0, 2)
+	var descriptor_team_size := clampi(int(packet.get("team_size", team_size)), RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE)
+	if descriptor_mode == 2:
+		descriptor_team_size = 4
 	return {
-		"team_size": clampi(int(packet.get("team_size", team_size)), RiftlineRoster.MIN_TEAM_SIZE, RiftlineRoster.MAX_TEAM_SIZE),
-		"game_mode": clampi(int(packet.get("game_mode", game_mode)), 0, 2),
-		"map_id": map_value if map_value in [RiftlineMap.Id.DUEL_YARD, RiftlineMap.Id.CONCOURSE] else int(default_arena_for_team_size(int(packet.get("team_size", team_size)))),
+		"team_size": descriptor_team_size,
+		"game_mode": descriptor_mode,
+		"map_id": map_value if map_value in [RiftlineMap.Id.DUEL_YARD, RiftlineMap.Id.CONCOURSE] else int(default_arena_for_team_size(descriptor_team_size)),
 		"protocol": int(packet.get("protocol", packet.get("version", PROTOCOL_VERSION))),
 	}
 
@@ -598,7 +602,6 @@ func _read_command_line_options() -> void:
 				game_mode = 1
 			elif mode_name in ["nuke", "nuke-rush"]:
 				game_mode = 2
-				team_size = maxi(team_size, 5)
 			elif mode_name == "deathmatch":
 				game_mode = 0
 			else:
@@ -622,8 +625,8 @@ func _read_command_line_options() -> void:
 			_sim_random.seed = int(argument.trim_prefix("--net-sim-seed="))
 		elif argument == "--lobby-auto-ready":
 			_lobby_auto_ready = true
-	if game_mode == 2 and team_size < 4:
-		team_size = 5
+	if game_mode == 2:
+		team_size = 4
 	arena_id = arena_override as RiftlineMap.Id if arena_override >= 0 else RiftlineMap.Id.CONCOURSE if arena_preview_requested else default_arena_for_team_size(team_size)
 	if _sim_latency > 0.0 or _sim_jitter > 0.0 or _sim_loss_percent > 0.0:
 		print("Riftline network test profile: latency=%dms jitter=%dms loss=%.1f%%" % [_sim_latency * 1000.0, _sim_jitter * 1000.0, _sim_loss_percent])

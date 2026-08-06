@@ -10,7 +10,7 @@ Keep that convention.
 ## Current state
 The circular Nuke Rush arena is implemented on branch
 `circular-nuke-arena` and is ready for review through the contributor-fork
-pull-request workflow. Concourse is now a symmetric circular 5v5 arena with
+pull-request workflow. Concourse is now a symmetric circular 4v4 arena with
 SUN and VOID bases on opposite sides and a central nuke pickup room. Nuke Rush
 runs for three minutes: either team can take, drop, or steal the nuke; delivery
 to the opposing base wins immediately; otherwise the furthest recorded push
@@ -18,9 +18,11 @@ toward the enemy base wins, with a 30-second overtime for an exact tie.
 
 The mode is integrated with the HUD, practice-mode picker, LAN descriptors,
 replicated match state, and procedural `pulp_lit` visuals. Protocol version is
-10. Headless import and every `tools/*_exercise.gd` test pass. A concurrent
-5v5 LAN host/join smoke test also passed; the existing documented ENet MTU
-warning can still appear. Desktop overview, center-room, and live 5v5 captures
+10. `nuke_rush_arena.tscn` is the canonical Concourse scene used at runtime
+and builds the procedural map directly in the Godot editor viewport. Headless
+import and every `tools/*_exercise.gd` test pass. A concurrent
+4v4 LAN host/join smoke test also passed; the existing documented ENet MTU
+warning can still appear. Desktop overview, center-room, and live 4v4 captures
 were visually checked. Device deployment and touch playtesting remain for a
 future session.
 

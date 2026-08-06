@@ -24,7 +24,7 @@ func _initialize() -> void:
 	assert((concourse.gate_positions()[Duelist.Team.VOID] as Vector3).z < 0.0)
 	for team in [Duelist.Team.SUN, Duelist.Team.VOID]:
 		var spawns := concourse.spawn_points(team)
-		assert(spawns.size() == 5)
+		assert(spawns.size() == 4)
 		for index in spawns.size():
 			assert(concourse.is_spawn_clear(spawns[index]))
 			for other_index in range(index + 1, spawns.size()):
@@ -65,6 +65,16 @@ func _initialize() -> void:
 	assert(RiftlineNetwork.arena_id_from_name("duel-yard") == RiftlineMap.Id.DUEL_YARD)
 	assert(RiftlineNetwork.arena_id_from_name("concourse") == RiftlineMap.Id.CONCOURSE)
 	assert(RiftlineNetwork.arena_id_from_name("not-a-map") == -1)
+
+	var nuke_scene_resource := load("res://nuke_rush_arena.tscn") as PackedScene
+	assert(nuke_scene_resource != null)
+	var nuke_scene := nuke_scene_resource.instantiate() as Node3D
+	root.add_child(nuke_scene)
+	var scene_map := nuke_scene.get_node("RiftlineMap") as RiftlineMap
+	assert(scene_map != null)
+	scene_map.configure(RiftlineMap.Id.CONCOURSE, false)
+	assert(scene_map.spawn_points(Duelist.Team.SUN).size() == 4)
+	assert(scene_map.spawn_points(Duelist.Team.VOID).size() == 4)
 
 	print("Riftline map exercise: PASS")
 	quit()

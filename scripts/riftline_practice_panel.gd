@@ -122,7 +122,7 @@ func _draw_entry() -> void:
 	var left := safe.position.x + 22.0
 	var top := maxf(safe.position.y + 74.0, safe.size.y * 0.18)
 	draw_string(_font, Vector2(left, top), "STEP INTO THE STORM", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 34, PAPER)
-	draw_string(_font, Vector2(left, top + 34.0), "Pick a mode. Nuke Rush is a 5v5 race from the center pickup to the enemy base.", HORIZONTAL_ALIGNMENT_LEFT, minf(safe.size.x - 44.0, 820.0), 15, MUTED)
+	draw_string(_font, Vector2(left, top + 34.0), "Pick a mode. Nuke Rush is a 4v4 race from the center pickup to the enemy base.", HORIZONTAL_ALIGNMENT_LEFT, minf(safe.size.x - 44.0, 820.0), 15, MUTED)
 	var mode_y := top + 78.0
 	_register_button("mode_deathmatch", Rect2(left, mode_y, 190.0, 46.0))
 	draw_rect(_button_rects["mode_deathmatch"], SUN if _mode == "deathmatch" else PANEL, true)
@@ -188,8 +188,8 @@ func _draw_formation(center: Vector2, drill: String, scale: float) -> void:
 			sun_points = [center + Vector2(-74.0, -24.0), center + Vector2(-74.0, 24.0)]
 			void_points = [center + Vector2(74.0, -24.0), center + Vector2(74.0, 24.0)]
 		_:
-			sun_points = [center + Vector2(-82.0, -32.0), center + Vector2(-90.0, 0), center + Vector2(-82.0, 32.0)]
-			void_points = [center + Vector2(82.0, -32.0), center + Vector2(90.0, 0), center + Vector2(82.0, 32.0)]
+			sun_points = [center + Vector2(-82.0, -36.0), center + Vector2(-90.0, -12.0), center + Vector2(-90.0, 12.0), center + Vector2(-82.0, 36.0)]
+			void_points = [center + Vector2(82.0, -36.0), center + Vector2(90.0, -12.0), center + Vector2(90.0, 12.0), center + Vector2(82.0, 36.0)]
 	for point in sun_points:
 		draw_circle(point, 8.0 * scale, SUN)
 		draw_line(point, center, Color(SUN, 0.28), 1.0)
@@ -207,5 +207,5 @@ func _drill_description(key: String) -> String:
 	return {
 		"solo": "Read one rival and learn the Seed line.",
 		"wing": "Move with a small wing through the Concourse.",
-		"full": "Join a full crew across three authored lanes.",
+		"full": "Join a four-player crew across three authored lanes.",
 	}.get(key, "Read one rival and learn the Seed line.")

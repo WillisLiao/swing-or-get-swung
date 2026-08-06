@@ -1,3 +1,4 @@
+@tool
 class_name RiftlineMap
 extends Node3D
 
@@ -11,6 +12,9 @@ const SEED_LIGHT := Color("fff0b0")
 
 enum Id { DUEL_YARD, CONCOURSE }
 
+@export var editor_preview_enabled := false
+@export var editor_preview_map: Id = Id.CONCOURSE
+
 const DUEL_SUN_SPAWN := Vector3(-15.0, 0.1, 6.0)
 const DUEL_VOID_SPAWN := Vector3(16.0, 0.1, -6.0)
 const DUEL_SUN_GATE := Vector3(-18.5, 0.05, 6.0)
@@ -21,18 +25,16 @@ const CONCOURSE_SEED := Vector3(0.0, 0.72, 0.0)
 const CONCOURSE_SUN_GATE := Vector3(0.0, 0.05, 52.0)
 const CONCOURSE_VOID_GATE := Vector3(0.0, 0.05, -52.0)
 const CONCOURSE_SUN_SPAWNS := [
-	Vector3(-10.0, 0.1, 48.0),
-	Vector3(-5.0, 0.1, 48.0),
-	Vector3(0.0, 0.1, 48.0),
-	Vector3(5.0, 0.1, 48.0),
-	Vector3(10.0, 0.1, 48.0),
+	Vector3(-7.5, 0.1, 48.0),
+	Vector3(-2.5, 0.1, 48.0),
+	Vector3(2.5, 0.1, 48.0),
+	Vector3(7.5, 0.1, 48.0),
 ]
 const CONCOURSE_VOID_SPAWNS := [
-	Vector3(10.0, 0.1, -48.0),
-	Vector3(5.0, 0.1, -48.0),
-	Vector3(0.0, 0.1, -48.0),
-	Vector3(-5.0, 0.1, -48.0),
-	Vector3(-10.0, 0.1, -48.0),
+	Vector3(7.5, 0.1, -48.0),
+	Vector3(2.5, 0.1, -48.0),
+	Vector3(-2.5, 0.1, -48.0),
+	Vector3(-7.5, 0.1, -48.0),
 ]
 
 var _map_id: Id = Id.DUEL_YARD
@@ -48,6 +50,10 @@ var _ambient_motion: Array[Dictionary] = []
 var _ambient_time := 0.0
 var _objective_pulse_remaining := 0.0
 var _objective_pulse_root: Node3D
+
+func _ready() -> void:
+	if Engine.is_editor_hint() and editor_preview_enabled:
+		call_deferred("configure", editor_preview_map, true)
 
 func _process(delta: float) -> void:
 	if not _presentation_enabled:
@@ -219,7 +225,7 @@ func _configure_concourse() -> void:
 		var wall_position := Vector3(cos(angle) * (CONCOURSE_RADIUS + 0.5), 2.75, sin(angle) * (CONCOURSE_RADIUS + 0.5))
 		_add_solid(wall_position, Vector3(wall_length, 5.5, 1.2), STORMGLASS_DEEP, 0.0, false, PI * 0.5 - angle)
 
-	# Opposing bases sit inside the north/south rim with five clear spawn slots.
+	# Opposing bases sit inside the north/south rim with four clear spawn slots.
 	_add_route_solid(Vector3(0.0, 1.45, 55.0), Vector3(25.0, 2.9, 1.4), OXIDIZED_COPPER)
 	_add_route_solid(Vector3(-13.0, 1.2, 50.0), Vector3(1.4, 2.4, 10.0), COPPER_LIGHT)
 	_add_route_solid(Vector3(13.0, 1.2, 50.0), Vector3(1.4, 2.4, 10.0), COPPER_LIGHT)
@@ -341,12 +347,12 @@ func _build_duel_landmarks() -> void:
 	_add_emissive_rail(Vector3(15, 0.06, 0), Vector3(0.08, 0.08, 20), Color("f4a55e"))
 
 func _build_concourse_landmarks() -> void:
-	# Base silhouettes mirror the hand sketch: blue north, orange south, five slots each.
+	# Base silhouettes mirror the hand sketch: blue north, orange south, four slots each.
 	var sun_base := _landmark_root("SunBase")
 	sun_base.position = CONCOURSE_SUN_GATE
 	_register_ambient_motion(sun_base, 0.004, 0.31, 0.0, 2)
 	_add_landmark_part(sun_base, _box_mesh(Vector3(24.0, 0.22, 0.22)), Vector3(0.0, 4.4, 2.8), COPPER_LIGHT, Vector3.ZERO, 0.8)
-	for x_offset in [-10.0, -5.0, 0.0, 5.0, 10.0]:
+	for x_offset in [-7.5, -2.5, 2.5, 7.5]:
 		_add_landmark_part(sun_base, _box_mesh(Vector3(1.5, 0.08, 2.4)), Vector3(x_offset, 0.06, -4.0), Color("ff9b4a"), Vector3.ZERO, 1.2)
 	_add_landmark_part(sun_base, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(-12.0, 3.2, 2.8), CHALK_CERAMIC)
 	_add_landmark_part(sun_base, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(12.0, 3.2, 2.8), CHALK_CERAMIC)
@@ -355,7 +361,7 @@ func _build_concourse_landmarks() -> void:
 	void_base.position = CONCOURSE_VOID_GATE
 	_register_ambient_motion(void_base, 0.004, 0.37, 0.8, 2)
 	_add_landmark_part(void_base, _box_mesh(Vector3(24.0, 0.22, 0.22)), Vector3(0.0, 4.4, -2.8), Color("75dbff"), Vector3.ZERO, 0.8)
-	for x_offset in [-10.0, -5.0, 0.0, 5.0, 10.0]:
+	for x_offset in [-7.5, -2.5, 2.5, 7.5]:
 		_add_landmark_part(void_base, _box_mesh(Vector3(1.5, 0.08, 2.4)), Vector3(x_offset, 0.06, 4.0), Color("75dbff"), Vector3.ZERO, 1.2)
 	_add_landmark_part(void_base, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(-12.0, 3.2, -2.8), CHALK_CERAMIC)
 	_add_landmark_part(void_base, _box_mesh(Vector3(0.22, 7.0, 0.22)), Vector3(12.0, 3.2, -2.8), CHALK_CERAMIC)

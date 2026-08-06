@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/riftline_map.gd" id="1_map"]
+
+[node name="NukeRushArena" type="Node3D"]
+
+[node name="RiftlineMap" type="Node3D" parent="."]
+script = ExtResource("1_map")
+editor_preview_enabled = true
+editor_preview_map = 1
