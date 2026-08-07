@@ -39,6 +39,45 @@ const FIRST_PERSON_HIP_ANCHOR := Vector3(0.33, -0.20, -0.95)
 # drive the root are not fighting it. It resolves to zero at full ADS, which is
 # what keeps the optic exactly on the camera's aim ray.
 const FIRST_PERSON_HIP_RIG_ROTATION := Vector3(-0.030, 0.075, 0.055)
+# Recoil used to be rotation-only (`_weapon_root.rotation.x/y`), which reads as
+# the camera nodding rather than the weapon itself kicking. This is the linear
+# throw added on top of that rotation, carried by `_weapon_rig.position` -
+# which nothing else ever writes to - so it is a pure decay with no other
+# consumer to fight, exactly like the existing rotation.x recoil term below.
+const RECOIL_POSITION_UP := 0.048
+const RECOIL_POSITION_BACK := 0.190
+# Shield class only. Reference (Siege-style shield operator) shows the aimed
+# revolver in a completely ordinary, centered sight picture - the "gun above
+# the shield" read comes from the shield dropping out of the way underneath
+# it, not from the gun being pushed out to one side. So this is simply the
+# PISTOL row's own anchor: `ads_anchor.y + optic_tip_local.y * SCALE == 0` is
+# what puts a sight on the aim ray, and the revolver's notch sights are built
+# on the same `optic_tip_local` the Sidearm 9 uses. Keeping the value here
+# rather than falling through to the generic branch leaves the shield class a
+# single obvious place to retune its framing.
+const SHIELD_ADS_WEAPON_ANCHOR := Vector3(0.0, -0.06460, -0.62)
+# The shield's default carry: a tall plate held out in front, slightly to the
+# left and turned just enough to show its face rather than its edge, with the
+# vision port near the middle of the view. This is also the forced pose during
+# a reload.
+const SHIELD_VERTICAL_POSITION := Vector3(-0.22, -0.28, -0.66)
+const SHIELD_VERTICAL_ROTATION := Vector3(0.05, 0.62, -0.09)
+# ADS pose. The plate does not spin in the picture plane - it *pitches*, the
+# way a visor or a car hood tips open: the carrier twists the wrist forward,
+# the top edge falls away from him, and the wall of steel becomes a low
+# horizontal parapet lying along the bottom of the screen that he shoots over.
+# So the ADS transform is a rotation about the camera's own right axis,
+# pre-multiplied onto the vertical basis so the parapet stays level on screen
+# regardless of the yaw already baked into the carry pose, plus a drop in
+# position to park it at the bottom edge of the frame. Lerping the raw Euler
+# triple doesn't compose correctly once X/Y are already non-zero, which is why
+# this isn't a second Vector3.
+const SHIELD_HORIZONTAL_POSITION := Vector3(0.01, -0.225, -0.66)
+const SHIELD_ADS_PITCH_ANGLE := -PI * 0.5
+# Weapon-root pose while a Shield-class reload plays: tucked in close and low
+# so it sits visually behind/below the vertical shield plate rather than out
+# at the usual hip or ADS anchor.
+const SHIELD_RELOAD_WEAPON_POSITION := Vector3(-0.02, -0.34, -0.30)
 # The view model lives alone on render layer 2, so it can carry its own key and
 # fill lights without touching a single watt of the arena's lighting. Without
 # them the weapon is lit only by a world-space sun and goes to pure black
@@ -67,6 +106,37 @@ const CLASS_LOADOUTS := {
 	PlayerClass.SNIPER: {"slot_count": 2, "primary_choices": [Weapon.SNIPER], "vest": false, "shield": false},
 	PlayerClass.RUNNER: {"slot_count": 1, "primary_choices": [Weapon.PISTOL], "vest": true, "shield": false},
 	PlayerClass.SHIELD: {"slot_count": 1, "primary_choices": [Weapon.PISTOL], "vest": false, "shield": true},
+}
+
+## Grip and support-hand poses in `_weapon_rig` space, tuned per weapon
+## silhouette against the existing part positions in each `_build_*_model()`
+## so the gloves land on the actual grip/foregrip rather than floating beside
+## the model. Not used by the Shield class - see `_rebuild_first_person_shield()`,
+## whose left hand grips the shield handle instead, and its right hand still
+## reads this table for the revolver.
+##
+## Both rotations are dictated by `_build_glove_hand()`'s origin convention
+## (grip axis along the glove's local X, forearm out its +Z) and so reduce to
+## one meaningful number each rather than three tuned-by-eye Euler terms:
+##
+##   grip_rot    = Vector3(<the grip column's own rotation.x>, 0, -PI/2)
+##                 - the quarter turn stands the glove's wrap axis up along a
+##                   pistol grip, the first term matches that grip's rake, so
+##                   the fist tracks the grip if the grip is ever re-raked.
+##   support_rot = Vector3(<roll around the barrel>, -PI/2, 0)
+##                 - the quarter turn lays the wrap axis down the handguard,
+##                   the first term is purely how far round the tube the hand
+##                   is rotated, which is the only free choice there is.
+##
+## The shotgun has no pistol grip, so its trigger hand wraps the small of the
+## stock instead and takes a positive (rearward) rake; that is the one entry
+## whose first term is not copied from a grip block.
+const HAND_GRIP_POSE := {
+	Weapon.RIFLE:   {"grip": Vector3(0.0, -0.118, 0.122), "grip_rot": Vector3(-0.36, 0.0, -PI * 0.5), "support": Vector3(0.0, 0.052, -0.700), "support_rot": Vector3(1.05, -PI * 0.5, 0.0)},
+	Weapon.SMG:     {"grip": Vector3(0.0, -0.096, 0.052), "grip_rot": Vector3(-0.19, 0.0, -PI * 0.5), "support": Vector3(0.0, 0.026, -0.545), "support_rot": Vector3(1.05, -PI * 0.5, 0.0)},
+	Weapon.SHOTGUN: {"grip": Vector3(0.0, -0.046, 0.170), "grip_rot": Vector3(0.42, 0.0, -PI * 0.5), "support": Vector3(0.0, -0.014, -0.460), "support_rot": Vector3(1.05, -PI * 0.5, 0.0)},
+	Weapon.PISTOL:  {"grip": Vector3(0.0, -0.104, 0.096), "grip_rot": Vector3(-0.28, 0.0, -PI * 0.5), "support": Vector3(-0.118, -0.150, 0.062), "support_rot": Vector3(-0.28, 0.0, -PI * 0.5)},
+	Weapon.SNIPER:  {"grip": Vector3(0.0, -0.134, 0.284), "grip_rot": Vector3(-0.32, 0.0, -PI * 0.5), "support": Vector3(0.0, 0.038, -0.680), "support_rot": Vector3(1.05, -PI * 0.5, 0.0)},
 }
 
 var team: Team = Team.RED
@@ -131,6 +201,17 @@ var _signal_spine: MeshInstance3D
 var _survey_frame: MeshInstance3D
 var _friendly_pennant: MeshInstance3D
 var _shield_plate: MeshInstance3D
+## Blended 0..1: 0 is the shield carried vertically (default, and forced
+## during reload), 1 is rolled flat horizontal for the Shield class's ADS.
+## See `SHIELD_VERTICAL_*`/`SHIELD_HORIZONTAL_*` and `_process()`.
+var _shield_horizontal_t := 0.0
+var _muzzle_light: OmniLight3D
+var _left_hand_root: Node3D
+var _right_hand_root: Node3D
+## Rest pose of the support hand before reload's mag-out/mag-in hump is added
+## on top of it. Recorded at build time so `_process` doesn't need to look the
+## per-weapon pose table up every frame.
+var _hand_support_rest := Vector3.ZERO
 var _left_leg: Node3D
 var _right_leg: Node3D
 var _left_arm: Node3D
@@ -289,6 +370,9 @@ func set_carrying_core(carrying: bool) -> void:
 func is_carrying_core() -> bool:
 	return carrying_core and not eliminated
 
+func is_shield_class() -> bool:
+	return player_class == PlayerClass.SHIELD
+
 func movement_speed_multiplier() -> float:
 	return CORE_CARRY_SPEED_MULTIPLIER if is_carrying_core() else 1.0
 
@@ -364,9 +448,16 @@ func _process(delta: float) -> void:
 				target += Vector3(-0.16 * swing, -0.08 * swing, -0.34 * swing)
 				_weapon_root.rotation.y = lerpf(_weapon_root.rotation.y, -0.6 * swing, clampf(delta * 26.0, 0.0, 1.0))
 		var active_reload_seconds := maxf(0.05, float(RiftWeapons.row(int(weapon)).reload_seconds))
+		var reload_phase := 0.0
 		if reload_remaining > 0.0 and _local_camera:
-			var reload_phase := clampf(1.0 - reload_remaining / active_reload_seconds, 0.0, 1.0)
-			target += Vector3(-0.04, -0.12 + sin(reload_phase * PI) * 0.06, 0.08)
+			reload_phase = clampf(1.0 - reload_remaining / active_reload_seconds, 0.0, 1.0)
+			if is_shield_class():
+				# Reloads happen tucked in close behind the vertical shield rather
+				# than out at the hip/ADS anchor - see `_fp_shield_root` below,
+				# which is forced back to vertical for the same duration.
+				target = SHIELD_RELOAD_WEAPON_POSITION
+			else:
+				target += Vector3(-0.04, -0.12 + sin(reload_phase * PI) * 0.06, 0.08)
 		if interact_progress > 0.0 and _local_camera:
 			var interact_arc := sin(interact_progress * PI)
 			target += Vector3(-0.06, -0.18 * interact_arc, 0.22 * interact_arc)
@@ -377,12 +468,72 @@ func _process(delta: float) -> void:
 		_weapon_root.rotation.x = lerpf(_weapon_root.rotation.x, -_recoil_kick, clampf(delta * 24.0, 0.0, 1.0))
 		if _melee_swing_remaining <= 0.0:
 			_weapon_root.rotation.y = lerpf(_weapon_root.rotation.y, _recoil_lateral, clampf(delta * 20.0, 0.0, 1.0))
+		if _weapon_rig != null:
+			# Linear recoil throw. `_weapon_rig.position` has no other writer, so
+			# it can decay straight toward the kick amount every frame without
+			# fighting the ADS/hip/sway/reload targets already driving
+			# `_weapon_root.position` above - and because every weapon part, the
+			# sight and the hands all hang off `_weapon_rig`, the whole assembly
+			# (sight included) rides the kick together, hip or ADS alike.
+			var recoil_offset := Vector3(0.0, RECOIL_POSITION_UP, RECOIL_POSITION_BACK) * _recoil_kick
+			_weapon_rig.position = _weapon_rig.position.lerp(recoil_offset, clampf(delta * 22.0, 0.0, 1.0))
 		if _magazine_mesh != null and reload_remaining > 0.0:
-			var reload_phase := clampf(1.0 - reload_remaining / active_reload_seconds, 0.0, 1.0)
 			_magazine_mesh.visible = reload_phase < 0.16 or reload_phase > 0.68
+		# The Shield class's left glove is not a support hand at all - it is
+		# welded to the shield's handle bar inside `_fp_shield_root` and rides
+		# the plate's own motion. `_hand_support_rest` is a *weapon-rig* pose
+		# and means nothing in shield space, so letting the branch below reach
+		# it dragged the fist off the handle and out into the middle of the
+		# frame, taking its whole forearm across the screen with it.
+		if _left_hand_root != null and _local_camera and not is_shield_class():
+			if reload_remaining > 0.0:
+				# Support hand sweeps down to the magazine well and back up on a
+				# single sine hump timed to the same reload_phase the magazine
+				# mesh hides/shows on, rather than a second, unsynchronized clock.
+				var mag_hump := sin(reload_phase * PI)
+				_left_hand_root.position = _hand_support_rest + Vector3(-0.025, -0.20, 0.10) * mag_hump
+			else:
+				_left_hand_root.position = _left_hand_root.position.lerp(_hand_support_rest, clampf(delta * 12.0, 0.0, 1.0))
+	if _fp_shield_root != null:
+		# Vertical is the resting/reload pose; ADS pitches the plate forward and
+		# down about the camera's right axis until it lies flat as a low
+		# parapet across the bottom of the frame, and the revolver comes up to
+		# an ordinary centered sight picture over it - see
+		# SHIELD_ADS_PITCH_ANGLE and `_ads_weapon_anchor()` above.
+		var shield_target_t := 0.0 if reload_remaining > 0.0 else clampf(ads_progress, 0.0, 1.0)
+		_shield_horizontal_t = lerpf(_shield_horizontal_t, shield_target_t, clampf(delta * 9.0, 0.0, 1.0))
+		var shield_pos := SHIELD_VERTICAL_POSITION.lerp(SHIELD_HORIZONTAL_POSITION, _shield_horizontal_t)
+		# Pre-multiplying the pitch onto the vertical basis (rather than
+		# lerping the Euler triple) rotates about the camera's own right axis,
+		# so the top edge falls straight away from the viewer and the parapet
+		# lands level on screen no matter how the carry pose has the plate
+		# yawed to show its face instead of its edge.
+		var shield_pitch := Basis(Vector3(1.0, 0.0, 0.0), SHIELD_ADS_PITCH_ANGLE * _shield_horizontal_t)
+		var shield_basis := shield_pitch * Basis.from_euler(SHIELD_VERTICAL_ROTATION)
+		if _melee_swing_remaining > 0.0:
+			# Shield-bump melee: the plate itself lunges forward - the
+			# Montagne-reference "hit them with the shield", not a weapon swing.
+			var bump := sin(_melee_swing_remaining * PI)
+			shield_pos += Vector3(0.0, -0.02 * bump, -0.46 * bump)
+		_fp_shield_root.position = _fp_shield_root.position.lerp(shield_pos, clampf(delta * 12.0, 0.0, 1.0))
+		_fp_shield_root.quaternion = _fp_shield_root.quaternion.slerp(shield_basis.get_rotation_quaternion(), clampf(delta * 12.0, 0.0, 1.0))
+		if _left_hand_root != null:
+			# The plate is tipped by the wrist, not by the whole arm. Left as a
+			# rigid child of the shield the glove rotates bodily with it and
+			# swings its forearm up and across the right of the screen, which
+			# is the one thing that gives away that this is a prop bolted to
+			# the camera. Rolling the glove back about its own X - the handle
+			# bar's axis, so the fist stays wrapped around the bar and only
+			# changes where round it the knuckles sit - holds the forearm
+			# roughly still while the plate turns under it. Slightly less than
+			# a full counter-roll, so some of the turn still carries into the
+			# arm and it does not read as a detached hand.
+			_left_hand_root.rotation.x = -SHIELD_ADS_PITCH_ANGLE * _shield_horizontal_t * 0.85
 	if _muzzle_flare != null:
 		var flare := clampf(_fire_flash_remaining / 0.075, 0.0, 1.0)
 		_muzzle_flare.scale = Vector3.ONE * flare
+	if _muzzle_light != null:
+		_muzzle_light.light_energy = clampf(_fire_flash_remaining / 0.05, 0.0, 1.0) * 7.0
 	if not _rail_slots.is_empty():
 		var sequence := clampf((0.12 - _fire_flash_remaining) / 0.12 * 6.0, 0.0, 6.0)
 		for index in _rail_slots.size():
@@ -721,6 +872,14 @@ func set_combat_pose(aiming: bool, delta: float) -> void:
 		camera.fov = lerpf(camera.fov, target_vertical, minf(1.0, delta * 13.0))
 
 func _ads_weapon_anchor() -> Vector3:
+	if is_shield_class():
+		# Ordinary centered sight picture; the shield pitches down out of the
+		# way underneath it rather than the gun stepping aside - see
+		# SHIELD_ADS_WEAPON_ANCHOR. Render-only: the authoritative shot
+		# origin still comes from RiftWeapons' optic_tip/ads_anchor formula
+		# via `optic_tip_head_offset()`, so this never touches hit
+		# registration or the crosshair.
+		return SHIELD_ADS_WEAPON_ANCHOR
 	# One calibration seam per weapon keeps its optic centered on the camera's aim ray.
 	return Vector3(RiftWeapons.row(int(weapon)).get("ads_anchor", Vector3(0.0, -0.11, -0.9)))
 
@@ -1124,16 +1283,22 @@ func _build_ballistic_shield(dark: Material, brass: Material, glow: Material) ->
 	_add_body_part(_box(Vector3(0.66, 0.9, 0.02)), Vector3(0.0, 1.02, -0.50), brass)
 	_add_body_part(_cylinder(0.07, 0.07, 0.4), Vector3(0.0, 1.02, -0.42), glow, Vector3(PI * 0.5, 0.0, 0.0))
 
-## The Shield class's own first-person view of its shield.
+## The Shield class's own first-person view of its shield: a ballistic
+## riot-shield the carrier looks through (the vision port between the rib
+## frames is open geometry, not a solid pane), carried vertically in front of
+## him by default, rolled flat horizontal on ADS with the revolver riding
+## above its edge, bumped forward on melee, and held vertical again through a
+## reload. See `_process()` for the pose blend and `SHIELD_VERTICAL_*`/
+## `SHIELD_HORIZONTAL_*`/`SHIELD_RELOAD_WEAPON_POSITION` for the numbers.
 ##
 ## `_build_character_silhouette()` - and with it `_build_ballistic_shield()` -
 ## is only ever built for the remote presentation, so up to now a Shield player
 ## was the one person in the match who could not see the piece of equipment
 ## that defines their class. This builds a separate, purpose-composed view
-## model: the plate is seen from *behind*, held out to the left so it never
-## covers the aim point, with the arm brace and grip facing the camera, which
-## is what actually sells "I am carrying this" rather than "a wall is stuck to
-## my screen". Rendering only - `has_ballistic_shield` and every block and
+## model, seen from *behind* (the carrier's own side), with the arm brace and
+## grip facing the camera and the left glove holding the grip - what actually
+## sells "I am carrying this" rather than "a wall is stuck to my screen".
+## Rendering only - `has_ballistic_shield` and every block and
 ## damage-reduction rule it feeds are untouched.
 func _rebuild_first_person_shield() -> void:
 	if not (_local_camera and _render_visuals) or camera == null:
@@ -1141,20 +1306,16 @@ func _rebuild_first_person_shield() -> void:
 	if _fp_shield_root != null:
 		_fp_shield_root.queue_free()
 		_fp_shield_root = null
+		_left_hand_root = null
 	if not has_ballistic_shield:
 		return
 	_fp_shield_root = Node3D.new()
 	_fp_shield_root.name = "FirstPersonShield"
-	# Carried low and out to the left, turned far enough to show its face rather
-	# than an edge. Distance and height are chosen so *both* vertical edges and
-	# the top lip land inside the frame: a plate that runs off every side of the
-	# screen stops reading as carried equipment and starts reading as a wall.
-	#
-	# Only the plate's top third is above the horizon of the view, so every
-	# piece of detail lives there. A grip modelled down at the player's actual
-	# chest height would be geometrically correct and permanently invisible.
-	_fp_shield_root.position = Vector3(-0.40, -0.30, -0.78)
-	_fp_shield_root.rotation = Vector3(0.05, 0.62, -0.09)
+	# Static build-time pose; `_process()` takes over every frame after the
+	# first to blend this against the horizontal ADS/reload poses.
+	_fp_shield_root.position = SHIELD_VERTICAL_POSITION
+	_fp_shield_root.rotation = SHIELD_VERTICAL_ROTATION
+	_shield_horizontal_t = 0.0
 	camera.add_child(_fp_shield_root)
 	var armour := NuclearMaterials.painted_metal(Color("323b46"), 0.60)
 	var rib := NuclearMaterials.metal(Color("6e7883"), 0.48)
@@ -1163,13 +1324,27 @@ func _rebuild_first_person_shield() -> void:
 	var glow := NuclearMaterials.emissive(_team_glow(), 1.1)
 	# Plate: stacked panels rather than one slab, each stepping slightly nearer
 	# the player, so the face has real relief instead of one flat grey field.
-	_add_shield_part(_box(Vector3(0.42, 0.26, 0.038)), Vector3(0.0, 0.180, 0.0), armour)
+	# The upper panel is cut into four pieces around the vision port rather than
+	# spanning it. It used to be one full-width slab, which meant the "open"
+	# port framed below was open only in the frame itself - there was solid
+	# armour a few millimetres behind it and the carrier saw grey, not the
+	# world. This is the one hole in the plate and it has to actually be a hole.
+	#
+	# The port itself spans x=[-0.175, 0.175] (nearly the full 0.42-wide plate)
+	# and y=[0.080, 0.280] (0.20 tall - 3x the original slit), so the four
+	# cutout panels below are sized to exactly surround that rectangle rather
+	# than the old narrow slot.
+	_add_shield_part(_box(Vector3(0.035, 0.26, 0.038)), Vector3(-0.1925, 0.180, 0.0), armour)
+	_add_shield_part(_box(Vector3(0.035, 0.26, 0.038)), Vector3(0.1925, 0.180, 0.0), armour)
+	_add_shield_part(_box(Vector3(0.35, 0.03, 0.038)), Vector3(0.0, 0.295, 0.0), armour)
+	_add_shield_part(_box(Vector3(0.35, 0.03, 0.038)), Vector3(0.0, 0.065, 0.0), armour)
 	_add_shield_part(_box(Vector3(0.42, 0.28, 0.044)), Vector3(0.0, -0.090, 0.007), armour)
 	_add_shield_part(_box(Vector3(0.40, 0.22, 0.038)), Vector3(0.0, -0.330, 0.015), armour)
-	# Reinforcing ribs and the top lip - the value contrast that keeps the plate
-	# from flattening out against a pale floor.
+	# Reinforcing rib and the top lip - the value contrast that keeps the plate
+	# from flattening out against a pale floor. The old middle rib (y=0.245)
+	# is gone - the enlarged port now occupies that band, and a rib crossing
+	# it would have re-blocked the view it exists to open up.
 	_add_shield_part(_box(Vector3(0.44, 0.016, 0.056)), Vector3(0.0, 0.052, 0.007), rib)
-	_add_shield_part(_box(Vector3(0.44, 0.016, 0.056)), Vector3(0.0, 0.245, 0.004), rib)
 	_add_shield_part(_box(Vector3(0.45, 0.030, 0.062)), Vector3(0.0, 0.318, 0.002), rib)
 	for bolt_x in [-0.15, -0.05, 0.05, 0.15]:
 		_add_shield_part(_sphere(0.010), Vector3(bolt_x, 0.318, 0.032), trim)
@@ -1178,17 +1353,34 @@ func _rebuild_first_person_shield() -> void:
 	_add_shield_part(_box(Vector3(0.024, 0.70, 0.056)), Vector3(0.213, -0.040, 0.007), trim)
 	_add_shield_part(_box(Vector3(0.013, 0.66, 0.018)), Vector3(0.213, -0.040, 0.035), glow)
 	_add_shield_part(_box(Vector3(0.024, 0.70, 0.056)), Vector3(-0.213, -0.040, 0.007), rib)
-	# Vision port, framed and sitting in the visible band.
-	_add_shield_part(_box(Vector3(0.22, 0.020, 0.050)), Vector3(0.04, 0.212, 0.010), rib)
-	_add_shield_part(_box(Vector3(0.22, 0.020, 0.050)), Vector3(0.04, 0.126, 0.010), rib)
-	for mullion_x in [-0.05, 0.13]:
-		_add_shield_part(_box(Vector3(0.016, 0.086, 0.046)), Vector3(mullion_x, 0.169, 0.010), rib)
+	# Vision port frame: a thin lip top and bottom, matching the new
+	# near-full-width, 3x-tall opening cut into the panels above.
+	_add_shield_part(_box(Vector3(0.35, 0.018, 0.050)), Vector3(0.0, 0.280, 0.010), rib)
+	_add_shield_part(_box(Vector3(0.35, 0.018, 0.050)), Vector3(0.0, 0.080, 0.010), rib)
+	for mullion_x in [-0.09, 0.09]:
+		_add_shield_part(_box(Vector3(0.014, 0.18, 0.046)), Vector3(mullion_x, 0.180, 0.010), rib)
 	# Arm brace and forearm cuff, raised to just under the vision port so they
 	# are actually in frame. This is the detail that reads as held equipment.
 	_add_shield_part(_box(Vector3(0.26, 0.048, 0.040)), Vector3(0.030, 0.062, 0.066), rib)
 	_add_shield_part(_torus(0.058, 0.017), Vector3(0.075, 0.062, 0.098), strap, Vector3(0.0, 0.0, PI * 0.5))
 	_add_shield_part(_cylinder(0.023, 0.023, 0.15), Vector3(0.145, -0.055, 0.090), strap, Vector3(0.0, 0.0, PI * 0.5))
 	_add_shield_part(_box(Vector3(0.044, 0.044, 0.096)), Vector3(0.050, -0.055, 0.066), rib)
+	# Left hand grips the handle bar and is parented here, not `_weapon_rig` -
+	# it rides the shield's own vertical/horizontal/melee-bump motion in
+	# `_process()` (turning clockwise with it on ADS) instead of the weapon's.
+	_left_hand_root = _build_glove_hand(NuclearMaterials.polymer(Color("1c2126"), 0.62), NuclearMaterials.polymer(Color("272c26"), 0.58))
+	_left_hand_root.name = "ShieldHand"
+	# The handle bar above runs along the shield's local X, so by
+	# `_build_glove_hand()`'s convention the glove needs no rotation at all
+	# here: its wrap axis is already X and its forearm already leaves toward
+	# the carrier (+Z). It sits exactly on the bar rather than beside it.
+	_left_hand_root.position = Vector3(0.145, -0.055, 0.090)
+	_left_hand_root.rotation = Vector3(0.0, 0.0, -0.10)
+	# Gloves are modelled in weapon-rig units; the shield is a direct child of
+	# the camera at world scale, so the 0.38 the weapon root applies has to be
+	# re-applied by hand or the glove arrives nearly three times life size.
+	_left_hand_root.scale = Vector3.ONE * FIRST_PERSON_WEAPON_SCALE
+	_fp_shield_root.add_child(_left_hand_root)
 
 func _add_shield_part(mesh: Mesh, position: Vector3, material: Material, rotation: Vector3 = Vector3.ZERO) -> void:
 	var instance := MeshInstance3D.new()
@@ -1277,6 +1469,186 @@ func _build_world_weapon() -> void:
 	_weapon_rig.name = "Rig"
 	_weapon_root.add_child(_weapon_rig)
 
+## An armoured tactical glove, built closed around whatever it is holding.
+##
+## Origin convention - this is what every caller depends on. Local (0,0,0) sits
+## on the *grip axis*: the imaginary tube the curled fingers enclose. That axis
+## runs along local X. The forearm leaves along +Z, the back of the hand faces
+## +Y, and the thumb/index side is -X, which is what makes this a right hand.
+## Placing a glove is therefore always the same instruction - put the origin on
+## the thing being held and aim local X down that thing's axis - which is
+## exactly what `HAND_GRIP_POSE` and the shield handle grip below both do, and
+## why both of their rotations reduce to one readable term plus a quarter turn.
+##
+## Scale: built in weapon-rig units, the same 1 unit is about 0.36 m the
+## `_build_*_model()` functions are drawn at, so a knuckle span of 0.245 here
+## is a 88 mm hand. The shield glove lives outside `_weapon_root`'s 0.38 scale
+## and re-applies that factor itself.
+##
+## The look is a hard-shell tactical gauntlet - PUBG/Siege proportions wearing
+## Halo/Destiny plating - and it earns that from the same trick the weapons in
+## this file use rather than from any imported mesh: nothing is ever a single
+## flat box. Every soft mass carries a harder plate floating a few millimetres
+## proud of it, seated on a darker shelf, so each step reads as a machined seam
+## instead of a colour change.
+func _build_glove_hand(glove: Material, cuff: Material) -> Node3D:
+	var root := Node3D.new()
+	# Armour and accent roles are mixed here rather than passed in, because
+	# hands are deliberately team-neutral: nothing in this function may ever be
+	# sourced from `_team_color()`. `glove` is the soft shell, `cuff` the
+	# sleeve, `plate` the hard gauntlet, `shade` the recessed seams the plates
+	# sit on, and `tell` the one small lit element on the wrist module.
+	# `plate` is deliberately several stops lighter than anything else on the
+	# glove. At the size a hand actually occupies in the frame the panel lines
+	# and the 3 mm steps are sub-pixel; the only thing that survives is value
+	# contrast, so the armour has to be the bright element against a near-black
+	# shell or the whole hand collapses into one dark blob.
+	var plate := NuclearMaterials.metal(Color("959eaa"), 0.34)
+	var shade := NuclearMaterials.painted_metal(Color("22272d"), 0.58)
+	var tell := NuclearMaterials.emissive(Color("e8a44e"), 0.9)
+	# --- Wrist and forearm, on their own pivot.
+	#
+	# A gripping hand's forearm is *not* perpendicular to the thing it holds -
+	# the wrist breaks toward the little finger by something like 35 degrees,
+	# which is why a shooter's elbow ends up below and behind the grip rather
+	# than level with it. Building that break in here rather than into every
+	# pose is what keeps `HAND_GRIP_POSE` down to one meaningful number per
+	# hand, and it is load-bearing visually: run the arm straight out of +Z
+	# instead and it leaves the grip pointing back and *upward*, which parks
+	# the flat disc of the elbow end cap in the middle of the frame. With the
+	# break, every arm exits through the bottom edge of the screen, which is
+	# where an arm belongs and is also the only place it can be cut off
+	# without showing a cap.
+	var arm := Node3D.new()
+	arm.name = "Forearm"
+	arm.position = Vector3(0.0, 0.056, 0.185)
+	arm.rotation = Vector3(0.0, 0.62, 0.0)
+	root.add_child(arm)
+	# Cinched collar and its steel ring, then the sleeve under a bolted bracer.
+	# The sleeve is the largest single mass on the glove and sits closest to
+	# the camera, so it gets banded rather than left as one smooth tube.
+	_add_child_part(arm, _cylinder(0.106, 0.120, 0.120), Vector3(0.0, 0.004, 0.052), cuff, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_child_part(arm, _torus(0.110, 0.026), Vector3(0.0, 0.004, 0.056), plate, Vector3(PI * 0.5, 0.0, 0.0))
+	# The sleeve deliberately runs a long way past the elbow. It is not there to
+	# be seen - it is there so that it is *never* seen ending. At the ADS pose
+	# the weapon comes to the middle of the screen and the support arm sweeps in
+	# from the left rather than dropping off the bottom, and a sleeve only as
+	# long as a real forearm finishes inside the frame, parking the flat disc of
+	# its end cap in open view. Run it past where the elbow would be and both
+	# arms leave through the bottom edge in every pose the rig can reach.
+	_add_child_part(arm, _tapered_cylinder(0.146, 0.102, 1.00), Vector3(0.0, 0.002, 0.610), cuff, Vector3(PI * 0.5, 0.0, 0.0))
+	# Straps have to clear the *local* sleeve radius, which tapers along its
+	# length - a fixed radius buries them at the far end and they read as
+	# nothing at all.
+	for strap_z in [0.290, 0.610, 0.930]:
+		var sleeve_radius := lerpf(0.102, 0.146, clampf((strap_z - 0.110) / 1.000, 0.0, 1.0))
+		_add_child_part(arm, _cylinder(sleeve_radius + 0.015, sleeve_radius + 0.013, 0.050), Vector3(0.0, 0.002, strap_z), shade, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_child_part(arm, _box(Vector3(0.190, 0.044, 0.620)), Vector3(0.0, 0.094, 0.440), plate, Vector3(-0.03, 0.0, 0.0))
+	for side in [-1.0, 1.0]:
+		_add_child_part(arm, _box(Vector3(0.026, 0.062, 0.620)), Vector3(side * 0.098, 0.076, 0.440), shade, Vector3(-0.03, 0.0, 0.0))
+	for rib_z in [0.250, 0.560]:
+		_add_child_part(arm, _box(Vector3(0.202, 0.030, 0.034)), Vector3(0.0, 0.114, rib_z), shade)
+		for side in [-1.0, 1.0]:
+			_add_child_part(arm, _sphere(0.015), Vector3(side * 0.060, 0.126, rib_z), plate)
+	# The module carrying the glove's single lit element, kept outboard so it
+	# never sits on the sight line.
+	_add_child_part(arm, _box(Vector3(0.048, 0.066, 0.104)), Vector3(0.112, 0.026, 0.074), shade, Vector3(0.0, 0.0, 0.14))
+	_add_child_part(arm, _box(Vector3(0.014, 0.022, 0.056)), Vector3(0.140, 0.030, 0.074), tell, Vector3(0.0, 0.0, 0.14))
+	# --- Palm mass: metacarpal shell with the thenar and hypothenar pads that
+	# stop the hand reading as one rectangular block, and a rubber grip pad on
+	# the underside where it actually meets the weapon.
+	_add_child_part(root, _box(Vector3(0.212, 0.098, 0.250)), Vector3(0.0, 0.062, 0.062), glove, Vector3(-0.20, 0.0, 0.0))
+	_add_child_part(root, _box(Vector3(0.196, 0.034, 0.206)), Vector3(0.0, 0.004, 0.070), shade, Vector3(-0.20, 0.0, 0.0))
+	_add_child_part(root, _box(Vector3(0.078, 0.094, 0.142)), Vector3(-0.100, 0.030, 0.046), glove, Vector3(-0.20, 0.0, 0.18))
+	_add_child_part(root, _box(Vector3(0.064, 0.086, 0.162)), Vector3(0.098, 0.030, 0.060), glove, Vector3(-0.20, 0.0, -0.14))
+	# --- Back of the hand: a two-tier dorsal plate stepping toward the
+	# knuckles, on a dark shelf, with a panel seam and side rails. This is the
+	# largest flat area on the glove and the one that would look most like a
+	# placeholder brick if it were left as a single box.
+	_add_child_part(root, _box(Vector3(0.220, 0.032, 0.256)), Vector3(0.0, 0.104, 0.060), shade, Vector3(-0.20, 0.0, 0.0))
+	# Two plates with a dark channel between them, not one slab: a single
+	# 0.19 x 0.21 rectangle here is the largest unbroken face on the glove and
+	# was reading as exactly the flat placeholder brick this redesign exists to
+	# get away from.
+	_add_child_part(root, _box(Vector3(0.180, 0.038, 0.108)), Vector3(0.0, 0.128, 0.104), plate, Vector3(-0.20, 0.0, 0.0))
+	_add_child_part(root, _box(Vector3(0.170, 0.040, 0.086)), Vector3(0.0, 0.136, 0.006), plate, Vector3(-0.20, 0.0, 0.0))
+	_add_child_part(root, _box(Vector3(0.142, 0.036, 0.104)), Vector3(0.0, 0.154, -0.024), plate, Vector3(-0.13, 0.0, 0.0))
+	for side in [-1.0, 1.0]:
+		_add_child_part(root, _box(Vector3(0.020, 0.058, 0.228)), Vector3(side * 0.102, 0.108, 0.056), shade, Vector3(-0.20, 0.0, 0.0))
+		_add_child_part(root, _box(Vector3(0.024, 0.026, 0.052)), Vector3(side * 0.088, 0.146, 0.104), plate, Vector3(-0.20, 0.0, 0.0))
+	# --- Knuckles: four separately-stepped caps riding a dark bridge, which is
+	# the single detail that reads as "armoured glove" from any distance.
+	var finger_x := [-0.086, -0.029, 0.028, 0.084]
+	var finger_w := [0.056, 0.056, 0.052, 0.046]
+	_add_child_part(root, _box(Vector3(0.232, 0.034, 0.078)), Vector3(0.0, 0.116, -0.078), shade, Vector3(-0.10, 0.0, 0.0))
+	for index in 4:
+		_add_child_part(root, _box(Vector3(finger_w[index] * 0.92, 0.040, 0.064)), Vector3(finger_x[index], 0.150 - float(index) * 0.005, -0.080), plate, Vector3(-0.10, 0.0, 0.0))
+	# --- Fingers, curled around the grip axis. Each phalanx is placed on the
+	# wrap circle by angle rather than by hand-guessed coordinates, so the curl
+	# stays a curl at any radius, and the outer fingers close a little further
+	# than the index - a straight four-finger row is the tell of a fake hand.
+	var seg_radius := [0.112, 0.104, 0.094]
+	var seg_length := [0.108, 0.098, 0.084]
+	var seg_angle := [152.0, 204.0, 254.0]
+	for index in 4:
+		for segment in 3:
+			var theta := deg_to_rad(seg_angle[segment]) + float(index) * 0.038
+			var radius: float = seg_radius[segment]
+			var tangent := atan2(-cos(theta), -sin(theta))
+			var thickness := 0.058 - float(segment) * 0.006
+			_add_child_part(root, _box(Vector3(finger_w[index], thickness, seg_length[segment])), Vector3(finger_x[index], sin(theta) * radius, cos(theta) * radius), glove, Vector3(tangent, 0.0, 0.0))
+			if segment < 2:
+				_add_child_part(root, _box(Vector3(finger_w[index] * 0.80, 0.022, seg_length[segment] * 0.86)), Vector3(finger_x[index], sin(theta) * (radius + 0.038), cos(theta) * (radius + 0.038)), plate, Vector3(tangent, 0.0, 0.0))
+	# --- Thumb, wrapping the far side. Its plated outer face is what tells the
+	# eye which way round the hand is once the fingers are hidden by the weapon.
+	_add_child_part(root, _box(Vector3(0.072, 0.068, 0.156)), Vector3(-0.108, 0.020, -0.062), glove, Vector3(0.62, -0.22, 0.0))
+	_add_child_part(root, _box(Vector3(0.064, 0.062, 0.122)), Vector3(-0.120, -0.076, 0.012), glove, Vector3(0.10, -0.30, 0.0))
+	_add_child_part(root, _box(Vector3(0.026, 0.056, 0.104)), Vector3(-0.152, -0.076, 0.010), plate, Vector3(0.10, -0.30, 0.0))
+	return root
+
+func _add_child_part(root: Node3D, mesh: Mesh, position: Vector3, material: Material, rotation: Vector3 = Vector3.ZERO) -> MeshInstance3D:
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	instance.position = position
+	instance.rotation = rotation
+	instance.material_override = material
+	instance.layers = VIEW_MODEL_LAYER_MASK if _local_camera else 1
+	root.add_child(instance)
+	return instance
+
+## First-person hands. Parented under `_weapon_rig`, not the character body,
+## so they inherit every motion that node already carries - recoil, ADS, hip
+## cant, reload sway, melee swing - for free, without a second animation
+## system that has to be kept in lockstep with the weapon's.
+##
+## The Shield class is the one exception on the left hand: it grips the
+## shield's own handle bar and is built in `_rebuild_first_person_shield()`
+## instead, so it rides the shield's vertical/horizontal/melee-bump motion,
+## not the weapon's. That function runs before this one every rebuild and
+## this leaves its result alone.
+func _build_first_person_hands(kit: Dictionary) -> void:
+	_right_hand_root = null
+	if not is_shield_class():
+		_left_hand_root = null
+	if not _local_camera or _weapon_rig == null:
+		return
+	var glove: Material = kit.get("glove", NuclearMaterials.polymer(Color("1c2126"), 0.62))
+	var cuff: Material = kit.get("glove_cuff", NuclearMaterials.polymer(Color("272c26"), 0.58))
+	var pose: Dictionary = HAND_GRIP_POSE.get(weapon, HAND_GRIP_POSE[Weapon.RIFLE])
+	_right_hand_root = _build_glove_hand(glove, cuff)
+	_right_hand_root.name = "TriggerHand"
+	_right_hand_root.position = pose.grip
+	_right_hand_root.rotation = pose.grip_rot
+	_weapon_rig.add_child(_right_hand_root)
+	if is_shield_class():
+		return
+	_hand_support_rest = pose.support
+	_left_hand_root = _build_glove_hand(glove, cuff)
+	_left_hand_root.name = "SupportHand"
+	_left_hand_root.position = _hand_support_rest
+	_left_hand_root.rotation = pose.support_rot
+	_weapon_rig.add_child(_left_hand_root)
+
 ## Rebuilds the equipped weapon's view model. Every weapon uses the
 ## realistic metal/polymer PBR materials from NuclearMaterials (the same
 ## factory the arena and characters use) rather than the flat, cartoon-shaded
@@ -1291,11 +1663,13 @@ func _rebuild_weapon_models() -> void:
 		_weapon_root.scale = Vector3.ONE * FIRST_PERSON_WEAPON_SCALE
 		_weapon_rig.rotation = FIRST_PERSON_HIP_RIG_ROTATION
 	_weapon_root.rotation = Vector3.ZERO
+	_weapon_rig.position = Vector3.ZERO
 	for child in _weapon_rig.get_children():
 		child.queue_free()
 	_weapon_mesh = null
 	_weapon_core = null
 	_muzzle_flare = null
+	_muzzle_light = null
 	_magazine_mesh = null
 	_rail_slots.clear()
 	# Four surface roles, shared by all five weapons so they read as one
@@ -1315,6 +1689,10 @@ func _rebuild_weapon_models() -> void:
 		# moving, animated element rather than a static one.
 		"rail": NuclearMaterials.emissive(_team_glow().lerp(Color("e6a25b"), 0.4), 1.0),
 		"hot": NuclearMaterials.emissive(Color("fff0b0"), 3.6),
+		# Deliberately not team-tinted: every player's own hands read the same
+		# regardless of Red/Blue, which is a codebase label, not a cosmetic.
+		"glove": NuclearMaterials.polymer(Color("1c2126"), 0.62),
+		"glove_cuff": NuclearMaterials.polymer(Color("272c26"), 0.58),
 	}
 	match weapon:
 		Weapon.RIFLE:
@@ -1324,11 +1702,15 @@ func _rebuild_weapon_models() -> void:
 		Weapon.SHOTGUN:
 			_build_shotgun_model(kit)
 		Weapon.PISTOL:
-			_build_pistol_model(kit)
+			if is_shield_class():
+				_build_revolver_model(kit)
+			else:
+				_build_pistol_model(kit)
 		Weapon.SNIPER:
 			_build_sniper_model(kit)
 	if _muzzle_flare != null:
 		_muzzle_flare.scale = Vector3.ONE * 0.001
+	_build_first_person_hands(kit)
 
 ## Weapon-local position of the optical center. Everything a sight is built
 ## from is placed relative to this point, so the housing can be redesigned
@@ -1369,6 +1751,46 @@ func _add_charge_strip(kit: Dictionary, at: Vector3, count: int, step: float) ->
 ## per-tooth fire sequence because they are all literally the same material.
 func _own_material(source: Material) -> Material:
 	return source.duplicate() if source != null else null
+
+## Turns the plain hot box every `_build_*_model()` already leaves in
+## `_muzzle_flare` into an actual muzzle flash: four crossed emissive blades
+## (the classic flash-star silhouette every real muzzle flash reads as) plus
+## a brief point light, both parented under the flare box so `_process()`'s
+## existing `_muzzle_flare.scale` animation drives every part of it together
+## and nothing new has to be tracked to keep them in sync.
+func _add_muzzle_flash_detail(hot: Material) -> void:
+	if _muzzle_flare == null:
+		return
+	# Blades, spanning *across* the bore and spun about it, which is what makes
+	# a star. The previous pass built these as boxes long in Z and then rotated
+	# them about Z - five rods pointing down the barrel, coincident, spinning
+	# about their own axis, so no star was ever drawn at all.
+	#
+	# Five of them, at irregular angles and three different lengths: an even
+	# four-blade star at one length reads as a plus sign stamped on the screen.
+	# The longest pair sits near horizontal, the axis a brake actually vents on.
+	var blades := [
+		[0.02, 0.021, 0.46], [PI * 0.5 + 0.05, 0.018, 0.34],
+		[PI * 0.27, 0.015, 0.30], [PI * 0.72, 0.014, 0.25], [PI * 0.87, 0.012, 0.20],
+	]
+	for blade in blades:
+		var thickness: float = blade[1]
+		_add_child_part(_muzzle_flare, _box(Vector3(blade[2], thickness, thickness)), Vector3.ZERO, _own_material(hot), Vector3(0.0, 0.0, blade[0]))
+	# Forward plume and core. The star alone is a flat decal facing the camera;
+	# a cone thrown down the bore - wide at the crown, tapering to a point out
+	# front - plus a bright bead give the flash depth from every angle except
+	# dead astern, and it is the part that actually lights the barrel.
+	_add_child_part(_muzzle_flare, _tapered_cylinder(0.052, 0.006, 0.32), Vector3(0.0, 0.0, -0.14), _own_material(hot), Vector3(PI * 0.5, 0.0, 0.0))
+	_add_child_part(_muzzle_flare, _sphere(0.046), Vector3(0.0, 0.0, -0.01), _own_material(hot))
+	_muzzle_light = OmniLight3D.new()
+	_muzzle_light.name = "MuzzleLight"
+	_muzzle_light.light_color = Color("ffdca0")
+	_muzzle_light.omni_range = 3.4
+	_muzzle_light.omni_attenuation = 1.6
+	_muzzle_light.light_energy = 0.0
+	_muzzle_light.light_cull_mask = VIEW_MODEL_LAYER_MASK if _local_camera else 1
+	_muzzle_light.shadow_enabled = false
+	_muzzle_flare.add_child(_muzzle_light)
 
 ## Enclosed trigger group - guard hoop plus the trigger blade inside it.
 func _add_trigger_group(kit: Dictionary, at: Vector3, radius: float) -> void:
@@ -1496,6 +1918,7 @@ func _build_rifle_model(kit: Dictionary) -> void:
 	_add_charge_strip(kit, Vector3(-0.062, 0.030, -0.10), 5, 0.078)
 	_add_reflex_sight(kit, 0.098, 0.088, 0.104)
 	_muzzle_flare = _add_weapon_part(_box(Vector3(0.070, 0.070, 0.100)), Vector3(0.0, 0.055, -1.41), _own_material(kit.hot))
+	_add_muzzle_flash_detail(kit.hot)
 
 func _build_smg_model(kit: Dictionary) -> void:
 	# Riftline SMG - MP7 pattern. Deliberately stubby: magazine housed in the
@@ -1522,6 +1945,7 @@ func _build_smg_model(kit: Dictionary) -> void:
 	_add_charge_strip(kit, Vector3(-0.055, 0.020, -0.10), 4, 0.072)
 	_add_reflex_sight(kit, 0.084, 0.076, 0.090)
 	_muzzle_flare = _add_weapon_part(_box(Vector3(0.058, 0.058, 0.080)), Vector3(0.0, 0.030, -0.93), _own_material(kit.hot))
+	_add_muzzle_flash_detail(kit.hot)
 
 func _build_shotgun_model(kit: Dictionary) -> void:
 	# S1897 Pump - trench gun. Two parallel tubes, a wood pump and stock, the
@@ -1551,6 +1975,7 @@ func _build_shotgun_model(kit: Dictionary) -> void:
 	_add_charge_strip(kit, Vector3(-0.058, 0.014, 0.020), 4, 0.070)
 	_add_ghost_ring_sights(kit, 0.060, -1.08)
 	_muzzle_flare = _add_weapon_part(_box(Vector3(0.086, 0.086, 0.100)), Vector3(0.0, 0.095, -1.16), _own_material(kit.hot))
+	_add_muzzle_flash_detail(kit.hot)
 
 func _build_pistol_model(kit: Dictionary) -> void:
 	# Sidearm 9 - compact striker-fired 9mm. Small, high-gripped, slide
@@ -1575,6 +2000,33 @@ func _build_pistol_model(kit: Dictionary) -> void:
 	_add_charge_strip(kit, Vector3(-0.046, 0.018, -0.050), 3, 0.058)
 	_add_notch_sights(kit, 0.140, -0.300)
 	_muzzle_flare = _add_weapon_part(_box(Vector3(0.048, 0.048, 0.060)), Vector3(0.0, 0.075, -0.400), _own_material(kit.hot))
+	_add_muzzle_flash_detail(kit.hot)
+
+## Shield class's sidearm: a break-top/DA revolver instead of the Runner's
+## semi-auto Sidearm 9, so the two pistol carriers read as different weapons
+## even though both use the shared RiftWeapons.PISTOL stat row. No magazine
+## mesh - a revolver has none - because its reload happens tucked in behind
+## the vertical shield where the mechanism is never on screen anyway; see
+## `_process()`'s SHIELD_RELOAD_WEAPON_POSITION branch.
+func _build_revolver_model(kit: Dictionary) -> void:
+	_weapon_mesh = _add_weapon_part(_box(Vector3(0.072, 0.090, 0.28)), Vector3(0.0, 0.075, 0.030), kit.steel)
+	_add_weapon_part(_tapered_cylinder(0.024, 0.030, 0.34), Vector3(0.0, 0.083, -0.250), kit.dark, Vector3(PI * 0.5, 0.0, 0.0))
+	# Exposed chamber drum, with its six chambers as separate cylinders -
+	# the one part of a revolver a semi-auto never has, and the read that
+	# sells "revolver" at a glance.
+	_add_weapon_part(_cylinder(0.058, 0.058, 0.086), Vector3(0.0, 0.077, -0.068), kit.dark, Vector3(PI * 0.5, 0.0, 0.0))
+	for chamber_index in 6:
+		var theta := TAU * float(chamber_index) / 6.0
+		_add_weapon_part(_cylinder(0.010, 0.010, 0.090), Vector3(cos(theta) * 0.036, 0.077 + sin(theta) * 0.036, -0.068), kit.brass, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_box(Vector3(0.020, 0.030, 0.130)), Vector3(0.0, 0.090, -0.005), kit.dark)
+	# Exposed spur hammer - a semi-auto's slide has no equivalent silhouette.
+	_add_weapon_part(_box(Vector3(0.014, 0.040, 0.020)), Vector3(0.0, 0.140, 0.085), kit.steel, Vector3(-0.25, 0.0, 0.0))
+	_add_weapon_part(_box(Vector3(0.076, 0.220, 0.098)), Vector3(0.0, -0.130, 0.135), kit.wood, Vector3(-0.30, 0.0, 0.0))
+	_add_trigger_group(kit, Vector3(0.0, -0.035, 0.020), 0.044)
+	_add_notch_sights(kit, 0.120, -0.270)
+	_weapon_core = _add_weapon_part(_box(Vector3(0.012, 0.020, 0.050)), Vector3(-0.040, 0.010, -0.010), _own_material(kit.accent))
+	_muzzle_flare = _add_weapon_part(_box(Vector3(0.044, 0.044, 0.056)), Vector3(0.0, 0.083, -0.420), _own_material(kit.hot))
+	_add_muzzle_flash_detail(kit.hot)
 
 func _build_sniper_model(kit: Dictionary) -> void:
 	# Longview Mk1 - Halo Infinite S7 as the named reference. Very long, heavy
@@ -1609,6 +2061,7 @@ func _build_sniper_model(kit: Dictionary) -> void:
 	_add_charge_strip(kit, Vector3(-0.062, -0.020, 0.020), 5, 0.086)
 	_add_scope(kit, 0.056, 0.300, -0.520)
 	_muzzle_flare = _add_weapon_part(_box(Vector3(0.062, 0.062, 0.090)), Vector3(0.0, 0.045, -1.66), _own_material(kit.hot))
+	_add_muzzle_flash_detail(kit.hot)
 
 func _add_weapon_part(mesh: Mesh, position: Vector3, material: Material, rotation: Vector3 = Vector3.ZERO) -> MeshInstance3D:
 	var instance := MeshInstance3D.new()
