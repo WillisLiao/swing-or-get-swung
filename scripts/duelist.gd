@@ -561,9 +561,16 @@ func _process(delta: float) -> void:
 		_carrier_signal_root.rotation.y += delta * 1.8
 		_carrier_signal_root.scale = Vector3.ONE * (1.0 + sin(Time.get_ticks_msec() * 0.006) * 0.06)
 
-func set_weapon_presentation(next_weapon: Weapon) -> void:
+## `force` skips the "same weapon, don't bother" optimization. Presentation
+## resets - respawn chief among them - need every view-model node rebuilt
+## fresh even when the incoming weapon matches what was already equipped,
+## because the fire/recoil/muzzle-flash state above (`_weapon_mesh`,
+## `_muzzle_flare`, `_muzzle_light`, `_rail_slots`, ...) is exactly what a
+## death cycle can leave in an inconsistent mid-effect state (see the
+## respawn caller below).
+func set_weapon_presentation(next_weapon: Weapon, force: bool = false) -> void:
 	var clamped := RiftWeapons.clamp_weapon(int(next_weapon)) as Weapon
-	if weapon == clamped and _weapon_mesh != null:
+	if not force and weapon == clamped and _weapon_mesh != null:
 		return
 	weapon = clamped
 	_recoil_remaining = 0.0
@@ -1086,8 +1093,23 @@ func _set_visual_transparency(amount: float) -> void:
 	for node: Node in geometry_nodes:
 		if node is GeometryInstance3D:
 			(node as GeometryInstance3D).transparency = clampf(amount, 0.0, 1.0)
-	set_weapon_presentation(loadout_slots[0] as Weapon)
+	# Forced: respawn must present a genuinely fresh weapon model even when the
+	# respawning weapon is the same one the player died holding - see
+	# set_weapon_presentation()'s comment for why the "unchanged, skip it"
+	# optimization is wrong specifically here.
+	set_weapon_presentation(loadout_slots[0] as Weapon, true)
 	_apply_stance(Stance.STAND)
+
+## Read-only mirror of `_recoil_kick`/`_recoil_lateral` for `DuelHud` to nudge
+## the ADS/scope reticle by, so the crosshair reads as attached to the
+## housing that is now visibly kicking under it, rather than floating dead
+## center while the sight housing jumps around it. Same precedent as
+## `ads_progress`/`zoom_index` being pushed into the HUD each frame - see
+## `DuelHud.set_ads_state()`. Deliberately not a 3D-to-2D projection of the
+## actual dot mesh; that's real optical work for a fix whose only job is
+## making the housing's own motion visible in the reticle too.
+func recoil_presentation() -> Vector2:
+	return Vector2(_recoil_kick, _recoil_lateral)
 
 func authoritative_eye_origin() -> Vector3:
 	return head.global_position if head != null else global_position + Vector3.UP * 1.46

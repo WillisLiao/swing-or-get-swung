@@ -117,6 +117,10 @@ var _weapon := Duelist.Weapon.RIFLE
 ## by the arena each frame. See set_ads_state().
 var _ads_progress := 0.0
 var _zoom_index := 0
+## Mirror of Duelist.recoil_presentation() (kick, lateral), pushed in by the
+## arena each frame alongside _ads_progress/_zoom_index. See set_recoil_state().
+var _recoil_kick := 0.0
+var _recoil_lateral := 0.0
 var _settings_open := false
 var _layout_editor := false
 var _aim_toggle := false
@@ -337,6 +341,19 @@ func set_ads_state(progress: float, zoom: int) -> void:
 		return
 	_ads_progress = next_progress
 	_zoom_index = next_zoom
+	queue_redraw()
+
+## Mirrors Duelist._recoil_kick/_recoil_lateral - the same two fields that
+## throw the 3D weapon rig under recoil - so the ADS/scope reticle can be
+## nudged in step with the housing it is supposed to read as sitting on. See
+## _recoil_reticle_offset().
+func set_recoil_state(recoil: Vector2) -> void:
+	var next_kick := recoil.x if is_finite(recoil.x) else 0.0
+	var next_lateral := recoil.y if is_finite(recoil.y) else 0.0
+	if absf(next_kick - _recoil_kick) < 0.0005 and absf(next_lateral - _recoil_lateral) < 0.0005:
+		return
+	_recoil_kick = next_kick
+	_recoil_lateral = next_lateral
 	queue_redraw()
 
 func set_view_fov(value: float, persist: bool = true) -> void:
@@ -972,15 +989,34 @@ func _reticle_arc(at: Vector2, radius: float, from_angle: float, to_angle: float
 
 func _draw_reticle(center: Vector2) -> void:
 	var ads := _ads_progress
+	# Only the aimed reticle rides the recoil kick - hip fire already has its
+	# own bloom-driven spread telling the same story, and is not what the
+	# "reticle doesn't move with recoil" report was about.
+	var kicked_center := center + _recoil_reticle_offset()
 	if _weapon == Duelist.Weapon.SNIPER and ads > 0.004:
-		_draw_scope_overlay(center, ads)
+		# The tube itself (the vignette/mask) stays put - a scope housing does
+		# not physically move on screen - only the reticle drawn inside it
+		# kicks, which is also the only way recoil reads at all once the 3D
+		# rig hides past SNIPER_SCOPE_HANDOVER (see handoff bug #3).
+		_draw_scope_overlay(center, ads, kicked_center)
 		return
 	var hip_opacity := 1.0 - smoothstep(0.0, 0.55, ads)
 	if hip_opacity > 0.004:
 		_draw_hip_reticle(center, hip_opacity)
 	var ads_opacity := smoothstep(0.45, 1.0, ads)
 	if ads_opacity > 0.004:
-		_draw_ads_reticle(center, ads_opacity)
+		_draw_ads_reticle(kicked_center, ads_opacity)
+
+## Pixel nudge for the ADS/scope reticle only, so it reads as attached to the
+## sight housing that now visibly kicks under the weapon-rig recoil throw
+## (`Duelist._weapon_rig.position`/`.rotation.x`) instead of staying glued to
+## dead screen-center while the housing jumps around it. `_recoil_kick`
+## throws the muzzle up (screen-up, hence the negative Y here); `_recoil_lateral`
+## is the same left/right alternation the weapon root's yaw already shows.
+## Magnitudes are a feel call tuned against a live ADS screenshot mid-recoil,
+## not a literal 1:1 of the 3D throw - see handoff bug #1.
+func _recoil_reticle_offset() -> Vector2:
+	return Vector2(_recoil_lateral * 260.0, -_recoil_kick * 190.0)
 
 ## Hip fire. All five keep the existing directional-bloom behaviour - the gap
 ## and span still open with `primary_fire_bloom` and recover with it - but the
@@ -1072,7 +1108,11 @@ func _ads_cone_radius_px() -> float:
 ## like a scope, and a mask stays exact at every aspect ratio and every FOV,
 ## which a glass disc parked near the near plane does not. The 3D scope body on
 ## the weapon keeps doing its job - it is what the mask closes down over.
-func _draw_scope_overlay(center: Vector2, ads: float) -> void:
+## `center` positions the tube/vignette itself (a scope housing does not
+## physically move on screen); `reticle_center` positions only the reticle
+## drawn inside it, which is where the recoil kick belongs - see the one
+## caller in _draw_reticle().
+func _draw_scope_overlay(center: Vector2, ads: float, reticle_center: Vector2) -> void:
 	# Closed by `Duelist.SNIPER_SCOPE_HANDOVER`, which is the same value the
 	# rifle's view model stops drawing on. Beyond that point this overlay *is*
 	# the scope, so it has to be fully opaque before the rifle disappears.
@@ -1094,19 +1134,19 @@ func _draw_scope_overlay(center: Vector2, ads: float) -> void:
 	draw_arc(center, radius - 4.5, 0.0, TAU, 96, Color("7d8ea3", 0.5 * seated), 1.5)
 	if seated < 0.35:
 		return
-	_draw_scope_reticle(center, radius, (seated - 0.35) / 0.65)
+	_draw_scope_reticle(reticle_center, radius, (seated - 0.35) / 0.65)
 
 func _draw_scope_reticle(center: Vector2, radius: float, opacity: float) -> void:
 	var stage_two := _zoom_index >= 1
 	var fine := Color("dfe9f4", 0.92 * opacity)
 	var mid := Color("dfe9f4", 0.58 * opacity)
 	var arm := radius * 0.93
-	var gap := 5.0 if stage_two else 8.0
-	var stroke := 1.1 if stage_two else 1.7
-	for quadrant in 4:
-		var axis := Vector2.from_angle(float(quadrant) * PI * 0.5)
-		_reticle_line(center + axis * gap, center + axis * arm, fine, stroke)
-	_reticle_dot(center, 1.1 if stage_two else 1.5, fine)
+	# A simple dot, not the four-arm crosshair this used to draw - see handoff
+	# bug #4. The mil-dot ranging marks stay: a bare dot with zero ranging aid
+	# would be a real regression for a sniper shooting at real distance, and
+	# the user's complaint was specifically about the cross, not about losing
+	# range information.
+	_reticle_dot(center, 1.6 if stage_two else 2.0, fine)
 	# Ranging dots on the two horizontals and the lower vertical; the upper arm
 	# stays clean, the way a real ranging reticle is.
 	var marks := 7 if stage_two else 4
