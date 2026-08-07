@@ -186,6 +186,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_tick_perf_sample(delta)
 	_sync_objective_presentation()
+	_sync_bot_interactions()
 	_sync_squad_hud()
 	_tick_feedback_preview(delta)
 	_tick_death_screen(delta)
@@ -377,6 +378,8 @@ func _populate_bot_opponents() -> void:
 		return
 	var red_roster: Array = director.rosters[Duelist.Team.RED]
 	var blue_roster: Array = director.rosters[Duelist.Team.BLUE]
+	var red_bots: Array[BotDuelist] = []
+	var blue_bots: Array[BotDuelist] = []
 	for duelist in _all_authority_actors():
 		if duelist is BotDuelist:
 			var enemies: Array[Duelist] = []
@@ -384,7 +387,26 @@ func _populate_bot_opponents() -> void:
 			for candidate in enemy_roster:
 				if candidate is Duelist:
 					enemies.append(candidate as Duelist)
-			(duelist as BotDuelist).set_opponents(enemies)
+			var bot := duelist as BotDuelist
+			bot.set_opponents(enemies)
+			if bot.team == Duelist.Team.RED:
+				red_bots.append(bot)
+			else:
+				blue_bots.append(bot)
+	red_bots.sort_custom(func(a: BotDuelist, b: BotDuelist) -> bool: return a.actor_id < b.actor_id)
+	blue_bots.sort_custom(func(a: BotDuelist, b: BotDuelist) -> bool: return a.actor_id < b.actor_id)
+	for index in red_bots.size():
+		red_bots[index].configure_objective_ai(arena_map, index)
+	for index in blue_bots.size():
+		blue_bots[index].configure_objective_ai(arena_map, index)
+
+func _sync_bot_interactions() -> void:
+	if director == null:
+		return
+	for duelist in _all_authority_actors():
+		if duelist is BotDuelist:
+			var bot := duelist as BotDuelist
+			director.set_interact(bot.actor_id, bot.wants_objective_interact())
 
 func _ensure_actor(record: Dictionary, local_controlled: bool, authoritative_collision: bool) -> Duelist:
 	var actor_id := str(record.get("actor_id", ""))
@@ -1752,6 +1774,7 @@ func _sync_objective_presentation() -> void:
 	if hud != null:
 		hud.set_objective_state(state)
 		_update_use_control(state)
+	_push_bot_objective_context(state)
 	_sync_nuke_core_presentation(state)
 	_sync_launch_pad_presentation(state)
 	_sync_interact_progress(state)

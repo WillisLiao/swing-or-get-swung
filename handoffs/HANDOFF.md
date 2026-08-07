@@ -20,7 +20,13 @@ This repo is protected on `main` - land changes by branch + PR, not a direct pus
 
 ## Current state (2026-08-07)
 
-**Latest - eleventh session, all seven bugs from `handoffs/NEXT-SESSION-weapon-visual-bugs.md` fixed, via `/sonnet-opus`:**
+**Latest - thirteenth session, objective-aware autonomous bots (Robert, PR #9):**
+Offline teammates and enemies now understand Nuclear Rush instead of acting as combat-only targets. Each squad assigns deterministic Runner, Escort, Defender, and Raider roles; bots dynamically claim the core, escort a friendly carrier, intercept an enemy carrier, deliver and install at their own pad, defend a launch, or invade and cancel an enemy launch. They reuse the map's route planner, keep fighting opportunistically while moving toward the objective, recover from obstructions, and drive the same authoritative `interact` input used by players. A new end-to-end exercise covers decisions plus real pickup/install/cancel rules. Headless import is clean, all 17 exercises pass, and MCP runtime inspection confirmed the live 4v4 bots moving without game-log errors. Full detail: "Thirteenth session" in `devlogs/2026-08-07.md`.
+
+**Twelfth session - full art/UI redesign via `/sonnet-opus`: Blender MCP weapons, HUD/UI visual pass, sniper scope picture-in-picture rework:**
+The "zero imported art" constraint was explicitly retired this session (Blender-authored assets are now a normal part of the pipeline; Mobile renderer stays hard, unchanged). All five weapons plus the Shield-class revolver were rebuilt as Blender-authored `.glb` models in a Halo/Destiny register, replacing procedural geometry, materialized through `NuclearMaterials`/`nuclear_pbr` by the same mesh-name-prefix convention the character import already used. `duel_hud.gd`, `rift_link_panel.gd`, `riftline_main_menu.gd`, and `riftline_class_panel.gd` got a full consistent visual redesign, replacing the old placeholder look, with every public signature and touch hit-test region preserved (a real latent settings-panel hit-test bug found and fixed along the way). The sniper scope was reworked from a flat full-screen mask to a genuine picture-in-picture second camera, fixing both the "solid color outside the scope" and "no recoil while scoped" reports at once. Full detail: "Twelfth session" in `devlogs/2026-08-07.md`.
+
+**Eleventh session - all seven bugs from `handoffs/NEXT-SESSION-weapon-visual-bugs.md` fixed, via `/sonnet-opus`:**
 The reticle now tracks recoil (a new `Duelist.recoil_presentation()` pushed into `DuelHud` each frame, same pattern as `ads_progress`), the confirmed respawn-with-same-weapon bug is fixed (`set_weapon_presentation(force: bool)`), the sniper scope reticle kicks under recoil instead of reading as dead, the sniper reticle is a dot with ranging marks instead of a cross, the pistol is one-handed at hip and two-handed on ADS with a genuinely mirrored (not just relocated) support hand, the shield's default carry reads as in front of the character with a squared-up ADS parapet and a visible reload pose, and the shader's periodic sine-wave surface relief - the actual cause of the moving stripe artifact - is replaced with an analytic-derivative noise field. Full detail, including each fix's known remaining limitations (pistol sleeve occlusion, shield forearm-cuff ring, unverified long-range shader aliasing): "Eleventh session" in `devlogs/2026-08-07.md`. `handoffs/NEXT-SESSION-weapon-visual-bugs.md` is now historical - its diagnosis was accurate, but every bug it describes is fixed; nothing there is still open work.
 
 **Ninth session - recoil, muzzle flash, ballistic shield rework, first-person hands (ported from the old `IOSapp/Riftline` working copy, now retired):**
@@ -34,7 +40,7 @@ Nuclear Rush is the **only** mode, built to the final rules below.
 The session layer is 4v4 on protocol 12 with no map or mode negotiation left in the wire format.
 Art moved to real PBR via `shaders/nuclear_pbr.gdshader` + `NuclearMaterials`. The shipping character and the standalone Cover V2 review are now explicit user-requested Blender-import exceptions; neither uses textures.
 The settings-panel touch-capture bug (a sliding finger activating other controls) is fixed with a regression test.
-Headless import is clean and all 16 exercises pass.
+Headless import is clean and all 17 exercises pass.
 Full detail: `devlogs/2026-08-07.md`.
 
 **Same day, second session - multiplayer hardening and three bug fixes:**
@@ -96,10 +102,9 @@ These touch `scripts/duelist.gd`, `scripts/riftline_arena.gd`, and `scripts/duel
 **Run them sequentially, one at a time, not as concurrently-running sessions against the same checkout** - see the "Sequencing" note in `NEXT-SESSION-art-ui-redesign.md` for what happens if you don't and how to do it safely with worktrees if you really want two running at once.
 
 **Older backlog, still real but lower priority than the above:**
-1. **Objective-aware bots.** `bot_duelist.gd` is combat-only. `set_objective_context()` exists and the arena feeds it, but nothing consumes it, so bots ignore the core entirely. This is the biggest gap for offline and bot-filled 4v4.
-2. **Surface relief bands on large flat areas.** Drive albedo from the isotropic value noise and leave the sine sum for the normal only.
-3. **Palette is over-saturated.** Team accents are on whole base walls; the pad emissive ring blows out. Large surfaces should be concrete/steel with team colour as accent only. (Likely absorbed into the art/UI redesign session rather than done separately - see that bootstrap file.)
-4. **On-device touch playtest** of install/cancel, which PR #1's review asked for.
+1. **Surface relief bands on large flat areas.** Drive albedo from the isotropic value noise and leave the sine sum for the normal only.
+2. **Palette is over-saturated.** Team accents are on whole base walls; the pad emissive ring blows out. Large surfaces should be concrete/steel with team colour as accent only. (Likely absorbed into the art/UI redesign session rather than done separately - see that bootstrap file.)
+3. **On-device touch playtest** of install/cancel, which PR #1's review asked for.
 
 The old character `pulp_lit` gap is resolved by the Blender character integration above. UI polish and any later higher-detail character pass remain in the art/UI redesign bootstrap.
 
