@@ -81,6 +81,12 @@ Full detail: `devlogs/2026-08-07.md`.
 - The existing 0.82x carrier movement multiplier remains the only universal carry penalty. Runner keeps the nuclear vest as readable class equipment, not damage immunity.
 - `riftline_modes_exercise.gd` now asserts that a non-Runner carrier keeps identical health while simulated and still receives the 0.82x speed multiplier.
 
+**Same day, ninth session - High Alert chip v1:**
+- Every local player currently has the High Alert chip equipped by default; there is no chip-selection screen yet. This is a presentation-only passive and does not change authority, damage, snapshots, or protocol 12.
+- An enemy must be alive, on the opposing team, at least 55% into ADS, within 95m, aiming within a 5.5-degree cone, outside the local camera frustum, and have an unobstructed layer-1 sightline for 0.5 seconds. Cover blocks the warning; the chip never supplies through-wall information.
+- A qualifying threat produces a pulsing amber screen-edge direction arc, `HIGH ALERT` plate, and a short procedural local warning tone. Each attacker must reacquire after losing the target, and its audio cue has a 5-second rearm window.
+- New `scripts/riftline_high_alert.gd` owns the local evaluator. `tools/riftline_high_alert_exercise.gd` covers timing, aim cone/range, behind-camera direction, cover suppression, and HUD state. Headless import is clean, all 17 exercises pass, the visual preview was inspected at 1280x588, and an MCP live main-scene run has no runtime errors.
+
 **Deferred by explicit user decision to their own sessions - do not start these inline, use the bootstrap files:**
 - `handoffs/NEXT-SESSION-art-ui-redesign.md` - its character-material premise is now partly stale because the live character is a Blender import on `NuclearMaterials`; use it for further character polish and the still-unfinished full UI pass. Visual polish for the main menu/class panel belongs here too.
 - `handoffs/NEXT-SESSION-respawn-logic.md` - respawn *timing* is now resolved (5s minimum + manual respawn). What's left there, if anything, is deeper game-mode-rule interaction, not the base mechanic.
@@ -121,6 +127,7 @@ The rules themselves:
 
 Roles (Shield Operator, Core Carrier, Support Operator, Observer/Marksman) are playstyle labels only.
 No loadout or perk restrictions are enforced.
+High Alert is currently a universal v1 passive, not a selectable or class-restricted perk.
 
 ## The one map
 

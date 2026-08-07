@@ -5,6 +5,7 @@ const SNAPSHOT_BUFFER := preload("res://scripts/riftline_snapshot_buffer.gd")
 const PRACTICE_PANEL := preload("res://scripts/riftline_practice_panel.gd")
 const MAIN_MENU := preload("res://scripts/riftline_main_menu.gd")
 const CLASS_PANEL := preload("res://scripts/riftline_class_panel.gd")
+const HIGH_ALERT := preload("res://scripts/riftline_high_alert.gd")
 const OPENING_HOLD_SECONDS := 2.5
 const DEFAULT_OFFLINE_SQUAD_SIZE := 4
 
@@ -55,6 +56,7 @@ var _ready_peers: Dictionary = {}
 var _pending_inputs: Array[Dictionary] = []
 var _local_duelist: Duelist
 var combat_feedback: RiftlineCombatFeedback
+var _high_alert: RiftlineHighAlert = HIGH_ALERT.new()
 var _local_actor_id := ""
 var _pending_actor_snapshots: Dictionary = {}
 var _snapshot_remaining := 0.0
@@ -189,6 +191,7 @@ func _physics_process(delta: float) -> void:
 	_sync_squad_hud()
 	_tick_feedback_preview(delta)
 	_tick_death_screen(delta)
+	_tick_high_alert(delta)
 	if _lan_active:
 		_tick_lobby_arming(delta)
 		_tick_lan_duel(delta)
@@ -383,6 +386,22 @@ func _populate_bot_opponents() -> void:
 				if candidate is Duelist:
 					enemies.append(candidate as Duelist)
 			(duelist as BotDuelist).set_opponents(enemies)
+
+func _tick_high_alert(delta: float) -> void:
+	if hud == null or _high_alert == null:
+		return
+	var opponents: Array[Duelist] = []
+	for candidate in _all_authority_actors():
+		if candidate != _local_duelist and candidate.team != _local_duelist.team:
+			opponents.append(candidate)
+	for candidate in _all_replica_actors():
+		if candidate != _local_duelist and candidate.team != _local_duelist.team and candidate not in opponents:
+			opponents.append(candidate)
+	var alert: Dictionary = _high_alert.evaluate(delta, _local_duelist, opponents)
+	if bool(alert.get("active", false)):
+		hud.show_high_alert(Vector2(alert.get("direction", Vector2.DOWN)), float(alert.get("intensity", 1.0)))
+	if bool(alert.get("just_triggered", false)) and combat_feedback != null:
+		combat_feedback.high_alert_warning()
 
 func _ensure_actor(record: Dictionary, local_controlled: bool, authoritative_collision: bool) -> Duelist:
 	var actor_id := str(record.get("actor_id", ""))
@@ -1339,6 +1358,9 @@ func _replace_match_for_lan(host: bool) -> void:
 func _clear_match_nodes() -> void:
 	_clear_ballistics()
 	_clear_ballistics_preview_bodies()
+	_high_alert.reset()
+	if hud != null:
+		hud.clear_high_alert()
 	if director != null:
 		director.queue_free()
 	for actor in _all_authority_actors():
@@ -2554,7 +2576,7 @@ func _tick_feedback_preview(delta: float) -> void:
 	if _feedback_preview.is_empty() or _local_duelist == null or hud == null:
 		return
 	_feedback_preview_elapsed += delta
-	var repeat_interval := 0.18 if _feedback_preview in ["damage-left", "damage-right", "low-health", "hit-confirm"] else 0.42
+	var repeat_interval := 0.05 if _feedback_preview == "high-alert-back" else 0.18 if _feedback_preview in ["damage-left", "damage-right", "low-health", "hit-confirm"] else 0.42
 	if _feedback_preview_elapsed < repeat_interval and delta > 0.0:
 		return
 	_feedback_preview_elapsed = 0.0
@@ -2582,6 +2604,8 @@ func _tick_feedback_preview(delta: float) -> void:
 		"damage-right":
 			hud.show_damage(22.0)
 			hud.show_damage_direction(Vector2.RIGHT, 1.0, int(enemy_team))
+		"high-alert-back":
+			hud.show_high_alert(Vector2.DOWN, 1.0)
 		"low-health":
 			hud.show_damage(22.0)
 		"seed-claimed":

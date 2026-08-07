@@ -123,6 +123,11 @@ func reload_completed(local: bool) -> void:
 		return
 	_play_local("reload_complete")
 
+func high_alert_warning() -> void:
+	if not _presentation_enabled:
+		return
+	_play_local("high_alert")
+
 ## The six objective events RiftlineMatch emits. Kept as one list so the audio
 ## bank and the dispatch check cannot drift apart.
 const NUCLEAR_RUSH_EVENTS := [
@@ -218,6 +223,7 @@ func _build_audio_bank() -> void:
 		"reload_start": _make_clip(0.08, 180.0, 360.0, 0.3, 163),
 		"reload_stage": _make_clip(0.075, 270.0, 190.0, 0.25, 169),
 		"reload_complete": _make_clip(0.105, 440.0, 760.0, 0.3, 179),
+		"high_alert": _make_clip(0.16, 540.0, 1280.0, 0.34, 181),
 		"core_picked_up": _make_clip(0.16, 410.0, 930.0, 0.38, 191),
 		"core_dropped": _make_clip(0.12, 540.0, 220.0, 0.38, 211),
 		"core_returned": _make_clip(0.19, 300.0, 820.0, 0.4, 227),
