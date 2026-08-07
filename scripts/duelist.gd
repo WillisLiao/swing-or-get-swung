@@ -56,12 +56,18 @@ const RECOIL_POSITION_BACK := 0.190
 # rather than falling through to the generic branch leaves the shield class a
 # single obvious place to retune its framing.
 const SHIELD_ADS_WEAPON_ANCHOR := Vector3(0.0, -0.06460, -0.62)
-# The shield's default carry: a tall plate held out in front, slightly to the
-# left and turned just enough to show its face rather than its edge, with the
-# vision port near the middle of the view. This is also the forced pose during
-# a reload.
-const SHIELD_VERTICAL_POSITION := Vector3(-0.22, -0.28, -0.66)
-const SHIELD_VERTICAL_ROTATION := Vector3(0.05, 0.62, -0.09)
+# The shield's default carry: a tall plate held out directly in front of the
+# carrier - not parked off to one side - turned just enough to show its face
+# rather than its edge, and raised so the vision port sits on the sight line
+# and the plate fills most of the view the way a carried riot shield does.
+# This is also the forced pose during a reload. The x offset is deliberately
+# near zero: earlier values (-0.40, then -0.22) pushed the plate into the left
+# third of the frame, which reads as a wall stuck to the side of the screen
+# rather than equipment held in front of the carrier. The yaw is also eased
+# from 0.62 to 0.46 - at 35 degrees the plate was oblique enough that the
+# vision port skewed off the aim line instead of framing it.
+const SHIELD_VERTICAL_POSITION := Vector3(-0.02, -0.18, -0.62)
+const SHIELD_VERTICAL_ROTATION := Vector3(0.05, 0.46, -0.09)
 # ADS pose. The plate does not spin in the picture plane - it *pitches*, the
 # way a visor or a car hood tips open: the carrier twists the wrist forward,
 # the top edge falls away from him, and the wall of steel becomes a low
@@ -72,12 +78,36 @@ const SHIELD_VERTICAL_ROTATION := Vector3(0.05, 0.62, -0.09)
 # position to park it at the bottom edge of the frame. Lerping the raw Euler
 # triple doesn't compose correctly once X/Y are already non-zero, which is why
 # this isn't a second Vector3.
-const SHIELD_HORIZONTAL_POSITION := Vector3(0.01, -0.225, -0.66)
+#
+# The carry pose's yaw has to come *out* over the same blend, though. Pitching
+# a plate that is still yawed 26 degrees lays it down as a diagonal running
+# out of the bottom-left corner rather than a parapet squared across the
+# bottom of the frame, and it leaves the right half of the view uncovered. So
+# the pitch is applied on top of an *interpolated* euler feed that unwinds the
+# carry yaw as the plate drops - the plate still pitches (never screen-rolls),
+# it just squares up to the camera on the way down, which is exactly what the
+# wrist does when a carrier pushes the shield down into a firing rest. A small
+# residual yaw is kept so the parapet is not machine-perfectly axis-aligned.
+const SHIELD_HORIZONTAL_POSITION := Vector3(0.0, -0.235, -0.62)
+const SHIELD_HORIZONTAL_ROTATION := Vector3(0.0, 0.06, 0.0)
 const SHIELD_ADS_PITCH_ANGLE := -PI * 0.5
-# Weapon-root pose while a Shield-class reload plays: tucked in close and low
-# so it sits visually behind/below the vertical shield plate rather than out
-# at the usual hip or ADS anchor.
-const SHIELD_RELOAD_WEAPON_POSITION := Vector3(-0.02, -0.34, -0.30)
+# How much of the plate's pitch the held glove rolls back out about the handle
+# bar. Rolling about the bar is free - the fist stays wrapped around it at any
+# angle - so this number chooses nothing but where the forearm exits the
+# frame. Slightly *over* a full counter-roll is what sends it down and out
+# through the bottom-right corner; at 0.85 the forearm came back level at the
+# camera and laid a metre of sleeve across the right third of the screen, and
+# at exactly 1.0 it ran out horizontally through the right edge. Any larger
+# and the arm starts to dive through the plate it is holding.
+const SHIELD_HAND_COUNTER_ROLL := 1.29
+# Weapon-root pose while a Shield-class reload plays: tucked in close and out
+# to the carrier's right so it sits clear of the vertical plate rather than
+# out at the usual hip or ADS anchor. The previous value (-0.02, -0.34, -0.30)
+# put it directly under the plate and a long way below the bottom edge of the
+# frame - the reload played entirely off-screen and the class simply had no
+# reload to look at. Kept low and outboard: it reads as a sidearm dropped out
+# of the fight while the shield stays up, without crossing the vision port.
+const SHIELD_RELOAD_WEAPON_POSITION := Vector3(0.175, -0.125, -0.34)
 # The view model lives alone on render layer 2, so it can carry its own key and
 # fill lights without touching a single watt of the arena's lighting. Without
 # them the weapon is lit only by a world-space sun and goes to pure black
@@ -572,9 +602,14 @@ func _process(delta: float) -> void:
 		# lerping the Euler triple) rotates about the camera's own right axis,
 		# so the top edge falls straight away from the viewer and the parapet
 		# lands level on screen no matter how the carry pose has the plate
-		# yawed to show its face instead of its edge.
+		# yawed to show its face instead of its edge. The euler that pitch is
+		# applied to is itself blended from the carry pose toward
+		# SHIELD_HORIZONTAL_ROTATION, so the carry yaw unwinds as the plate drops
+		# and the parapet squares up across the frame instead of lying down as a
+		# diagonal running out of one corner.
 		var shield_pitch := Basis(Vector3(1.0, 0.0, 0.0), SHIELD_ADS_PITCH_ANGLE * _shield_horizontal_t)
-		var shield_basis := shield_pitch * Basis.from_euler(SHIELD_VERTICAL_ROTATION)
+		var shield_euler := SHIELD_VERTICAL_ROTATION.lerp(SHIELD_HORIZONTAL_ROTATION, _shield_horizontal_t)
+		var shield_basis := shield_pitch * Basis.from_euler(shield_euler)
 		if _melee_swing_remaining > 0.0:
 			# Shield-bump melee: the plate itself lunges forward - the
 			# Montagne-reference "hit them with the shield", not a weapon swing.
@@ -590,10 +625,10 @@ func _process(delta: float) -> void:
 			# the camera. Rolling the glove back about its own X - the handle
 			# bar's axis, so the fist stays wrapped around the bar and only
 			# changes where round it the knuckles sit - holds the forearm
-			# roughly still while the plate turns under it. Slightly less than
-			# a full counter-roll, so some of the turn still carries into the
-			# arm and it does not read as a detached hand.
-			_left_hand_root.rotation.x = -SHIELD_ADS_PITCH_ANGLE * _shield_horizontal_t * 0.85
+			# roughly still while the plate turns under it. See
+			# SHIELD_HAND_COUNTER_ROLL for why it is slightly more than a full
+			# counter-roll rather than less.
+			_left_hand_root.rotation.x = -SHIELD_ADS_PITCH_ANGLE * _shield_horizontal_t * SHIELD_HAND_COUNTER_ROLL
 	if _muzzle_flare != null:
 		var flare := clampf(_fire_flash_remaining / 0.075, 0.0, 1.0)
 		_muzzle_flare.scale = Vector3.ONE * flare
