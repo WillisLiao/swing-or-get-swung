@@ -26,7 +26,7 @@ All five weapon models rebuilt with distinct silhouettes; sights redesigned from
 Robert's circular arena is in as the **only** map, ported forward from PR #1 rather than merged.
 Nuclear Rush is the **only** mode, built to the final rules below.
 The session layer is 4v4 on protocol 12 with no map or mode negotiation left in the wire format.
-Art moved to real PBR via `shaders/nuclear_pbr.gdshader` + `NuclearMaterials`, still with zero imported art.
+Art moved to real PBR via `shaders/nuclear_pbr.gdshader` + `NuclearMaterials`. The shipping character and the standalone Cover V2 review are now explicit user-requested Blender-import exceptions; neither uses textures.
 The settings-panel touch-capture bug (a sliding finger activating other controls) is fixed with a regression test.
 Headless import is clean and all 16 exercises pass.
 Full detail: `devlogs/2026-08-07.md`.
@@ -43,7 +43,7 @@ Full detail: `devlogs/2026-08-07.md`.
 - Iron sights and the knife are gone. Every weapon ADS's through an optic; melee (`Duelist.melee_attack()`) swings whatever weapon is currently equipped, with per-weapon range/damage/cooldown.
 - Five real weapons replace the single generic M4/PULSE: assault rifle, MP7-reference SMG, S1897-reference pump shotgun (9-pellet rosette), 9mm-class pistol, Halo-Infinite-referenced sniper (two zoom steps, zero ADS drift). New `scripts/rift_weapons.gd` data table backs all of it; `rift_ballistics.gd` is now fully data-driven.
 - New accuracy model: `RiftWeapons.cone_for()` composes hipfire/ADS x stationary/moving/jumping/crouching from one formula per weapon, driven by new networked `Duelist` state (`bloom`, `shot_counter`, `ads_progress`) that is symmetric across `authoritative_state()`/`apply_presentation_state()`.
-- Four classes (frontline/sniper/runner/shield) resolve into 1-2 loadout slots via `Duelist.configure_loadout()`; `RiftlineRoster` carries `player_class`/`primary_weapon` (defaults to Frontline/Rifle - no selection screen yet, see below). Runner wears the nuclear vest (removes the new carry damage-over-time); shield blocks frontal damage.
+- Four classes (frontline/sniper/runner/shield) resolve into 1-2 loadout slots via `Duelist.configure_loadout()`; `RiftlineRoster` carries `player_class`/`primary_weapon` (defaults to Frontline/Rifle - no selection screen yet, see below). Runner still wears the nuclear vest as visual class equipment, but carrying the core no longer damages any class; shield blocks frontal damage.
 - All five weapons rebuilt on `NuclearMaterials` instead of the old flat `pulp_lit` boxes (mid-session user feedback: the old carbine read "Roblox/TF2-like," not the Halo/Destiny register the rest of the game already commits to) - still "lightly on the model side" per the handoff, not final art.
 - `PROTOCOL_VERSION` bumped 10 -> 11 (new `melee` input field, renamed `melee_strike` wire event, new snapshot fields).
 - All 16 exercises still pass, several extended for the new weapon/accuracy/loadout surface. Full detail: the "Third session" entry in `devlogs/2026-08-07.md`.
@@ -64,8 +64,25 @@ Full detail: `devlogs/2026-08-07.md`.
 - Bots now automatically call the existing authoritative respawn request when their same 5-second minimum death timer expires. Human players still use the death-screen button and can change class before respawning; that manual flow is unchanged.
 - `tools/riftline_modes_exercise.gd` now covers both bot auto-respawn and death-visual cleanup/reset. Headless import is clean, all 16 exercises pass, and an MCP main-scene launch reports no runtime errors (existing GDScript warnings remain).
 
+**Same day, sixth session - Blender Cover V2 preview (explicit imported-art exception):**
+- User explicitly requested a Blender-authored map pass with more cover and varied interior-wall heights. The original uniform outer wall is unchanged; 32 new pieces span 1.10-2.55m and remain 180-degree symmetric for RED/BLUE fairness.
+- The Blender source is `/Users/robertwu/Documents/New project/art/exports/RiftlineMap_Concourse_CoverV2.blend`. A visual-only 205-mesh export lives at `assets/maps/riftline_map_concourse_cover_v2.glb`, wrapped by `scenes/cover_v2_preview.tscn` with an orbit camera.
+- This is a standalone review scene only: it has no gameplay collisions and does not replace the procedural shipping map. Press F6 while the preview scene is open; hold Space to pause its orbit.
+- Godot 4.7.1 imported the GLB cleanly, the preview scene ran through MCP with no runtime errors, and the editor is left open on `cover_v2_preview.tscn`.
+
+**Same day, seventh session - Blender character integrated into live play (explicit imported-art exception):**
+- The old GDScript-built box/cylinder body silhouette is replaced by `assets/characters/riftline_duelist_lowpoly.glb`, a Blender-authored modular low-poly armored character: 31 meshes under seven named pivots (`Torso`, `Head`, left/right arms, left/right legs, root). The source is `/Users/robertwu/Documents/New project/art/exports/RiftlineDuelist_LowPoly.blend`; no textures are used.
+- One shared model serves both teams. `Duelist` assigns RED/BLUE `NuclearMaterials` at runtime by exported mesh-name roles (`TEAM_`, `DARK_`, `ARMOR_`, `METAL_`, `VISOR_`, `ACCENT_`), so there are no SUN/VOID variants or duplicated team assets.
+- Existing procedural gait, stance scaling, head pitch, strafe lean, class equipment, world weapon, carrier signal, collision capsule, and networking remain attached to the same `Duelist`. The 1.8s death hold + 0.7s fade now traverses all imported `MeshInstance3D` descendants; respawn restores visibility and zero transparency exactly as before.
+- `riftline_modes_exercise.gd` now locks the imported model/pivot contract, minimum mesh count, both team albedos, death disappearance, and respawn restoration. Headless import is clean, all 16 exercises pass, and MCP live-game inspection confirmed 31 meshes and `nuclear_pbr` materials for both teams.
+
+**Same day, eighth session - core carry health drain removed:**
+- Per the user's direct playtest decision, carrying the nuclear core never deals damage, regardless of class or vest. The old 2.5 HP/s non-Runner drain and its constant are removed.
+- The existing 0.82x carrier movement multiplier remains the only universal carry penalty. Runner keeps the nuclear vest as readable class equipment, not damage immunity.
+- `riftline_modes_exercise.gd` now asserts that a non-Runner carrier keeps identical health while simulated and still receives the 0.82x speed multiplier.
+
 **Deferred by explicit user decision to their own sessions - do not start these inline, use the bootstrap files:**
-- `handoffs/NEXT-SESSION-art-ui-redesign.md` - full Halo/Destiny-register art, character/weapon materials off `pulp_lit`, and a full UI pass (not just the settings-panel layout fix already done). **Run after** the weapons/loadouts session (now done) - they touch the same files. Visual polish for the new main menu/class panel belongs here too.
+- `handoffs/NEXT-SESSION-art-ui-redesign.md` - its character-material premise is now partly stale because the live character is a Blender import on `NuclearMaterials`; use it for further character polish and the still-unfinished full UI pass. Visual polish for the main menu/class panel belongs here too.
 - `handoffs/NEXT-SESSION-respawn-logic.md` - respawn *timing* is now resolved (5s minimum + manual respawn). What's left there, if anything, is deeper game-mode-rule interaction, not the base mechanic.
 
 These touch `scripts/duelist.gd`, `scripts/riftline_arena.gd`, and `scripts/duel_hud.gd` in overlapping ways.
@@ -77,7 +94,7 @@ These touch `scripts/duelist.gd`, `scripts/riftline_arena.gd`, and `scripts/duel
 3. **Palette is over-saturated.** Team accents are on whole base walls; the pad emissive ring blows out. Large surfaces should be concrete/steel with team colour as accent only. (Likely absorbed into the art/UI redesign session rather than done separately - see that bootstrap file.)
 4. **On-device touch playtest** of install/cancel, which PR #1's review asked for.
 
-Character/weapon materials being on `pulp_lit` moved from this list into the art/UI redesign bootstrap file - it is the same underlying gap, just now scoped with the rest of the visual redesign instead of as a standalone item.
+The old character `pulp_lit` gap is resolved by the Blender character integration above. UI polish and any later higher-detail character pass remain in the art/UI redesign bootstrap.
 
 ## THE GAME MODE - FINAL RULES
 
@@ -112,7 +129,7 @@ It is Robert's layout from PR #1 on the Nuclear-Rush repo, ported forward onto c
 
 ## Art direction
 
-Realistic, in the register of Halo Infinite, but with **no imported art** - that convention still holds.
+Realistic, in the register of Halo Infinite. Procedural geometry remains the default, with only the user-approved Blender character and Cover V2 review as imported-art exceptions.
 Realism comes from `shaders/nuclear_pbr.gdshader` plus the `NuclearMaterials` factory in `scripts/nuclear_materials.gd`: true metal-roughness response, procedural relief with an analytic normal gradient, grime in recesses, dust on upward faces, material-supplied AO, sky ambient and reflection, ACES tonemapping, soft shadows, bloom.
 
 The renderer stays **Mobile**.
@@ -120,6 +137,8 @@ SSAO, SSIL, SDFGI, SSR, and volumetric fog are Forward+ only and are not afforda
 Do not reach for them.
 
 The older `shaders/pulp_lit.gdshader` is the previous illustrative look and is being retired in favour of `nuclear_pbr`.
+
+The current exceptions are the Blender Cover V2 **review scene** and the Blender character described above. The character is wired into live play; Cover V2 is still preview-only and should not be treated as approval to replace the procedural shipping map.
 
 ## Also decided, do not undo
 

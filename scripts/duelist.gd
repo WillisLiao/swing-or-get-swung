@@ -3,6 +3,7 @@ extends CharacterBody3D
 
 const PULP_LIT := preload("res://shaders/pulp_lit.gdshader")
 const BALLISTICS := preload("res://scripts/rift_ballistics.gd")
+const CHARACTER_MODEL: PackedScene = preload("res://assets/characters/riftline_duelist_lowpoly.glb")
 
 signal defeated(victim: Duelist, killer: Duelist)
 signal fire_requested(shooter: Duelist, weapon: Weapon, origin: Vector3, direction: Vector3)
@@ -55,9 +56,6 @@ const JUMP_SPEED := 9.3
 # Carrying the nuclear core is the mode's central risk: slow enough that a
 # carrier needs escorts, not so slow that reaching your own base is hopeless.
 const CORE_CARRY_SPEED_MULTIPLIER := 0.82
-# Carrying without the runner's nuclear vest costs steady health in addition
-# to the speed penalty every carrier pays; the vest removes this, not the speed cost.
-const CORE_CARRY_DAMAGE_PER_SECOND := 2.5
 # A shot is airborne when the restored (snapshotted) vertical velocity is
 # clearly off the ground plate. Grounded velocity.y is pinned to -0.1 by
 # _simulate_motion, so this threshold is unambiguous and - unlike
@@ -107,10 +105,18 @@ var _pending_authoritative_shot_plan: Dictionary = {}
 var last_shot_was_hip_followup := false
 var _collision: CollisionShape3D
 var _capsule: CapsuleShape3D
-var _torso: MeshInstance3D
+var _torso: Node3D
 var _band: MeshInstance3D
 var _body_visual_root: Node3D
 var _body_visual_target_scale_y := 1.0
+var _torso_rest_position := Vector3.ZERO
+var _torso_rest_rotation := Vector3.ZERO
+var _model_head: Node3D
+var _model_head_rest_rotation := Vector3.ZERO
+var _left_leg_rest_rotation := Vector3.ZERO
+var _right_leg_rest_rotation := Vector3.ZERO
+var _left_arm_rest_rotation := Vector3.ZERO
+var _right_arm_rest_rotation := Vector3.ZERO
 var _weapon_root: Node3D
 ## Static resting pose of the weapon inside `_weapon_root`. The root itself is
 ## already animated every frame (ADS anchor, recoil, obstruction, melee, swap),
@@ -312,22 +318,20 @@ func _process(delta: float) -> void:
 	var firing_pose := clampf(_recoil_remaining / 0.22, 0.0, 1.0)
 	var flinch_pose := clampf(_flinch_remaining / 0.18, 0.0, 1.0)
 	if _torso != null:
-		_torso.position.y = 1.03 + absf(gait) * (0.018 if moving else 0.0)
-		_torso.rotation.z = gait_lag * (0.035 if moving else 0.0) + flinch_pose * 0.12
-		_torso.rotation.x = flinch_pose * -0.1
+		_torso.position = _torso_rest_position + Vector3.UP * (absf(gait) * (0.018 if moving else 0.0))
+		_torso.rotation = _torso_rest_rotation + Vector3(flinch_pose * -0.1, 0.0, gait_lag * (0.035 if moving else 0.0) + flinch_pose * 0.12)
 	if _band != null:
-		_band.position.y = 1.18
 		_band.scale = Vector3.ONE * (1.0 + (_damage_flash_remaining / 0.16) * 0.08)
 	if _left_leg != null:
-		_left_leg.rotation.x = gait * (0.17 if stance == Stance.STAND else 0.07)
+		_left_leg.rotation = _left_leg_rest_rotation + Vector3(gait * (0.17 if stance == Stance.STAND else 0.07), 0.0, 0.0)
 	if _right_leg != null:
-		_right_leg.rotation.x = -gait * (0.17 if stance == Stance.STAND else 0.07)
+		_right_leg.rotation = _right_leg_rest_rotation + Vector3(-gait * (0.17 if stance == Stance.STAND else 0.07), 0.0, 0.0)
 	if _left_arm != null:
-		_left_arm.rotation.x = -gait * 0.09
-		_left_arm.rotation.z = airborne * 0.08 - firing_pose * 0.05
+		_left_arm.rotation = _left_arm_rest_rotation + Vector3(-gait * 0.09, 0.0, airborne * 0.08 - firing_pose * 0.05)
 	if _right_arm != null:
-		_right_arm.rotation.x = gait * 0.09
-		_right_arm.rotation.z = -airborne * 0.08 + firing_pose * 0.05
+		_right_arm.rotation = _right_arm_rest_rotation + Vector3(gait * 0.09, 0.0, -airborne * 0.08 + firing_pose * 0.05)
+	if _model_head != null and head != null:
+		_model_head.rotation = _model_head_rest_rotation + Vector3(head.rotation.x, 0.0, 0.0)
 	if _survey_frame != null:
 		_survey_frame.rotation.z = -gait_lag * 0.025
 	if _weapon_root != null:
@@ -677,8 +681,6 @@ func _simulate_motion(move_input: Vector2, wants_jump: bool, delta: float) -> vo
 	else:
 		velocity.y = JUMP_SPEED if wants_jump and stance != Stance.PRONE else -0.1
 	move_and_slide()
-	if is_carrying_core() and not has_nuclear_vest:
-		take_damage(CORE_CARRY_DAMAGE_PER_SECOND * delta, null)
 
 func set_stance(next_stance: Stance) -> void:
 	if eliminated or not match_active or stance == next_stance:
@@ -1008,36 +1010,85 @@ func _team_glow() -> Color:
 	return Color("ff7a68") if team == Team.RED else Color("7bdbff")
 
 func _build_character_silhouette() -> void:
-	# Broad value groups and one asymmetric expedition tool make the adult frame readable without armor language.
-	_body_visual_root = Node3D.new()
-	_body_visual_root.name = "ExpeditionSilhouette"
+	# Blender-authored, low-poly modular armor. The same lightweight geometry
+	# serves both teams; runtime materials provide RED/BLUE identity without
+	# duplicating the asset. Named pivots preserve the existing procedural gait.
+	var model_instance: Node = CHARACTER_MODEL.instantiate()
+	if not model_instance is Node3D:
+		push_error("Riftline character GLB did not instantiate as Node3D")
+		model_instance.queue_free()
+		return
+	_body_visual_root = model_instance as Node3D
+	_body_visual_root.name = "BlenderCharacter"
 	add_child(_body_visual_root)
-	var cloth := _material(_team_color(), 0.0)
-	var dark := _material(Color("17263e"), 0.0)
-	var brass := _material(Color("d6ad67"), 0.0)
-	var glow := _material(_team_glow(), 1.4)
-	_torso = _add_body_part(_box(Vector3(0.68, 0.92, 0.42)), Vector3(0.0, 1.03, 0.03), cloth)
-	_left_leg = _add_body_part(_cylinder(0.15, 0.17, 0.76), Vector3(-0.19, 0.37, 0.02), dark, Vector3(0.0, 0.0, 0.02))
-	_right_leg = _add_body_part(_cylinder(0.15, 0.17, 0.76), Vector3(0.19, 0.37, 0.02), dark, Vector3(0.0, 0.0, -0.02))
-	_left_arm = _add_body_part(_cylinder(0.11, 0.12, 0.72), Vector3(-0.48, 1.08, 0.0), cloth, Vector3(0.0, 0.0, -0.2))
-	_right_arm = _add_body_part(_cylinder(0.11, 0.12, 0.72), Vector3(0.48, 1.08, 0.0), cloth, Vector3(0.0, 0.0, 0.2))
-	_band = _add_body_part(_cylinder(0.51, 0.51, 0.13), Vector3(0.0, 1.18, 0.0), glow)
-	var head_mesh := SphereMesh.new()
-	head_mesh.radius = 0.27
-	head_mesh.height = 0.52
-	_add_head_part(head_mesh, Vector3.ZERO, dark)
-	_add_head_part(_cylinder(0.33, 0.33, 0.08), Vector3(0.0, 0.22, 0.0), cloth)
-	_add_head_part(_box(Vector3(0.38, 0.1, 0.08)), Vector3(0.0, 0.0, -0.24), brass)
-
-	if team == Team.RED:
-		_build_signal_hauler(cloth, dark, brass, glow)
-	else:
-		_build_storm_surveyor(cloth, dark, brass, glow)
+	_torso = _model_part("Torso")
+	_model_head = _model_part("Head")
+	_left_leg = _model_part("LeftLeg")
+	_right_leg = _model_part("RightLeg")
+	_left_arm = _model_part("LeftArm")
+	_right_arm = _model_part("RightArm")
+	_band = _body_visual_root.find_child("ACCENT_ChestStripe", true, false) as MeshInstance3D
+	_cache_character_rest_pose()
+	_apply_character_materials()
+	var dark := NuclearMaterials.polymer(Color("111923"), 0.7)
+	var brass := NuclearMaterials.metal(Color("7b8797"), 0.32)
+	var glow := NuclearMaterials.emissive(_team_glow(), 1.4)
 	_build_carrier_signal(glow)
 	if player_class == PlayerClass.SHIELD:
 		_build_ballistic_shield(dark, brass, glow)
 	elif player_class == PlayerClass.RUNNER:
 		_build_nuclear_vest_marker(glow)
+
+func _model_part(part_name: String) -> Node3D:
+	if _body_visual_root == null:
+		return null
+	var found: Node = _body_visual_root.find_child(part_name, true, false)
+	return found as Node3D if found is Node3D else null
+
+func _cache_character_rest_pose() -> void:
+	if _torso != null:
+		_torso_rest_position = _torso.position
+		_torso_rest_rotation = _torso.rotation
+	if _model_head != null:
+		_model_head_rest_rotation = _model_head.rotation
+	if _left_leg != null:
+		_left_leg_rest_rotation = _left_leg.rotation
+	if _right_leg != null:
+		_right_leg_rest_rotation = _right_leg.rotation
+	if _left_arm != null:
+		_left_arm_rest_rotation = _left_arm.rotation
+	if _right_arm != null:
+		_right_arm_rest_rotation = _right_arm.rotation
+
+func _apply_character_materials() -> void:
+	if _body_visual_root == null:
+		return
+	var team_plate: Material = NuclearMaterials.painted_metal(_team_color(), 0.38)
+	var undersuit: Material = NuclearMaterials.polymer(Color("101923"), 0.72)
+	var armor: Material = NuclearMaterials.metal(Color("26313e"), 0.36)
+	var hardware: Material = NuclearMaterials.metal(Color("566273"), 0.28)
+	var team_light: Material = NuclearMaterials.emissive(_team_glow(), 2.2)
+	var geometry_nodes: Array[Node] = _body_visual_root.find_children("*", "MeshInstance3D", true, false)
+	for node: Node in geometry_nodes:
+		var instance := node as MeshInstance3D
+		if instance == null:
+			continue
+		instance.layers = 1
+		if instance.name.begins_with("TEAM_"):
+			instance.material_override = team_plate
+		elif instance.name.begins_with("DARK_"):
+			instance.material_override = undersuit
+		elif instance.name.begins_with("ARMOR_"):
+			instance.material_override = armor
+		elif instance.name.begins_with("METAL_"):
+			instance.material_override = hardware
+		elif instance.name.begins_with("VISOR_") or instance.name.begins_with("ACCENT_"):
+			instance.material_override = team_light
+	# Damage presentation animates only this chest strip. Give it a local
+	# material instance so one actor flashing cannot change every same-team
+	# visor/accent through NuclearMaterials' intentional shared cache.
+	if _band != null:
+		_band.material_override = team_light.duplicate() as Material
 
 func _torus(inner_radius: float, outer_radius: float) -> TorusMesh:
 	var mesh := TorusMesh.new()
@@ -1148,8 +1199,8 @@ func _add_shield_part(mesh: Mesh, position: Vector3, material: Material, rotatio
 	instance.layers = VIEW_MODEL_LAYER_MASK
 	_fp_shield_root.add_child(instance)
 
-## Runner class equipment: a chest-worn vest that marks who is immune to the
-## carry damage-over-time.
+## Runner class equipment: a chest-worn vest that keeps the class silhouette
+## readable. Core carrying no longer deals damage to any class.
 func _build_nuclear_vest_marker(glow: Material) -> void:
 	_add_body_part(_box(Vector3(0.5, 0.5, 0.46)), Vector3(0.0, 1.05, 0.0), glow)
 

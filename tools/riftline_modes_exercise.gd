@@ -74,6 +74,10 @@ func _test_pickup_at_center(root: Node3D) -> void:
 	assert(match_node.core_carrier_id == "pick_red")
 	assert(match_node.core_carrier_team == RED)
 	assert(red.is_carrying_core())
+	var health_before_carry: float = red.health
+	red._simulate_motion(Vector2.ZERO, false, 1.0)
+	assert(is_equal_approx(red.health, health_before_carry))
+	assert(is_equal_approx(red.movement_speed_multiplier(), Duelist.CORE_CARRY_SPEED_MULTIPLIER))
 
 func _test_carrier_flag_set_and_cleared(root: Node3D) -> void:
 	var match_node := _make_match(root, _default_pads())
@@ -374,6 +378,26 @@ func _test_death_visual_cleanup(root: Node3D) -> void:
 	duelist.set_actor_id("death_visual")
 	root.add_child(duelist)
 	duelist.set_match_active(true)
+	assert(duelist._body_visual_root != null)
+	assert(duelist._body_visual_root.name == "BlenderCharacter")
+	assert(duelist._left_arm != null and duelist._right_arm != null)
+	assert(duelist._left_leg != null and duelist._right_leg != null)
+	var imported_geometry: Array[Node] = duelist._body_visual_root.find_children("*", "MeshInstance3D", true, false)
+	assert(imported_geometry.size() >= 31)
+	var red_plate := duelist._body_visual_root.find_child("TEAM_ChestPlate", true, false) as MeshInstance3D
+	assert(red_plate != null and red_plate.material_override is ShaderMaterial)
+	var red_albedo: Color = (red_plate.material_override as ShaderMaterial).get_shader_parameter("albedo")
+	assert(red_albedo.is_equal_approx(duelist._team_color()))
+	assert(duelist._band != null and duelist._band.material_override != red_plate.material_override)
+
+	var blue_duelist := Duelist.new()
+	blue_duelist.build(BLUE, false, true, true)
+	root.add_child(blue_duelist)
+	var blue_plate := blue_duelist._body_visual_root.find_child("TEAM_ChestPlate", true, false) as MeshInstance3D
+	assert(blue_plate != null and blue_plate.material_override is ShaderMaterial)
+	var blue_albedo: Color = (blue_plate.material_override as ShaderMaterial).get_shader_parameter("albedo")
+	assert(blue_albedo.is_equal_approx(blue_duelist._team_color()))
+	blue_duelist.queue_free()
 
 	duelist.take_damage(Duelist.HEALTH, null)
 	assert(duelist.eliminated)
