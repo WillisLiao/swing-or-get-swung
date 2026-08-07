@@ -2,6 +2,7 @@ class_name DuelHud
 extends Control
 
 signal rift_link_requested
+signal main_menu_requested
 signal feedback_preferences_changed(effects_enabled: bool, haptics_enabled: bool)
 signal view_fov_changed(horizontal_degrees: float)
 
@@ -24,8 +25,8 @@ var movement := Vector2.ZERO
 var fire_held := false
 var aim_held := false
 var health := 100.0
-var magazine_rounds := Duelist.M4_MAGAZINE_SIZE
-var reserve_ammo := Duelist.M4_RESERVE_AMMO
+var magazine_rounds := int(RiftWeapons.row(int(Duelist.Weapon.RIFLE)).magazine_size)
+var reserve_ammo := int(RiftWeapons.row(int(Duelist.Weapon.RIFLE)).reserve_ammo)
 var reload_remaining := 0.0
 var damage_flash := 0.0
 var hit_confirm := 0.0
@@ -69,6 +70,8 @@ var _crouch_requested := false
 var _prone_requested := false
 var _weapon_switch_requested := false
 var _reload_requested := false
+var _melee_requested := false
+var _melee_touch := -1
 var _interact_requested := false
 var _left_fire_touch := -1
 var _right_fire_touch := -1
@@ -109,7 +112,11 @@ var _objective_message_remaining := 0.0
 var _score_pulse := 0.0
 var _score_pulse_team := -1
 var _stance := Duelist.Stance.STAND
-var _weapon := Duelist.Weapon.PULSE
+var _weapon := Duelist.Weapon.RIFLE
+## Presentation mirrors of Duelist.ads_progress / Duelist.zoom_index, pushed in
+## by the arena each frame. See set_ads_state().
+var _ads_progress := 0.0
+var _zoom_index := 0
 var _settings_open := false
 var _layout_editor := false
 var _aim_toggle := false
@@ -202,6 +209,11 @@ func take_reload() -> bool:
 	_reload_requested = false
 	return requested
 
+func take_melee() -> bool:
+	var requested := _melee_requested
+	_melee_requested = false
+	return requested
+
 func take_reset_training() -> bool:
 	var requested := _reset_training_requested
 	_reset_training_requested = false
@@ -244,7 +256,7 @@ func set_touch_preview(preview: String) -> void:
 	if preview == "ammo-low":
 		show_ammo(4, 24, 0.0)
 	elif preview == "reloading":
-		show_ammo(4, 24, Duelist.M4_RELOAD_SECONDS * 0.5)
+		show_ammo(4, 24, float(RiftWeapons.row(int(Duelist.Weapon.RIFLE)).reload_seconds) * 0.5)
 	if preview == "coach-move":
 		set_coach_cue({"key": "move", "text": "DRAG LEFT SIDE TO MOVE", "region": "left"})
 	elif preview == "coach-look":
@@ -312,9 +324,19 @@ func set_stance(stance: Duelist.Stance) -> void:
 
 func set_weapon(weapon: Duelist.Weapon) -> void:
 	_weapon = weapon
-	if _weapon == Duelist.Weapon.KNIFE:
-		aim_held = false
-		_aim_touch = -1
+	queue_redraw()
+
+## Mirrors the two presentation values `Duelist` already tracks every frame, so
+## the reticle can cross-fade with the weapon actually coming up and the sniper
+## scope knows which of its two magnification stages to draw. Read-only here -
+## the authoritative sim owns both.
+func set_ads_state(progress: float, zoom: int) -> void:
+	var next_progress := clampf(progress, 0.0, 1.0) if is_finite(progress) else 0.0
+	var next_zoom := maxi(0, zoom)
+	if absf(next_progress - _ads_progress) < 0.001 and next_zoom == _zoom_index:
+		return
+	_ads_progress = next_progress
+	_zoom_index = next_zoom
 	queue_redraw()
 
 func set_view_fov(value: float, persist: bool = true) -> void:
@@ -330,8 +352,9 @@ func set_view_fov(value: float, persist: bool = true) -> void:
 func show_ammo(magazine: int, reserve: int, reload_time: float) -> void:
 	if _ammo_preview_override:
 		return
-	magazine_rounds = clampi(magazine, 0, Duelist.M4_MAGAZINE_SIZE)
-	reserve_ammo = clampi(reserve, 0, Duelist.M4_RESERVE_AMMO)
+	var row := RiftWeapons.row(int(_weapon))
+	magazine_rounds = clampi(magazine, 0, int(row.magazine_size))
+	reserve_ammo = clampi(reserve, 0, int(row.reserve_ammo))
 	reload_remaining = maxf(0.0, reload_time)
 	queue_redraw()
 
@@ -450,6 +473,9 @@ func _gui_input(event: InputEvent) -> void:
 			elif event.pressed and _pressed_circle(event.position, _reload_center(), _reload_radius() + 12.0):
 				_reload_requested = true
 				fire_held = false
+			elif event.pressed and _pressed_circle(event.position, _melee_center(), _melee_radius() + 12.0):
+				_melee_requested = true
+				fire_held = false
 			elif event.pressed and _interact_available and _pressed_circle(event.position, _control_center("interact"), _control_radius("interact") + 12.0):
 				_interact_requested = true
 				fire_held = false
@@ -475,6 +501,10 @@ func _handle_touch(index: int, point: Vector2, pressed: bool) -> void:
 		return
 	if _pressed_circle(point, _reload_center(), _reload_radius() + 12.0):
 		_reload_requested = true
+		return
+	if _pressed_circle(point, _melee_center(), _melee_radius() + 12.0):
+		_melee_touch = index
+		_melee_requested = true
 		return
 	var key := _action_key_at(point)
 	if key == "left_fire":
@@ -547,6 +577,8 @@ func _release_touch(index: int) -> void:
 		_prone_touch = -1
 	if index == _switch_touch:
 		_switch_touch = -1
+	if index == _melee_touch:
+		_melee_touch = -1
 	if index == _interact_touch:
 		_interact_touch = -1
 	if index == _settings_owner_touch:
@@ -562,6 +594,7 @@ func _release_all_touch_ownership() -> void:
 	_crouch_touch = -1
 	_prone_touch = -1
 	_switch_touch = -1
+	_melee_touch = -1
 	_interact_touch = -1
 	_settings_owner_touch = -1
 	_settings_captures.clear()
@@ -575,6 +608,7 @@ func _release_all_touch_ownership() -> void:
 	_prone_requested = false
 	_weapon_switch_requested = false
 	_reload_requested = false
+	_melee_requested = false
 	_interact_requested = false
 	_stick_visual_target = 0.0
 
@@ -592,17 +626,7 @@ func _draw_gameplay_hud() -> void:
 	var center := size * 0.5
 	_draw_coach_cue(friendly, enemy)
 
-	# The reticle stays clean for touch aiming, with a short directional bloom that recovers quickly.
-	if _weapon == Duelist.Weapon.KNIFE:
-		draw_circle(center, 3.0, Color("ffffff", 0.96))
-	elif not aim_held:
-		var bloom_gap := 10.0 + primary_fire_bloom * 4.0
-		var bloom_span := 25.0 + primary_fire_bloom * 6.0
-		var reticle_color := Color("ffffff", 0.96)
-		draw_line(center + Vector2(-bloom_span, 0), center + Vector2(-bloom_gap, 0), reticle_color, 2.0)
-		draw_line(center + Vector2(bloom_gap, 0), center + Vector2(bloom_span, 0), reticle_color, 2.0)
-		draw_line(center + Vector2(0, -bloom_span), center + Vector2(0, -bloom_gap), reticle_color, 2.0)
-		draw_line(center + Vector2(0, bloom_gap), center + Vector2(0, bloom_span), reticle_color, 2.0)
+	_draw_reticle(center)
 	if hit_confirm > 0.0:
 		var confirm_color := Color("fff0b0", 0.95 * hit_confirm)
 		var confirm_radius := 23.0 + (1.0 - hit_confirm) * 7.0
@@ -635,16 +659,17 @@ func _draw_gameplay_hud() -> void:
 
 	_draw_button("left_fire", friendly, _left_fire_touch >= 0)
 	_draw_button("right_fire", friendly, _right_fire_touch >= 0)
-	if _weapon == Duelist.Weapon.PULSE:
-		_draw_button("ads", enemy, aim_held)
+	# Every weapon ADS's through an optic now, so the ADS button is no longer
+	# weapon-gated the way it was when only the carbine could aim.
+	_draw_button("ads", enemy, aim_held)
 	_draw_button("jump", enemy, _jump_touch >= 0)
 	_draw_button("crouch", friendly, _stance == Duelist.Stance.CROUCH)
 	_draw_button("prone", friendly, _stance == Duelist.Stance.PRONE)
 	_draw_button("swap", Color("c292ff"), _switch_touch >= 0)
 	if _interact_available:
 		_draw_button("interact", friendly, _interact_touch >= 0)
-	if _weapon == Duelist.Weapon.PULSE:
-		_draw_button_fixed(_reload_center(), _reload_radius(), Color("e6a25b"), reload_remaining > 0.0, "reload")
+	_draw_button_fixed(_reload_center(), _reload_radius(), Color("e6a25b"), reload_remaining > 0.0, "reload")
+	_draw_button_fixed(_melee_center(), _melee_radius(), Color("8fd6a8"), _melee_touch >= 0, "melee")
 	_draw_weapon_indicator(friendly)
 	_draw_button_fixed(_settings_center(), 24.0, enemy, _settings_open, "settings")
 	if _touch_preview in ["two-thumb", "four-finger"]:
@@ -684,17 +709,28 @@ func _enemy_color() -> Color:
 	return _team_color(Duelist.Team.BLUE if _roster_local_team == int(Duelist.Team.RED) else Duelist.Team.RED)
 
 func _draw_vitality_strip(safe: Rect2, friendly: Color) -> void:
-	var plate_size := Vector2(20.0, 10.0)
-	var gap := 5.0
-	var total_width := plate_size.x * 5.0 + gap * 4.0
-	var origin := Vector2(safe.get_center().x - total_width * 0.5, safe.end.y - 44.0)
-	var filled := clampi(ceili(health / 20.0), 0, 5)
+	# A continuous 0-100 bar. Every point of damage moves the fill; this is
+	# not a chunked "hits remaining" meter, since damage varies per weapon
+	# (SMG/pistol chip damage vs. sniper one-shots) and a fixed hit count
+	# would lie about how much health is actually left.
+	var bar_size := Vector2(132.0, 14.0)
+	var origin := Vector2(safe.get_center().x - bar_size.x * 0.5, safe.end.y - 46.0)
+	var track := Rect2(origin, bar_size)
+	var fraction := clampf(health / Duelist.HEALTH, 0.0, 1.0)
 	var low_pulse := 0.7 + sin(Time.get_ticks_msec() * 0.012) * 0.3 if health <= 30.0 else 1.0
-	var plate_color := Color("ef8b78", low_pulse) if health <= 30.0 else Color("f5e6bd") if health <= 60.0 else friendly
-	for index in 5:
-		var rect := Rect2(origin + Vector2(index * (plate_size.x + gap), 0.0), plate_size)
-		draw_rect(rect, Color(plate_color, 0.9 if index < filled else 0.12), index < filled)
-		draw_rect(rect, Color("f1f6ff", 0.7), false, 1.2)
+	var fill_color := Color("ef8b78", low_pulse) if health <= 30.0 else Color("f5e6bd") if health <= 60.0 else friendly
+	draw_rect(track, Color("0b1730", 0.72))
+	if fraction > 0.0:
+		draw_rect(Rect2(track.position, Vector2(track.size.x * fraction, track.size.y)), Color(fill_color, 0.92))
+	var ticks: Array[float] = [0.25, 0.5, 0.75]
+	for tick in ticks:
+		var tick_x: float = track.position.x + track.size.x * tick
+		draw_line(Vector2(tick_x, track.position.y), Vector2(tick_x, track.end.y), Color("0b1730", 0.55), 1.0)
+	draw_rect(track, Color("f1f6ff", 0.7), false, 1.2)
+	var label := str(ceili(health))
+	var font := ThemeDB.fallback_font
+	var label_width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+	draw_string(font, Vector2(track.get_center().x - label_width * 0.5, track.position.y - 5.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("f1f6ff", 0.9))
 
 
 func _team_color(team: int) -> Color:
@@ -814,7 +850,7 @@ func _draw_button_fixed(center: Vector2, radius: float, color: Color, active: bo
 	var outline_alpha := 0.95 if active else 0.34
 	draw_circle(center, radius, Color("071126", fill_alpha * opacity))
 	draw_arc(center, radius, 0.0, TAU, 32, Color(color, outline_alpha * opacity), 2.5 if active else 1.35)
-	if _control_specs().has(label) or label == "reload" or label == "settings":
+	if _control_specs().has(label) or label == "reload" or label == "settings" or label == "melee":
 		_draw_control_glyph(center, radius, color, label, active, opacity)
 		return
 	var font := ThemeDB.fallback_font
@@ -856,9 +892,14 @@ func _draw_control_glyph(center: Vector2, radius: float, color: Color, key: Stri
 			draw_line(center + Vector2(radius * 0.05, 0), center + Vector2(radius * 0.42, 0), glyph_color, weight)
 			draw_line(center + Vector2(radius * 0.27, -radius * 0.16), center + Vector2(radius * 0.42, 0), glyph_color, weight)
 			draw_line(center + Vector2(radius * 0.27, radius * 0.16), center + Vector2(radius * 0.42, 0), glyph_color, weight)
+		"melee":
+			# Swings whatever is currently equipped - a simple crossed-blade
+			# glyph rather than a per-weapon icon, since it's not a weapon slot.
+			draw_line(center + Vector2(-radius * 0.3, -radius * 0.3), center + Vector2(radius * 0.3, radius * 0.3), glyph_color, weight)
+			draw_line(center + Vector2(-radius * 0.3, radius * 0.3), center + Vector2(radius * 0.3, -radius * 0.3), glyph_color, weight)
 		"reload":
 			if active and reload_indicator_animates():
-				_draw_reload_sweep(center, radius * 0.58, glyph_color, reload_progress_for(reload_remaining))
+				_draw_reload_sweep(center, radius * 0.58, glyph_color, reload_progress_for(reload_remaining, float(RiftWeapons.row(int(_weapon)).reload_seconds)))
 			else:
 				_draw_reload_icon(center, radius * 0.58, glyph_color)
 		"settings":
@@ -879,45 +920,263 @@ func _draw_reload_icon(center: Vector2, radius: float, color: Color) -> void:
 	draw_line(tip, tip + Vector2(-radius * 0.02, radius * 0.28), color, 2.4)
 	draw_line(tip, tip + Vector2(-radius * 0.27, radius * 0.04), color, 2.4)
 
+## Loadout slots default to a Frontline rifle+pistol pair for presentation
+## before the first authoritative sync arrives; set_loadout_slots() below
+## keeps this in step with the local duelist's actual class/loadout.
+var _loadout_slots: Array = [Duelist.Weapon.RIFLE, Duelist.Weapon.PISTOL]
+
+func set_loadout_slots(slots: Array) -> void:
+	if slots.is_empty():
+		return
+	_loadout_slots = slots.duplicate()
+	queue_redraw()
+
 func _draw_weapon_indicator(color: Color) -> void:
 	var safe := _safe_rect()
 	var center := Vector2(safe.end.x - 170.0, safe.end.y - 74.0)
-	_draw_loadout_plate(center - Vector2(48.0, 0.0), Duelist.Weapon.PULSE, color)
-	_draw_loadout_plate(center + Vector2(48.0, 0.0), Duelist.Weapon.KNIFE, color)
-	if _weapon == Duelist.Weapon.PULSE:
-		_draw_magazine_read(center - Vector2(48.0, 0.0) + Vector2(0.0, 30.0), color)
+	if _loadout_slots.size() == 1:
+		_draw_loadout_plate(center, RiftWeapons.clamp_weapon(int(_loadout_slots[0])) as Duelist.Weapon, color)
+		_draw_magazine_read(center + Vector2(0.0, 30.0), color)
 		if reload_remaining > 0.0:
-			_draw_reload_sweep(center - Vector2(48.0, 0.0), 24.0, Color("fff0b0"), reload_progress_for(reload_remaining))
+			_draw_reload_sweep(center, 24.0, Color("fff0b0"), reload_progress_for(reload_remaining, float(RiftWeapons.row(int(_weapon)).reload_seconds)))
+		return
+	_draw_loadout_plate(center - Vector2(48.0, 0.0), RiftWeapons.clamp_weapon(int(_loadout_slots[0])) as Duelist.Weapon, color)
+	_draw_loadout_plate(center + Vector2(48.0, 0.0), RiftWeapons.clamp_weapon(int(_loadout_slots[1])) as Duelist.Weapon, color)
+	var active_offset := Vector2(-48.0, 0.0) if int(_weapon) == RiftWeapons.clamp_weapon(int(_loadout_slots[0])) else Vector2(48.0, 0.0)
+	_draw_magazine_read(center + active_offset + Vector2(0.0, 30.0), color)
+	if reload_remaining > 0.0:
+		_draw_reload_sweep(center + active_offset, 24.0, Color("fff0b0"), reload_progress_for(reload_remaining, float(RiftWeapons.row(int(_weapon)).reload_seconds)))
 
+# --- Sight pictures -------------------------------------------------------
+#
+# One hand-drawn language, five sight pictures, no imported art. Every stroke
+# goes down twice - a dark, slightly wider pass, then the bright pass on top -
+# because the single-pass reticle this replaces disappeared completely against
+# bare sky and against the arena's pale concrete, which is most of the map.
+
+const RETICLE_INK := Color(0.02, 0.05, 0.10)
+
+func _reticle_line(from: Vector2, to: Vector2, tint: Color, width: float) -> void:
+	draw_line(from, to, Color(RETICLE_INK, tint.a * 0.55), width + 2.0)
+	draw_line(from, to, tint, width)
+
+func _reticle_dot(at: Vector2, radius: float, tint: Color) -> void:
+	draw_circle(at, radius + 1.2, Color(RETICLE_INK, tint.a * 0.55))
+	draw_circle(at, radius, tint)
+
+func _reticle_arc(at: Vector2, radius: float, from_angle: float, to_angle: float, tint: Color, width: float) -> void:
+	# The halo is deliberately narrower here than on straight strokes: a 2px
+	# skirt around a 1px ring reads as a dark ring, not as a legible one.
+	draw_arc(at, radius, from_angle, to_angle, 28, Color(RETICLE_INK, tint.a * 0.5), width + 1.4)
+	draw_arc(at, radius, from_angle, to_angle, 28, tint, width)
+
+func _draw_reticle(center: Vector2) -> void:
+	var ads := _ads_progress
+	if _weapon == Duelist.Weapon.SNIPER and ads > 0.004:
+		_draw_scope_overlay(center, ads)
+		return
+	var hip_opacity := 1.0 - smoothstep(0.0, 0.55, ads)
+	if hip_opacity > 0.004:
+		_draw_hip_reticle(center, hip_opacity)
+	var ads_opacity := smoothstep(0.45, 1.0, ads)
+	if ads_opacity > 0.004:
+		_draw_ads_reticle(center, ads_opacity)
+
+## Hip fire. All five keep the existing directional-bloom behaviour - the gap
+## and span still open with `primary_fire_bloom` and recover with it - but the
+## shape now says which weapon is in hand.
+func _draw_hip_reticle(center: Vector2, opacity: float) -> void:
+	var tint := Color(1.0, 1.0, 1.0, 0.96 * opacity)
+	var bloom := primary_fire_bloom
+	match _weapon:
+		Duelist.Weapon.SHOTGUN:
+			# A pellet weapon's useful information is the spread, not a point,
+			# so it gets a broken ring instead of a cross.
+			var radius := 27.0 + bloom * 6.0
+			for quadrant in 4:
+				var bearing := float(quadrant) * PI * 0.5 + PI * 0.25
+				_reticle_arc(center, radius, bearing - 0.46, bearing + 0.46, tint, 2.6)
+			_reticle_dot(center, 1.8, tint)
+		Duelist.Weapon.SNIPER:
+			# Deliberately unhelpful: four diagonals and no centre mark. The HUD
+			# should not be encouraging anyone to hip-fire the Longview.
+			var gap := 13.0 + bloom * 7.0
+			var span := 31.0 + bloom * 11.0
+			for quadrant in 4:
+				var axis := Vector2.from_angle(float(quadrant) * PI * 0.5 + PI * 0.25)
+				_reticle_line(center + axis * gap, center + axis * span, tint, 2.0)
+		Duelist.Weapon.PISTOL:
+			var gap := 7.0 + bloom * 4.0
+			var span := 18.0 + bloom * 5.0
+			for quadrant in 4:
+				var axis := Vector2.from_angle(float(quadrant) * PI * 0.5)
+				_reticle_line(center + axis * gap, center + axis * span, tint, 1.8)
+			_reticle_dot(center, 1.5, tint)
+		Duelist.Weapon.SMG:
+			var gap := 13.0 + bloom * 5.0
+			var span := 27.0 + bloom * 8.0
+			for quadrant in 4:
+				var axis := Vector2.from_angle(float(quadrant) * PI * 0.5)
+				_reticle_line(center + axis * gap, center + axis * span, tint, 2.4)
+		_:
+			var gap := 10.0 + bloom * 4.0
+			var span := 25.0 + bloom * 6.0
+			for quadrant in 4:
+				var axis := Vector2.from_angle(float(quadrant) * PI * 0.5)
+				_reticle_line(center + axis * gap, center + axis * span, tint, 2.0)
+			_reticle_dot(center, 1.6, tint)
+
+## Aimed. Until now nothing at all was drawn while `aim_held`, on any weapon.
+## Each of these is the 2D half of the optic modelled on the weapon: the dot
+## the reflex housing frames, or the bead the iron sights sit either side of.
+func _draw_ads_reticle(center: Vector2, opacity: float) -> void:
+	var dot := Color("ff5f4a", 0.98 * opacity)
+	var fine := Color("e8f1fa", 0.85 * opacity)
+	match _weapon:
+		Duelist.Weapon.SHOTGUN:
+			# Bead plus the weapon's real aimed cone, converted through the
+			# current magnification - the ring is the actual spread, not decor.
+			_reticle_arc(center, _ads_cone_radius_px(), 0.0, TAU, Color(fine, 0.42 * opacity), 1.4)
+			# Cream, not amber: the modelled bead directly under it is brass, and
+			# an amber dot on a brass bead is an invisible dot.
+			_reticle_dot(center, 2.8, Color("fff4d2", 0.98 * opacity))
+		Duelist.Weapon.PISTOL:
+			# Three-dot irons: the front bead between the two rear dots.
+			_reticle_dot(center, 2.1, Color("fff4d2", 0.96 * opacity))
+			_reticle_dot(center + Vector2(-11.0, 0.0), 1.6, Color(fine, 0.6 * opacity))
+			_reticle_dot(center + Vector2(11.0, 0.0), 1.6, Color(fine, 0.6 * opacity))
+		Duelist.Weapon.SMG:
+			_reticle_dot(center, 2.5, dot)
+			_reticle_line(center + Vector2(-15.0, 0.0), center + Vector2(-9.0, 0.0), fine, 1.6)
+			_reticle_line(center + Vector2(9.0, 0.0), center + Vector2(15.0, 0.0), fine, 1.6)
+		_:
+			# Red dot: a soft bloom under the dot itself, which is what stops
+			# a 3px circle from reading as a dead pixel over a bright wall.
+			draw_circle(center, 7.5, Color("ff5f4a", 0.16 * opacity))
+			_reticle_dot(center, 2.8, dot)
+			_reticle_arc(center, 13.0, 0.0, TAU, Color(fine, 0.38 * opacity), 1.1)
+
+## The equipped weapon's stationary aimed cone in screen pixels at the current
+## magnification. Used only to size the shotgun's spread ring - it reads the
+## same frozen accuracy table the simulation does, so the ring cannot drift
+## away from where the pellets actually go.
+func _ads_cone_radius_px() -> float:
+	var span := deg_to_rad(maxf(1.0, RiftWeapons.ads_horizontal_fov(horizontal_fov, int(_weapon), _zoom_index)))
+	var cone := RiftWeapons.cone_for(int(_weapon), 0.0, false, false, 1.0, primary_fire_bloom)
+	return clampf(cone / maxf(0.01, tan(span * 0.5)) * size.x * 0.5, 8.0, size.y * 0.45)
+
+## The Longview's scope picture.
+##
+## The tube is drawn in 2D rather than modelled in front of the camera: masking
+## everything outside the ocular circle is what actually makes a scope feel
+## like a scope, and a mask stays exact at every aspect ratio and every FOV,
+## which a glass disc parked near the near plane does not. The 3D scope body on
+## the weapon keeps doing its job - it is what the mask closes down over.
+func _draw_scope_overlay(center: Vector2, ads: float) -> void:
+	# Closed by `Duelist.SNIPER_SCOPE_HANDOVER`, which is the same value the
+	# rifle's view model stops drawing on. Beyond that point this overlay *is*
+	# the scope, so it has to be fully opaque before the rifle disappears.
+	var seated := smoothstep(0.06, Duelist.SNIPER_SCOPE_HANDOVER, ads)
+	var short_edge := minf(size.x, size.y)
+	# Second stage closes the tube down as well as magnifying, so the step up
+	# is legible the instant it happens.
+	var target := short_edge * (0.430 if _zoom_index < 1 else 0.335)
+	var radius := lerpf(short_edge * 0.95, target, seated)
+	# One stroked annulus from the circle out past the farthest corner masks
+	# the whole surround in a single call, with no overlapping alpha to seam.
+	var reach := center.length() + 8.0
+	if reach > radius:
+		draw_arc(center, (radius + reach) * 0.5, 0.0, TAU, 96, Color(0.010, 0.018, 0.030, seated), reach - radius)
+	# Tube wall, the soft shadow a real ocular throws inside the edge, and a
+	# single cold highlight so the rim is not a flat black band.
+	draw_arc(center, radius - 1.0, 0.0, TAU, 96, Color(0.03, 0.05, 0.08, seated), 6.0)
+	draw_arc(center, radius - 9.0, 0.0, TAU, 96, Color(0.03, 0.05, 0.08, 0.32 * seated), 14.0)
+	draw_arc(center, radius - 4.5, 0.0, TAU, 96, Color("7d8ea3", 0.5 * seated), 1.5)
+	if seated < 0.35:
+		return
+	_draw_scope_reticle(center, radius, (seated - 0.35) / 0.65)
+
+func _draw_scope_reticle(center: Vector2, radius: float, opacity: float) -> void:
+	var stage_two := _zoom_index >= 1
+	var fine := Color("dfe9f4", 0.92 * opacity)
+	var mid := Color("dfe9f4", 0.58 * opacity)
+	var arm := radius * 0.93
+	var gap := 5.0 if stage_two else 8.0
+	var stroke := 1.1 if stage_two else 1.7
+	for quadrant in 4:
+		var axis := Vector2.from_angle(float(quadrant) * PI * 0.5)
+		_reticle_line(center + axis * gap, center + axis * arm, fine, stroke)
+	_reticle_dot(center, 1.1 if stage_two else 1.5, fine)
+	# Ranging dots on the two horizontals and the lower vertical; the upper arm
+	# stays clean, the way a real ranging reticle is.
+	var marks := 7 if stage_two else 4
+	var spacing := arm / float(marks + 1)
+	var dot_radius := 1.5 if stage_two else 2.0
+	for index in range(1, marks + 1):
+		var offset := spacing * float(index)
+		_reticle_dot(center + Vector2(-offset, 0.0), dot_radius, mid)
+		_reticle_dot(center + Vector2(offset, 0.0), dot_radius, mid)
+		_reticle_dot(center + Vector2(0.0, offset), dot_radius, mid)
+	if stage_two:
+		# The second stage earns a drop ladder and a tighter inner ring, so the
+		# two magnifications are told apart by the reticle itself and not only
+		# by how much of the world fits inside the tube.
+		for index in range(1, 4):
+			var rung := spacing * float(index) * 2.0
+			var half := radius * (0.20 - 0.035 * float(index))
+			_reticle_line(center + Vector2(-half, rung), center + Vector2(half, rung), fine, 1.2)
+		_reticle_arc(center, radius * 0.30, 0.0, TAU, Color(mid, 0.45 * opacity), 1.0)
+	var steps: Array = RiftWeapons.row(int(_weapon)).zoom_steps
+	if steps.is_empty():
+		return
+	var label := "%.0f×" % float(steps[clampi(_zoom_index, 0, steps.size() - 1)])
+	draw_string(ThemeDB.fallback_font, center + Vector2(radius * 0.46, radius * 0.70), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("dfe9f4", 0.88 * opacity))
+
+## Distinct per-archetype glyphs (barrel+optic for rifle-class weapons, a
+## broad fanned wedge for the shotgun, a small block for the pistol, a long
+## scoped line for the sniper) so the two loadout plates read at a glance
+## instead of a generic rectangle.
 func _draw_loadout_plate(center: Vector2, slot: Duelist.Weapon, color: Color) -> void:
-	var held := _weapon == slot
+	var held := int(_weapon) == int(slot)
 	var plate_color := color if held else Color("9bb2d1")
 	draw_rect(Rect2(center - Vector2(32.0, 22.0), Vector2(64.0, 44.0)), Color("071126", 0.72), true)
 	draw_rect(Rect2(center - Vector2(32.0, 22.0), Vector2(64.0, 44.0)), Color(plate_color, 0.95 if held else 0.34), false, 2.0 if held else 1.0)
-	if slot == Duelist.Weapon.PULSE:
-		draw_rect(Rect2(center - Vector2(17.0, 4.0), Vector2(30.0, 8.0)), plate_color)
-		draw_line(center + Vector2(13.0, -4.0), center + Vector2(24.0, -11.0), plate_color, 2.5)
-		draw_line(center + Vector2(13.0, 4.0), center + Vector2(24.0, 11.0), plate_color, 2.5)
-	else:
-		draw_line(center + Vector2(-2.0, -14.0), center + Vector2(11.0, 14.0), plate_color, 3.0)
-		draw_line(center + Vector2(-11.0, 10.0), center + Vector2(0.0, 14.0), plate_color, 3.0)
+	match slot:
+		Duelist.Weapon.RIFLE, Duelist.Weapon.SMG:
+			draw_rect(Rect2(center - Vector2(17.0, 4.0), Vector2(30.0, 8.0)), plate_color)
+			draw_line(center + Vector2(13.0, -4.0), center + Vector2(24.0, -11.0), plate_color, 2.5)
+			draw_line(center + Vector2(13.0, 4.0), center + Vector2(24.0, 11.0), plate_color, 2.5)
+		Duelist.Weapon.SHOTGUN:
+			draw_rect(Rect2(center - Vector2(18.0, 3.0), Vector2(34.0, 6.0)), plate_color)
+			for pellet_angle in [-0.5, -0.22, 0.0, 0.22, 0.5]:
+				var pellet_end := center + Vector2(24.0, 0.0) + Vector2.from_angle(pellet_angle) * 10.0
+				draw_line(center + Vector2(16.0, 0.0), pellet_end, plate_color, 1.6)
+		Duelist.Weapon.PISTOL:
+			draw_rect(Rect2(center - Vector2(12.0, 5.0), Vector2(22.0, 8.0)), plate_color)
+			draw_rect(Rect2(center + Vector2(-5.0, 3.0), Vector2(7.0, 12.0)), plate_color)
+		Duelist.Weapon.SNIPER:
+			draw_line(center + Vector2(-22.0, 0.0), center + Vector2(22.0, 0.0), plate_color, 2.5)
+			draw_circle(center + Vector2(4.0, -7.0), 6.0, Color("071126", 0.9))
+			draw_arc(center + Vector2(4.0, -7.0), 6.0, 0.0, TAU, 16, plate_color, 1.8)
 
 func _draw_magazine_read(center: Vector2, color: Color) -> void:
-	var magazine_ratio := clampf(float(magazine_rounds) / float(Duelist.M4_MAGAZINE_SIZE), 0.0, 1.0)
+	var capacity := int(RiftWeapons.row(int(_weapon)).magazine_size)
+	var reserve_capacity := int(RiftWeapons.row(int(_weapon)).reserve_ammo)
+	var magazine_ratio := clampf(float(magazine_rounds) / float(maxi(1, capacity)), 0.0, 1.0)
 	var filled_segments := ceili(magazine_ratio * 5.0) if magazine_rounds > 0 else 0
 	for index in 5:
 		var segment := Rect2(center + Vector2(-28.0 + index * 12.0, -4.0), Vector2(9.0, 8.0))
 		draw_rect(segment, Color(color, 0.88 if index < filled_segments else 0.14), index < filled_segments)
 		draw_rect(segment, Color(color, 0.56), false, 1.0)
-	var reserve_ratio := clampf(float(reserve_ammo) / float(Duelist.M4_RESERVE_AMMO), 0.0, 1.0)
+	var reserve_ratio := clampf(float(reserve_ammo) / float(maxi(1, reserve_capacity)), 0.0, 1.0)
 	var reserve_blocks := ceili(reserve_ratio * 3.0) if reserve_ammo > 0 else 0
 	for index in 3:
 		var block := Rect2(center + Vector2(-17.0 + index * 12.0, 10.0), Vector2(8.0, 4.0))
 		draw_rect(block, Color("fff0b0", 0.7 if index < reserve_blocks else 0.12), index < reserve_blocks)
 		draw_rect(block, Color("fff0b0", 0.42), false, 1.0)
 
-static func reload_progress_for(remaining: float) -> float:
-	return clampf(1.0 - remaining / Duelist.M4_RELOAD_SECONDS, 0.0, 1.0)
+static func reload_progress_for(remaining: float, reload_seconds: float = 2.0) -> float:
+	return clampf(1.0 - remaining / maxf(0.05, reload_seconds), 0.0, 1.0)
 
 func _draw_reload_sweep(center: Vector2, radius: float, color: Color, progress: float) -> void:
 	var phase := clampf(progress, 0.0, 1.0)
@@ -1074,11 +1333,12 @@ func _settings_control_at(panel: Rect2, point: Vector2) -> String:
 		return "ads_look_chip"
 	if _hud_layout_rect(panel).has_point(point):
 		return "hud_layout_chip"
-	if _reset_training_rect(panel).has_point(point):
-		return "reset_training_chip"
 	if _rift_link_rect(panel).has_point(point):
 		return "rift_link_chip"
-	# QUICK SWAP is drawn but stays inert on purpose.
+	if _reset_training_rect(panel).has_point(point):
+		return "reset_training_chip"
+	if _main_menu_rect(panel).has_point(point):
+		return "main_menu_chip"
 	return ""
 
 func _camera_track_rect(panel: Rect2) -> Rect2:
@@ -1125,6 +1385,10 @@ func _apply_settings_press(control: String, point: Vector2, panel: Rect2) -> voi
 			_settings_open = false
 			_release_all_touch_ownership()
 			rift_link_requested.emit()
+		"main_menu_chip":
+			_settings_open = false
+			_release_all_touch_ownership()
+			main_menu_requested.emit()
 		_:
 			pass
 
@@ -1170,15 +1434,17 @@ func _draw_settings_panel(friendly: Color, enemy: Color) -> void:
 	draw_string(font, panel.position + Vector2(24, 157), "ADS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, enemy)
 	_draw_setting_slider(_camera_track_rect(panel).position, panel.size.x - 190, camera_sensitivity, friendly)
 	_draw_setting_slider(_ads_track_rect(panel).position, panel.size.x - 190, ads_sensitivity, friendly)
-	_draw_setting_chip(Rect2(panel.position + Vector2(24, 188), Vector2(142, 44)), "AIM %s" % ("TAP" if _aim_toggle else "HOLD"), friendly, _aim_toggle)
-	_draw_setting_chip(Rect2(panel.position + Vector2(184, 188), Vector2(142, 44)), "GYRO %s" % ("ON" if gyro_enabled else "OFF"), Color("c292ff"), gyro_enabled)
-	_draw_setting_chip(Rect2(panel.position + Vector2(344, 188), Vector2(142, 44)), "QUICK SWAP", Color("c292ff"), true)
+	draw_string(font, panel.position + Vector2(24, SETTINGS_TOGGLES_TOP - SETTINGS_LABEL_GAP), "CONTROLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("92a7c7"))
+	_draw_setting_chip(_aim_rect(panel), "AIM %s" % ("TAP" if _aim_toggle else "HOLD"), friendly, _aim_toggle)
+	_draw_setting_chip(_gyro_rect(panel), "GYRO %s" % ("ON" if gyro_enabled else "OFF"), Color("c292ff"), gyro_enabled)
 	_draw_setting_chip(_effects_rect(panel), "EFFECTS %s" % ("ON" if effects_enabled else "OFF"), friendly, effects_enabled)
 	_draw_setting_chip(_stick_mode_rect(panel), "STICK %s" % ("FLOAT" if _stick_mode == MobileTouchRouter.StickMode.FLOATING else "FIXED"), friendly, _stick_mode == MobileTouchRouter.StickMode.FLOATING)
 	_draw_setting_chip(_ads_look_rect(panel), "ADS LOOK %s" % ("ON" if ads_button_look else "OFF"), Color("c292ff"), ads_button_look)
+	draw_string(font, panel.position + Vector2(24, _settings_actions_top() - SETTINGS_LABEL_GAP), "ACTIONS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("92a7c7"))
 	_draw_setting_chip(_hud_layout_rect(panel), "HUD LAYOUT", enemy, true)
-	_draw_setting_chip(_reset_training_rect(panel), "RESET TRAINING", Color("e57c70"), false)
 	_draw_setting_chip(_rift_link_rect(panel), "RIFT LINK", Color("71cfff"), false)
+	_draw_setting_chip(_reset_training_rect(panel), "RESET TRAINING", Color("e57c70"), false)
+	_draw_setting_chip(_main_menu_rect(panel), "MAIN MENU", Color("e57c70"), false)
 	draw_string(font, panel.position + Vector2(24, panel.size.y - 22), "Tap outside to return", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("92a7c7"))
 
 func _draw_setting_slider(position: Vector2, width: float, value: float, color: Color) -> void:
@@ -1363,29 +1629,56 @@ func _editor_button_rect(button: String) -> Rect2:
 func _settings_panel() -> Rect2:
 	var safe := _safe_rect()
 	var width := clampf(safe.size.x * 0.72, 520.0, 760.0)
-	var height := clampf(safe.size.y * 0.82, 500.0, 620.0)
+	var height := clampf(safe.size.y * 0.82, 540.0, 620.0)
 	return Rect2(safe.get_center() - Vector2(width, height) * 0.5, Vector2(width, height))
 
-func _rift_link_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(244, 418), Vector2(180, 44))
+## A consistent 2-column grid shared by every toggle and action chip, so
+## nothing in the panel is hand-placed pixel-by-pixel: every row lines up
+## under the same margins and every chip in a column shares the same width.
+const SETTINGS_GRID_MARGIN := 24.0
+const SETTINGS_GRID_GAP := 10.0
+const SETTINGS_CHIP_HEIGHT := 42.0
+const SETTINGS_ROW_PITCH := 50.0
+const SETTINGS_TOGGLES_TOP := 212.0
+const SETTINGS_SECTION_GAP := 20.0
+const SETTINGS_LABEL_GAP := 18.0
 
-func _stick_mode_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(184, 250), Vector2(142, 44))
+func _settings_grid_rect(panel: Rect2, top: float, col: int, row: int) -> Rect2:
+	var content_width := panel.size.x - SETTINGS_GRID_MARGIN * 2.0
+	var chip_width := (content_width - SETTINGS_GRID_GAP) * 0.5
+	var x := panel.position.x + SETTINGS_GRID_MARGIN + float(col) * (chip_width + SETTINGS_GRID_GAP)
+	var y := panel.position.y + top + float(row) * SETTINGS_ROW_PITCH
+	return Rect2(Vector2(x, y), Vector2(chip_width, SETTINGS_CHIP_HEIGHT))
 
-func _ads_look_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(24, 306), Vector2(142, 44))
+func _aim_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, SETTINGS_TOGGLES_TOP, 0, 0)
 
-func _hud_layout_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(184, 306), Vector2(210, 44))
-
-func _reset_training_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(24, 418), Vector2(210, 44))
+func _gyro_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, SETTINGS_TOGGLES_TOP, 1, 0)
 
 func _effects_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(24, 250), Vector2(142, 44))
+	return _settings_grid_rect(panel, SETTINGS_TOGGLES_TOP, 0, 1)
 
-func _haptics_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(184, 250), Vector2(142, 44))
+func _stick_mode_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, SETTINGS_TOGGLES_TOP, 1, 1)
+
+func _ads_look_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, SETTINGS_TOGGLES_TOP, 0, 2)
+
+func _settings_actions_top() -> float:
+	return SETTINGS_TOGGLES_TOP + SETTINGS_ROW_PITCH * 3.0 + SETTINGS_SECTION_GAP
+
+func _hud_layout_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, _settings_actions_top(), 0, 0)
+
+func _rift_link_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, _settings_actions_top(), 1, 0)
+
+func _reset_training_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, _settings_actions_top(), 0, 1)
+
+func _main_menu_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, _settings_actions_top(), 1, 1)
 
 func _safe_rect() -> Rect2:
 	return RESPONSIVE.safe_rect(self)
@@ -1404,6 +1697,13 @@ func _reload_center() -> Vector2:
 
 func _reload_radius() -> float:
 	return 34.0
+
+func _melee_center() -> Vector2:
+	var safe := _safe_rect()
+	return Vector2(safe.end.x - 470.0, safe.end.y - 84.0)
+
+func _melee_radius() -> float:
+	return 30.0
 
 func _control_specs() -> Dictionary:
 	return {

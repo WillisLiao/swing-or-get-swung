@@ -14,7 +14,7 @@ func _initialize() -> void:
 
 	# Presentation-disabled mode is a harmless no-op and never allocates voices.
 	feedback.configure(false, "local", camera)
-	feedback.weapon_fired("local", Duelist.Weapon.PULSE, Vector3.ZERO, true)
+	feedback.weapon_fired("local", Duelist.Weapon.RIFLE, Vector3.ZERO, true)
 	assert(feedback._world_players.is_empty())
 	assert(feedback._local_players.is_empty())
 
@@ -66,13 +66,15 @@ func _initialize() -> void:
 	assert(is_equal_approx(local.health, initial_health))
 	assert(enemy.health == Duelist.HEALTH)
 	feedback._last_damage_feedback_msec = -10000
-	feedback.knife_struck("enemy", Vector3(2.0, 1.0, 0.0), Vector3.ZERO, Duelist.Team.BLUE, false, true, "local", Vector3(2.0, 1.0, 0.0), "knife:1", local.global_position)
-	feedback.knife_struck("enemy", Vector3(2.0, 1.0, 0.0), Vector3.ZERO, Duelist.Team.BLUE, false, true, "local", Vector3(2.0, 1.0, 0.0), "knife:1", local.global_position)
+	# Melee is "swing whatever is equipped" now - melee_struck carries the
+	# actual weapon rather than a dedicated knife identity.
+	feedback.melee_struck("enemy", Duelist.Weapon.SHOTGUN, Vector3(2.0, 1.0, 0.0), Vector3.ZERO, Duelist.Team.BLUE, false, true, "local", Vector3(2.0, 1.0, 0.0), "melee:1", local.global_position)
+	feedback.melee_struck("enemy", Duelist.Weapon.SHOTGUN, Vector3(2.0, 1.0, 0.0), Vector3.ZERO, Duelist.Team.BLUE, false, true, "local", Vector3(2.0, 1.0, 0.0), "melee:1", local.global_position)
 	assert(damage_count[0] == 2)
 
 	# Reusing the event path remains a no-op in headless mode and never allocates voices.
 	for index in 20:
-		feedback.weapon_fired("remote-%d" % index, Duelist.Weapon.PULSE, Vector3.ZERO, false)
+		feedback.weapon_fired("remote-%d" % index, Duelist.Weapon.RIFLE, Vector3.ZERO, false)
 	assert(feedback._world_players.is_empty())
 	assert(feedback._local_players.is_empty())
 	feedback.stop_all()

@@ -17,7 +17,15 @@ signal lobby_live_received(state: Dictionary)
 signal lobby_abandoned_received(state: Dictionary)
 
 const PROJECT_ID := "riftline-lan"
-const PROTOCOL_VERSION := 10
+## v11: weapons/loadout rebuild - a new "melee" input field, renamed melee
+## wire event (was "knife_strike"), and new authoritative-state fields
+## (loadout_slots, active_slot, zoom_index, bloom, shot_counter, ads_progress,
+## player_class, has_nuclear_vest, has_ballistic_shield).
+## v12: manual respawn + class picker - new "respawn"/"class_id"/
+## "primary_weapon" input fields (the death screen and pre-game class panel
+## ride these to the host the same way every other combat input does).
+## Mismatched builds must refuse to pair rather than silently desync.
+const PROTOCOL_VERSION := 12
 const MODE_LABEL := "nuclear-rush"
 const MAP_LABEL := "concourse"
 const APP_HOST_REMOTE_SLOTS := 7
@@ -31,6 +39,13 @@ const MAX_MOVE_COMPONENT := 1.05
 const MAX_VIEW_TURN_PER_FRAME := 0.55
 const ADVERTISEMENT_INTERVAL := 0.65
 const DISCOVERY_TTL := 4.0
+## How often a dropped client automatically retries dialing the address it
+## was last connected to, while it still holds an unexpired rejoin token.
+const AUTO_RECONNECT_RETRY_MS := 1500
+## A mid-match connection that never presents a rejoin token (a stranger, or
+## a client that is not reconnect-aware) is idle - not admitted, not
+## rejected - until it either sends one or this timeout elapses.
+const PENDING_REJOIN_TIMEOUT_MS := 5000
 
 enum SessionRole { OFFLINE, APP_HOST, DEDICATED_SERVER, JOINING_CLIENT }
 
@@ -65,6 +80,11 @@ var _sim_last_unreliable_release := -1
 var _sim_reliable_release_after := 0.0
 var _lobby_auto_ready := false
 var _last_logged_lobby_phase := -1
+var _rejoin_token := ""
+var _last_joined_address := ""
+var _auto_reconnect_deadline := 0.0
+var _auto_reconnect_next_attempt := 0.0
+var _pending_rejoin_peers: Dictionary = {}
 
 func _ready() -> void:
 	_read_command_line_options()
@@ -82,6 +102,11 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	simulation_clock += delta
 	_release_simulated_messages()
+	if multiplayer.multiplayer_peer != null and multiplayer.is_server() and lobby != null:
+		_sweep_reconnect_grace()
+		_sweep_pending_rejoins()
+	if _auto_reconnect_deadline > 0.0:
+		_tick_auto_reconnect()
 	if _advertising:
 		_advertisement_remaining -= delta
 		if _advertisement_remaining <= 0.0:
@@ -141,6 +166,7 @@ func stop() -> void:
 	_peer = null
 	_last_input_sequence.clear()
 	_last_input_view.clear()
+	_pending_rejoin_peers.clear()
 	_configure_roster(session_role == SessionRole.DEDICATED_SERVER)
 	_configure_lobby(session_role == SessionRole.DEDICATED_SERVER)
 	local_actor_id = ""
@@ -224,6 +250,9 @@ func submit_client_lobby_rematch_ready(ready: bool, revision: int) -> void:
 	_submit_client_lobby_intent({"type": "lobby_rematch_ready", "ready": ready, "revision": revision})
 
 func submit_client_lobby_leave() -> void:
+	# A voluntary leave must not be undone by the auto-reconnect loop below.
+	_auto_reconnect_deadline = 0.0
+	_rejoin_token = ""
 	_submit_client_lobby_intent({"type": "lobby_leave"})
 
 func start_command_line_mode() -> bool:
@@ -250,6 +279,7 @@ func _join_address(address: String) -> Error:
 	var expected_team_size := team_size
 	stop()
 	session_role = SessionRole.JOINING_CLIENT
+	_last_joined_address = address
 	if not expected_descriptor.is_empty():
 		session_descriptor = expected_descriptor
 		team_size = expected_team_size
@@ -327,13 +357,22 @@ func _poll_discovery() -> void:
 
 func _on_peer_connected(peer_id: int) -> void:
 	if multiplayer.is_server():
+		var phase := int(lobby.public_state().get("phase", RiftlineLobby.Phase.STAGING)) if lobby != null else RiftlineLobby.Phase.STAGING
+		if phase == RiftlineLobby.Phase.LIVE or phase == RiftlineLobby.Phase.ARMING:
+			# The match is already running. New admissions are closed; this
+			# connection must present a valid rejoin token via _rpc_client_event
+			# (sent immediately by a reconnecting client) or it is dropped once
+			# PENDING_REJOIN_TIMEOUT_MS elapses - see _sweep_pending_rejoins().
+			_pending_rejoin_peers[peer_id] = Time.get_ticks_msec()
+			peer_joined.emit(peer_id)
+			return
 		var assigned := lobby.admit_peer(peer_id) if lobby != null else {}
 		if assigned.is_empty():
 			_peer.disconnect_peer(peer_id, true)
 			session_status.emit("RIFT FULL")
 			return
 		_send_server_event(peer_id, _session_event())
-		_send_server_event(peer_id, {"type": "assigned_actor", "actor_id": assigned.actor_id, "team": int(assigned.team)})
+		_send_server_event(peer_id, {"type": "assigned_actor", "actor_id": assigned.actor_id, "team": int(assigned.team), "rejoin_token": str(assigned.get("rejoin_token", ""))})
 		_broadcast_roster()
 		_broadcast_lobby_state()
 		session_status.emit("RIVAL LINKED")
@@ -342,21 +381,87 @@ func _on_peer_connected(peer_id: int) -> void:
 func _on_peer_disconnected(peer_id: int) -> void:
 	_last_input_sequence.erase(peer_id)
 	_last_input_view.erase(peer_id)
+	_pending_rejoin_peers.erase(peer_id)
 	if multiplayer.is_server():
-		var removed := lobby.remove_peer(peer_id) if lobby != null else roster.remove_peer(peer_id)
-		if not removed.is_empty():
-			_broadcast_roster()
-			if lobby != null and int(lobby.public_state().phase) == RiftlineLobby.Phase.ABANDONED:
-				_broadcast_lobby_event("lobby_abandoned", lobby.public_state())
-				if session_role == SessionRole.DEDICATED_SERVER and lobby.reset_empty():
+		var phase := int(lobby.public_state().get("phase", -1)) if lobby != null else -1
+		if lobby != null and (phase == RiftlineLobby.Phase.LIVE or phase == RiftlineLobby.Phase.ARMING):
+			var disconnected := lobby.disconnect_peer(peer_id)
+			if not disconnected.is_empty():
+				_broadcast_roster()
+				if int(lobby.public_state().phase) == RiftlineLobby.Phase.ABANDONED:
+					_broadcast_lobby_event("lobby_abandoned", lobby.public_state())
+				else:
 					_broadcast_lobby_state()
-			else:
-				_broadcast_lobby_state()
+					session_status.emit("RIVAL LINK LOST - RECONNECTING")
+					peer_left.emit(peer_id)
+					return
+		else:
+			var removed := lobby.remove_peer(peer_id) if lobby != null else roster.remove_peer(peer_id)
+			if not removed.is_empty():
+				_broadcast_roster()
+				if lobby != null and int(lobby.public_state().phase) == RiftlineLobby.Phase.ABANDONED:
+					_broadcast_lobby_event("lobby_abandoned", lobby.public_state())
+					if session_role == SessionRole.DEDICATED_SERVER and lobby.reset_empty():
+						_broadcast_lobby_state()
+				else:
+					_broadcast_lobby_state()
 	peer_left.emit(peer_id)
 	session_status.emit("LINK LOST")
 
+func _sweep_reconnect_grace() -> void:
+	if lobby.sweep_grace(Time.get_ticks_msec()):
+		_broadcast_roster()
+		if int(lobby.public_state().phase) == RiftlineLobby.Phase.ABANDONED:
+			_broadcast_lobby_event("lobby_abandoned", lobby.public_state())
+		else:
+			_broadcast_lobby_state()
+
+## A connection that arrived mid-match and never presented a rejoin token
+## (a stranger, or an older client that does not know the handshake) is not
+## admitted and not immediately rejected either - see _on_peer_connected().
+## Left alone forever it would just sit there holding an ENet slot, so drop
+## it once PENDING_REJOIN_TIMEOUT_MS has passed without a token.
+func _sweep_pending_rejoins() -> void:
+	if _pending_rejoin_peers.is_empty():
+		return
+	var now := Time.get_ticks_msec()
+	var expired: Array[int] = []
+	for peer_id in _pending_rejoin_peers.keys():
+		if now - int(_pending_rejoin_peers[peer_id]) >= PENDING_REJOIN_TIMEOUT_MS:
+			expired.append(int(peer_id))
+	for peer_id in expired:
+		_pending_rejoin_peers.erase(peer_id)
+		if _peer != null:
+			_peer.disconnect_peer(peer_id, true)
+
+## Client-side: while we hold an unexpired rejoin token and know the address
+## we were last connected to, keep dialing it every AUTO_RECONNECT_RETRY_MS.
+## A brief mobile network blip should not require the player to manually
+## retry - it should just resolve itself within the server's grace window.
+func _tick_auto_reconnect() -> void:
+	var now := Time.get_ticks_msec()
+	if now >= _auto_reconnect_deadline or _rejoin_token.is_empty() or _last_joined_address.is_empty():
+		_auto_reconnect_deadline = 0.0
+		return
+	if multiplayer.multiplayer_peer != null:
+		# Already dialing or connected - _on_connected_to_server() clears the
+		# deadline on success, and a failed attempt clears the peer, letting
+		# this fire again on the next scheduled attempt.
+		return
+	if now < _auto_reconnect_next_attempt:
+		return
+	_auto_reconnect_next_attempt = now + AUTO_RECONNECT_RETRY_MS
+	session_status.emit("RECONNECTING")
+	_join_address(_last_joined_address)
+
 func _on_connected_to_server() -> void:
 	_stop_discovery()
+	_auto_reconnect_deadline = 0.0
+	if not _rejoin_token.is_empty():
+		# We were previously admitted to this session and dropped mid-match.
+		# Present the token immediately so the server can restore our actor
+		# identity and team instead of treating this as a stranger.
+		_queue_or_send({"kind": "client_event", "event": {"type": "rejoin", "token": _rejoin_token}}, true)
 	session_status.emit("RIVAL LINKED")
 	peer_joined.emit(1)
 
@@ -367,7 +472,15 @@ func _on_connection_failed() -> void:
 func _on_server_disconnected() -> void:
 	session_status.emit("LINK LOST")
 	peer_left.emit(1)
+	# If we were admitted to a live match (we hold a rejoin token) and know
+	# who to dial, keep trying automatically for as long as the server would
+	# still honor that token - see RiftlineLobby.RECONNECT_GRACE_MS. stop()
+	# below does not clear _rejoin_token or _last_joined_address.
+	var should_retry := not _rejoin_token.is_empty() and not _last_joined_address.is_empty()
 	stop()
+	if should_retry:
+		_auto_reconnect_deadline = Time.get_ticks_msec() + RiftlineLobby.RECONNECT_GRACE_MS
+		_auto_reconnect_next_attempt = Time.get_ticks_msec() + 500.0
 
 @rpc("any_peer", "call_remote", "unreliable_ordered", INPUT_CHANNEL)
 func _rpc_input(frame: Dictionary) -> void:
@@ -408,6 +521,9 @@ func _rpc_event(event: Dictionary) -> void:
 	if event_type == "assigned_actor":
 		local_actor_id = str(event.get("actor_id", ""))
 		local_team = int(event.get("team", -1))
+		var token := str(event.get("rejoin_token", ""))
+		if not token.is_empty():
+			_rejoin_token = token
 		actor_assigned.emit(local_actor_id, local_team)
 		team_assigned.emit(local_team)
 	elif event_type == "roster":
@@ -513,8 +629,11 @@ func _validate_input(peer_id: int, frame: Dictionary) -> Dictionary:
 	var pitch := clampf(float(frame.pitch), -1.05, 0.9)
 	if _last_input_view.has(peer_id) and absf(angle_difference(float(_last_input_view[peer_id]), yaw)) > MAX_VIEW_TURN_PER_FRAME:
 		return {}
-	for key in ["aim", "fire", "jump", "crouch", "prone", "weapon_switch", "reload", "pass_seed", "interact"]:
+	for key in ["aim", "fire", "jump", "crouch", "prone", "weapon_switch", "reload", "pass_seed", "interact", "melee", "respawn"]:
 		if not frame.has(key) or typeof(frame[key]) != TYPE_BOOL:
+			return {}
+	for key in ["class_id", "primary_weapon"]:
+		if not frame.has(key) or typeof(frame[key]) != TYPE_INT:
 			return {}
 	return {
 		"protocol": PROTOCOL_VERSION,
@@ -532,6 +651,10 @@ func _validate_input(peer_id: int, frame: Dictionary) -> Dictionary:
 		"reload": bool(frame.reload),
 		"pass_seed": bool(frame.pass_seed),
 		"interact": bool(frame.interact),
+		"melee": bool(frame.melee),
+		"respawn": bool(frame.respawn),
+		"class_id": clampi(int(frame.class_id), int(Duelist.PlayerClass.FRONTLINE), int(Duelist.PlayerClass.SHIELD)),
+		"primary_weapon": RiftWeapons.clamp_weapon(int(frame.primary_weapon)),
 	}
 
 func _is_finite_number(value: Variant) -> bool:
@@ -670,6 +793,21 @@ func _handle_lobby_intent(event: Dictionary, sender_id: int) -> bool:
 	if lobby == null or not multiplayer.is_server():
 		return false
 	var event_type := str(event.get("type", ""))
+	if event_type == "rejoin":
+		_pending_rejoin_peers.erase(sender_id)
+		var reclaimed := lobby.reclaim_peer(str(event.get("token", "")), sender_id)
+		if reclaimed.is_empty():
+			# Not a valid reconnection - either a stale token or a stranger
+			# trying to join a match that is already live.
+			if _peer != null:
+				_peer.disconnect_peer(sender_id, true)
+			return true
+		_send_server_event(sender_id, _session_event())
+		_send_server_event(sender_id, {"type": "assigned_actor", "actor_id": reclaimed.actor_id, "team": int(reclaimed.team), "rejoin_token": str(reclaimed.get("rejoin_token", ""))})
+		_broadcast_roster()
+		_broadcast_lobby_state()
+		session_status.emit("RIVAL RELINKED")
+		return true
 	if event_type == "lobby_leave":
 		var removed := lobby.remove_peer(sender_id)
 		if not removed.is_empty():
@@ -731,7 +869,7 @@ func _validated_public_records(value: Variant) -> Array[Dictionary]:
 		var team := int(candidate.get("team", -1))
 		if actor_id.is_empty() or team < Duelist.Team.RED or team > Duelist.Team.BLUE:
 			continue
-		result.append({"actor_id": actor_id, "team": team, "human": bool(candidate.get("human", false))})
+		result.append({"actor_id": actor_id, "team": team, "human": bool(candidate.get("human", false)), "connected": bool(candidate.get("connected", true))})
 	return result
 
 func _new_session_marker() -> String:

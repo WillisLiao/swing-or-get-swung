@@ -58,7 +58,7 @@ func set_preferences(next_effects_enabled: bool, _next_haptics_enabled: bool) ->
 func weapon_fired(actor_id: String, weapon: Duelist.Weapon, origin: Vector3, local: bool) -> void:
 	if not _presentation_enabled:
 		return
-	var event_name := "carbine_fire" if weapon == Duelist.Weapon.PULSE else "knife_fire"
+	var event_name := "%s_fire" % String(RiftWeapons.row(int(weapon)).class_tag)
 	if local:
 		_play_local(event_name)
 	else:
@@ -73,7 +73,8 @@ func projectile_impacted(fact: Dictionary, local_position: Vector3) -> void:
 	_remember_event(event_key)
 	var impact_position: Vector3 = fact.get("position", Vector3.ZERO)
 	var team := int(fact.get("team", int(Duelist.Team.RED)))
-	_play_world("carbine_impact", impact_position, 2)
+	var impact_weapon := RiftWeapons.clamp_weapon(int(fact.get("weapon", 0)))
+	_play_world("%s_impact" % String(RiftWeapons.row(impact_weapon).class_tag), impact_position, 2)
 	var shooter_id := str(fact.get("shooter_id", ""))
 	var target_id := str(fact.get("target_id", ""))
 	var hit_duelist := bool(fact.get("hit_duelist", false))
@@ -85,17 +86,17 @@ func projectile_impacted(fact: Dictionary, local_position: Vector3) -> void:
 		var intensity := clampf(float(fact.get("damage", Duelist.HEALTH * 0.23)) / Duelist.HEALTH * 2.2, 0.2, 1.0)
 		_emit_damage(_screen_direction(source_position, local_position) if source_position is Vector3 else Vector2.ZERO, intensity, team)
 
-func knife_struck(actor_id: String, origin: Vector3, end: Vector3, team: Duelist.Team, local: bool, hit_target: bool, target_id: String = "", source_position: Variant = null, event_id: String = "", local_position: Vector3 = Vector3.ZERO) -> void:
+func melee_struck(actor_id: String, weapon: Duelist.Weapon, origin: Vector3, end: Vector3, team: Duelist.Team, local: bool, hit_target: bool, target_id: String = "", source_position: Variant = null, event_id: String = "", local_position: Vector3 = Vector3.ZERO) -> void:
 	if not _presentation_enabled:
 		return
-	var event_key := "knife:%s" % event_id if not event_id.is_empty() else "knife:%s:%s:%s" % [actor_id, origin, end]
+	var event_key := "melee:%s" % event_id if not event_id.is_empty() else "melee:%s:%s:%s" % [actor_id, origin, end]
 	if _seen_events.has(event_key):
 		return
 	_remember_event(event_key)
 	if local:
-		_play_local("knife_fire")
+		_play_local("melee_swing")
 	else:
-		_play_world("knife_fire", origin, 1)
+		_play_world("melee_swing", origin, 1)
 	if local and hit_target:
 		_play_local("hit_confirm")
 		hit_confirm_feedback.emit()
@@ -179,11 +180,27 @@ func diagnostics() -> Dictionary:
 		"seen_events": _seen_events.size(),
 		"skipped_low_priority": _skipped_low_priority,
 	}
+## Per-weapon fire/impact seeds, tuned so each of the five archetypes reads
+## distinctly even as procedural noise: SMG fast/bright, shotgun low/punchy,
+## pistol crisp, sniper a deep single boom, rifle the mid baseline.
+const _WEAPON_FIRE_CLIP_FACTS := {
+	"ar": {"duration": 0.105, "start": 190.0, "end": 900.0, "gain": 0.85, "seed": 17},
+	"smg": {"duration": 0.07, "start": 260.0, "end": 1180.0, "gain": 0.7, "seed": 23},
+	"shotgun": {"duration": 0.16, "start": 130.0, "end": 480.0, "gain": 0.95, "seed": 31},
+	"pistol": {"duration": 0.085, "start": 220.0, "end": 980.0, "gain": 0.7, "seed": 37},
+	"sniper": {"duration": 0.22, "start": 90.0, "end": 620.0, "gain": 1.0, "seed": 43},
+}
+const _WEAPON_IMPACT_CLIP_FACTS := {
+	"ar": {"duration": 0.055, "start": 1250.0, "end": 720.0, "gain": 0.44, "seed": 41},
+	"smg": {"duration": 0.045, "start": 1350.0, "end": 800.0, "gain": 0.4, "seed": 47},
+	"shotgun": {"duration": 0.07, "start": 900.0, "end": 480.0, "gain": 0.5, "seed": 53},
+	"pistol": {"duration": 0.05, "start": 1300.0, "end": 760.0, "gain": 0.42, "seed": 59},
+	"sniper": {"duration": 0.08, "start": 700.0, "end": 320.0, "gain": 0.55, "seed": 61},
+}
+
 func _build_audio_bank() -> void:
 	_world_streams = {
-		"carbine_fire": _make_clip(0.105, 190.0, 900.0, 0.85, 17),
-		"knife_fire": _make_clip(0.11, 190.0, 520.0, 0.58, 29),
-		"carbine_impact": _make_clip(0.055, 1250.0, 720.0, 0.44, 41),
+		"melee_swing": _make_clip(0.11, 190.0, 520.0, 0.58, 29),
 		# Nuclear Rush core events. Rising sweeps read as gaining the objective,
 		# falling ones as losing it; the launch is the longest and lowest clip so
 		# it carries across the arena.
@@ -195,9 +212,7 @@ func _build_audio_bank() -> void:
 		"launch_complete": _make_clip(0.42, 240.0, 1240.0, 0.66, 127),
 	}
 	_local_streams = {
-		"carbine_fire": _make_clip(0.095, 230.0, 1050.0, 0.72, 101),
-		"knife_fire": _make_clip(0.1, 220.0, 620.0, 0.62, 113),
-		"carbine_impact": _make_clip(0.045, 1480.0, 880.0, 0.3, 127),
+		"melee_swing": _make_clip(0.1, 220.0, 620.0, 0.62, 113),
 		"hit_confirm": _make_clip(0.06, 1660.0, 1040.0, 0.22, 139),
 		"damage": _make_clip(0.12, 82.0, 62.0, 0.46, 151),
 		"reload_start": _make_clip(0.08, 180.0, 360.0, 0.3, 163),
@@ -210,6 +225,16 @@ func _build_audio_bank() -> void:
 		"launch_cancelled": _make_clip(0.18, 480.0, 120.0, 0.48, 251),
 		"launch_complete": _make_clip(0.36, 260.0, 1420.0, 0.6, 263),
 	}
+	for class_tag in _WEAPON_FIRE_CLIP_FACTS:
+		var world_facts: Dictionary = _WEAPON_FIRE_CLIP_FACTS[class_tag]
+		_world_streams["%s_fire" % class_tag] = _make_clip(float(world_facts.duration), float(world_facts.start), float(world_facts.end), float(world_facts.gain), int(world_facts.seed))
+		var local_facts: Dictionary = _WEAPON_FIRE_CLIP_FACTS[class_tag]
+		_local_streams["%s_fire" % class_tag] = _make_clip(float(local_facts.duration) * 0.9, float(local_facts.start) * 1.2, float(local_facts.end) * 1.15, float(local_facts.gain) * 0.82, int(local_facts.seed) + 100)
+	for class_tag in _WEAPON_IMPACT_CLIP_FACTS:
+		var world_impact: Dictionary = _WEAPON_IMPACT_CLIP_FACTS[class_tag]
+		_world_streams["%s_impact" % class_tag] = _make_clip(float(world_impact.duration), float(world_impact.start), float(world_impact.end), float(world_impact.gain), int(world_impact.seed))
+		var local_impact: Dictionary = _WEAPON_IMPACT_CLIP_FACTS[class_tag]
+		_local_streams["%s_impact" % class_tag] = _make_clip(float(local_impact.duration) * 0.85, float(local_impact.start) * 1.15, float(local_impact.end) * 1.1, float(local_impact.gain) * 0.68, int(local_impact.seed) + 100)
 
 func _build_player_pools() -> void:
 	for index in WORLD_VOICE_COUNT:

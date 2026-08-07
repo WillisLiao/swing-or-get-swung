@@ -20,7 +20,11 @@ enum GameMode { NUCLEAR_RUSH }
 enum CoreState { AT_CENTER, CARRIED, DROPPED, INSTALLED, RESPAWNING }
 
 const OPENING_HOLD_SECONDS := 2.5
-const RESPAWN_DELAY_SECONDS := 3.0
+# The minimum time a player is dead before they may respawn. Unlike the old
+# instant/auto respawn, reaching this minimum does not respawn them by
+# itself - it only unlocks the respawn action (see can_respawn/
+# request_respawn), giving the death screen's class picker somewhere to sit.
+const RESPAWN_MIN_SECONDS := 5.0
 const SAFE_SPAWN_RADIUS := 9.0
 const MATCH_SECONDS := 600.0
 const POINTS_TO_WIN := 3
@@ -55,7 +59,10 @@ var sudden_death := false
 
 var _presentation_enabled := false
 var _duelists_by_id: Dictionary = {}
-var _respawn_generation: Dictionary = {}
+## Seconds each currently-eliminated actor has been dead, ticked in
+## _physics_process. Presence in this dict (rather than a bool) is also what
+## `_is_registered`/`can_respawn` use to know someone is mid-death.
+var _respawn_elapsed: Dictionary = {}
 var _opening_remaining := 0.0
 var _started := false
 var _winner: Duelist.Team = Duelist.Team.RED
@@ -80,7 +87,6 @@ func register_duelist(duelist: Duelist, actor_id: String) -> void:
 		return
 	rosters[duelist.team].append(duelist)
 	_duelists_by_id[actor_id] = duelist
-	_respawn_generation[actor_id] = 0
 	duelist.defeated.connect(_on_defeated)
 
 func unregister_duelist(actor_id: String) -> void:
@@ -92,7 +98,7 @@ func unregister_duelist(actor_id: String) -> void:
 	if duelist in rosters[(duelist as Duelist).team]:
 		rosters[(duelist as Duelist).team].erase(duelist)
 	_duelists_by_id.erase(actor_id)
-	_respawn_generation.erase(actor_id)
+	_respawn_elapsed.erase(actor_id)
 	_interact_held.erase(actor_id)
 	if rosters[Duelist.Team.RED].is_empty() or rosters[Duelist.Team.BLUE].is_empty():
 		_started = false
@@ -177,8 +183,13 @@ func _physics_process(delta: float) -> void:
 		match_remaining = maxf(0.0, match_remaining - delta)
 	if phase == Phase.LIVE or phase == Phase.SUDDEN_DEATH:
 		_tick_core(delta)
+		_tick_respawn_timers(delta)
 		if phase == Phase.LIVE and match_remaining <= 0.0:
 			_on_clock_expired()
+
+func _tick_respawn_timers(delta: float) -> void:
+	for actor_id in _respawn_elapsed.keys():
+		_respawn_elapsed[actor_id] = float(_respawn_elapsed[actor_id]) + delta
 
 func _start_match() -> void:
 	_opening_remaining = OPENING_HOLD_SECONDS
@@ -218,7 +229,7 @@ func _on_defeated(victim: Duelist, killer: Duelist) -> void:
 		return
 	if victim.actor_id == core_carrier_id and core_state == CoreState.CARRIED:
 		_drop_core(victim.global_position)
-	_schedule_respawn(victim)
+	_begin_death(victim)
 
 func _tick_core(delta: float) -> void:
 	var changed := false
@@ -392,16 +403,36 @@ func _finish_match(winner: Duelist.Team) -> void:
 	_set_phase(Phase.FINISHED)
 	match_finished.emit(winner)
 
-func _schedule_respawn(victim: Duelist) -> void:
-	var actor_id := victim.actor_id
-	var generation := int(_respawn_generation.get(actor_id, 0)) + 1
-	_respawn_generation[actor_id] = generation
-	await get_tree().create_timer(RESPAWN_DELAY_SECONDS).timeout
-	if generation != int(_respawn_generation.get(actor_id, -1)):
-		return
-	if not is_live() or not is_instance_valid(victim) or not victim.eliminated:
-		return
-	_respawn_duelist(victim)
+func _begin_death(victim: Duelist) -> void:
+	_respawn_elapsed[victim.actor_id] = 0.0
+
+## True once an eliminated actor has cleared the minimum death time and may
+## respawn. False for an actor who isn't currently tracked as dead at all
+## (already alive, or never registered) as well as one still waiting it out.
+func can_respawn(actor_id: String) -> bool:
+	return _respawn_elapsed.has(actor_id) and float(_respawn_elapsed[actor_id]) >= RESPAWN_MIN_SECONDS
+
+## Seconds still owed on the minimum death timer, 0 once respawn-eligible.
+func respawn_seconds_remaining(actor_id: String) -> float:
+	if not _respawn_elapsed.has(actor_id):
+		return 0.0
+	return maxf(0.0, RESPAWN_MIN_SECONDS - float(_respawn_elapsed[actor_id]))
+
+## The respawn action itself - unlike the old auto-respawn, this only ever
+## fires from an explicit request (the death screen's Respawn button), never
+## on a timer alone. Returns false (a no-op) if it's not actually eligible
+## yet, so a stray/late client request can't jump the queue.
+func request_respawn(actor_id: String) -> bool:
+	if not can_respawn(actor_id):
+		return false
+	var victim: Variant = _duelists_by_id.get(actor_id, null)
+	if not victim is Duelist or not is_instance_valid(victim) or not (victim as Duelist).eliminated:
+		return false
+	if not is_live():
+		return false
+	_respawn_elapsed.erase(actor_id)
+	_respawn_duelist(victim as Duelist)
+	return true
 
 func _respawn_duelist(victim: Duelist) -> void:
 	var point := _pick_safe_spawn(victim)
@@ -452,8 +483,7 @@ func _is_registered(duelist: Duelist) -> bool:
 	return duelist != null and rosters[duelist.team].has(duelist)
 
 func _cancel_respawns() -> void:
-	for key in _respawn_generation.keys():
-		_respawn_generation[key] = int(_respawn_generation[key]) + 1
+	_respawn_elapsed.clear()
 
 func _set_phase(next_phase: Phase) -> void:
 	if phase == next_phase:

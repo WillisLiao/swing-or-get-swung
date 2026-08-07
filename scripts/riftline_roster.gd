@@ -19,6 +19,7 @@ var bot_fill_enabled := false
 
 var _records_by_id: Dictionary = {}
 var _actor_by_peer: Dictionary = {}
+var _actor_by_token: Dictionary = {}
 var _used_actor_ids: Dictionary = {}
 var _peer_generations: Dictionary = {}
 
@@ -42,22 +43,34 @@ func assign_peer(peer_id: int) -> Dictionary:
 	if team < 0:
 		return {}
 	var actor_id := _next_peer_actor_id(peer_id)
-	return _add_record(actor_id, peer_id, team as Duelist.Team, true)
+	return _add_record(actor_id, peer_id, team as Duelist.Team, true, _new_rejoin_token())
 
 func add_bot(actor_id: String, team: Duelist.Team) -> Dictionary:
 	if actor_id.is_empty() or _used_actor_ids.has(actor_id) or not _has_room_for(team):
 		return {}
 	return _add_record(actor_id, -1, team, false)
 
+## Class/loadout selection. Defaults to Frontline/Rifle at admission (set in
+## _add_record) - there is deliberately no dedicated selection screen yet
+## (that belongs to the art/UI redesign session), but the data contract and
+## this setter exist now so a future UI, or a debug/dedicated-server config,
+## can drive it. `primary_choice` only matters for Frontline; every other
+## class has exactly one legal primary and Duelist.configure_loadout() itself
+## ignores an out-of-set request.
+func set_class(actor_id: String, player_class: Duelist.PlayerClass, primary_choice: Duelist.Weapon = Duelist.Weapon.RIFLE) -> bool:
+	if not _records_by_id.has(actor_id):
+		return false
+	var existing: Dictionary = _records_by_id[actor_id]
+	existing["player_class"] = int(player_class)
+	existing["primary_weapon"] = int(primary_choice)
+	_records_by_id[actor_id] = existing
+	return true
+
 func remove_peer(peer_id: int) -> Dictionary:
 	var actor_id := str(_actor_by_peer.get(peer_id, ""))
 	if actor_id.is_empty():
 		return {}
-	var removed := record(actor_id)
-	_actor_by_peer.erase(peer_id)
-	_records_by_id.erase(actor_id)
-	actor_removed.emit(actor_id)
-	return removed
+	return remove_actor(actor_id)
 
 func remove_actor(actor_id: String) -> Dictionary:
 	var existing := record(actor_id)
@@ -66,9 +79,60 @@ func remove_actor(actor_id: String) -> Dictionary:
 	var peer_id := int(existing.get("peer_id", -1))
 	if peer_id > 0:
 		_actor_by_peer.erase(peer_id)
+	var token := str(existing.get("rejoin_token", ""))
+	if not token.is_empty():
+		_actor_by_token.erase(token)
 	_records_by_id.erase(actor_id)
 	actor_removed.emit(actor_id)
 	return existing
+
+## Marks a human actor's connection as lost without freeing their slot. The
+## record, team assignment, and rejoin token all survive so `reclaim()` can
+## restore the same actor identity when the same client reconnects within
+## the grace window. Distinct from `remove_peer`, which frees the slot for
+## someone else immediately (used pre-match, where there is no match state
+## worth preserving).
+func disconnect_peer(peer_id: int) -> Dictionary:
+	var actor_id := str(_actor_by_peer.get(peer_id, ""))
+	if actor_id.is_empty():
+		return {}
+	var existing: Dictionary = _records_by_id[actor_id]
+	if str(existing.get("rejoin_token", "")).is_empty():
+		# No token to reclaim with (e.g. the host) - this is a hard removal.
+		return remove_actor(actor_id)
+	_actor_by_peer.erase(peer_id)
+	existing["peer_id"] = -1
+	existing["connected"] = false
+	existing["disconnected_at"] = Time.get_ticks_msec()
+	_records_by_id[actor_id] = existing
+	return existing.duplicate(true)
+
+## Restores a previously disconnected actor to a freshly connected peer id,
+## presenting the rejoin token issued when that actor was first admitted.
+## Returns {} if the token does not match a currently-disconnected actor.
+func reclaim(token: String, peer_id: int) -> Dictionary:
+	if token.is_empty() or peer_id <= 0 or _actor_by_peer.has(peer_id):
+		return {}
+	var actor_id := str(_actor_by_token.get(token, ""))
+	if actor_id.is_empty() or not _records_by_id.has(actor_id):
+		return {}
+	var existing: Dictionary = _records_by_id[actor_id]
+	if bool(existing.get("connected", true)):
+		return {}
+	existing["peer_id"] = peer_id
+	existing["connected"] = true
+	existing["disconnected_at"] = 0
+	_records_by_id[actor_id] = existing
+	_actor_by_peer[peer_id] = actor_id
+	return existing.duplicate(true)
+
+## Every currently disconnected human actor, for grace-timeout sweeps.
+func disconnected_records() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for existing in _records_by_id.values():
+		if not bool((existing as Dictionary).get("connected", true)):
+			result.append((existing as Dictionary).duplicate(true))
+	return result
 
 func actor_for_peer(peer_id: int) -> Dictionary:
 	var actor_id := str(_actor_by_peer.get(peer_id, ""))
@@ -105,7 +169,7 @@ func team_records(team: Duelist.Team) -> Array[Dictionary]:
 			result.append((existing as Dictionary).duplicate(true))
 	return result
 
-func _add_record(actor_id: String, peer_id: int, team: Duelist.Team, human: bool) -> Dictionary:
+func _add_record(actor_id: String, peer_id: int, team: Duelist.Team, human: bool, rejoin_token: String = "") -> Dictionary:
 	if actor_id.is_empty() or _records_by_id.has(actor_id) or not _has_room_for(team):
 		return {}
 	var next := {
@@ -113,13 +177,23 @@ func _add_record(actor_id: String, peer_id: int, team: Duelist.Team, human: bool
 		"peer_id": peer_id,
 		"team": int(team),
 		"human": human,
+		"connected": true,
+		"disconnected_at": 0,
+		"rejoin_token": rejoin_token,
+		"player_class": int(Duelist.PlayerClass.FRONTLINE),
+		"primary_weapon": int(Duelist.Weapon.RIFLE),
 	}
 	_records_by_id[actor_id] = next
 	_used_actor_ids[actor_id] = true
 	if peer_id > 0:
 		_actor_by_peer[peer_id] = actor_id
+	if not rejoin_token.is_empty():
+		_actor_by_token[rejoin_token] = actor_id
 	actor_added.emit(next.duplicate(true))
 	return next.duplicate(true)
+
+func _new_rejoin_token() -> String:
+	return "%d-%d-%d" % [Time.get_ticks_usec(), randi(), randi()]
 
 func _balanced_team() -> int:
 	var red_count := _team_count(Duelist.Team.RED, false)
@@ -160,4 +234,7 @@ func _public_record(private_record: Dictionary) -> Dictionary:
 		"actor_id": str(private_record.get("actor_id", "")),
 		"team": int(private_record.get("team", -1)),
 		"human": bool(private_record.get("human", false)),
+		"connected": bool(private_record.get("connected", true)),
+		"player_class": int(private_record.get("player_class", int(Duelist.PlayerClass.FRONTLINE))),
+		"primary_weapon": int(private_record.get("primary_weapon", int(Duelist.Weapon.RIFLE))),
 	}
