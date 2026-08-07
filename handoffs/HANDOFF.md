@@ -14,13 +14,19 @@ Earlier names for the same project: Riftline, WhoYouPeekin, Nuclear Rush.
 The bundle id is still `com.lull.riftline` and is deliberately unchanged, because changing it breaks code signing and orphans existing installs.
 That is a separate decision from the display name.
 
-This source tree lives in two places that are kept identical: `IOSapp/Riftline/` (day-to-day working copy) and the standalone `WillisLiao/swing-or-get-swung` GitHub repo (collaboration home, protected `main`, PRs required).
-That repo was previously named `Nuclear-Rush`; GitHub redirects the old URL, but new clones should use the current name.
-See `WORKFLOW.md` in that repo for the two-developer plus AI-assistant flow.
+This repo is protected on `main` - land changes by branch + PR, not a direct push (`gh pr merge --admin` works for the owner). See `WORKFLOW.md` for the two-developer plus AI-assistant flow.
+
+**As of 2026-08-07, `IOSapp` is a direct clone of this repo, at its root - there is no longer a separate `IOSapp/Riftline/` working copy.** That two-tree setup (this repo plus a working copy on a different remote, manually kept "identical" - which it in fact was not; see the sessions below for exactly how they'd diverged) was retired at the user's request specifically because of that silent drift. If you're reading this from `IOSapp` and it still looks like it has a `Riftline/` subfolder or an `X-in-a-bottle` remote, something regressed - it shouldn't.
 
 ## Current state (2026-08-07)
 
-**Latest, fifth session - weapon models, sights, sniper scope, and shield visibility redesign (via `/sonnet-opus`):**
+**Latest - eleventh session, all seven bugs from `handoffs/NEXT-SESSION-weapon-visual-bugs.md` fixed, via `/sonnet-opus`:**
+The reticle now tracks recoil (a new `Duelist.recoil_presentation()` pushed into `DuelHud` each frame, same pattern as `ads_progress`), the confirmed respawn-with-same-weapon bug is fixed (`set_weapon_presentation(force: bool)`), the sniper scope reticle kicks under recoil instead of reading as dead, the sniper reticle is a dot with ranging marks instead of a cross, the pistol is one-handed at hip and two-handed on ADS with a genuinely mirrored (not just relocated) support hand, the shield's default carry reads as in front of the character with a squared-up ADS parapet and a visible reload pose, and the shader's periodic sine-wave surface relief - the actual cause of the moving stripe artifact - is replaced with an analytic-derivative noise field. Full detail, including each fix's known remaining limitations (pistol sleeve occlusion, shield forearm-cuff ring, unverified long-range shader aliasing): "Eleventh session" in `devlogs/2026-08-07.md`. `handoffs/NEXT-SESSION-weapon-visual-bugs.md` is now historical - its diagnosis was accurate, but every bug it describes is fixed; nothing there is still open work.
+
+**Ninth session - recoil, muzzle flash, ballistic shield rework, first-person hands (ported from the old `IOSapp/Riftline` working copy, now retired):**
+Ported as a clean patch from that working copy's own sixth session - see "Ninth session" in `devlogs/2026-08-07.md` for full detail, and its "Known, pre-existing three-way divergence" note for exactly how the two trees had drifted apart before this port (this repo's own sixth-eighth sessions - Blender character, death-presentation cleanup, core-carry damage removal - were not reflected in the old working copy; conversely this session's work didn't exist here until ported). Recoil now moves the weapon rig's position, not just its rotation. Muzzle flash is a real crossed-blade star plus a brief point light. The Shield class has a reworked ADS (plate pitches into a low parapet, sidearm rises to a normal centered sight), a shield-bump melee, a reload pose tucked behind the vertical shield, a much larger vision port, and a new revolver model. First-person hands exist on this render path for the first time, team-neutral by design.
+
+**Fifth session - weapon models, sights, sniper scope, and shield visibility redesign (via `/sonnet-opus`):**
 All five weapon models rebuilt with distinct silhouettes; sights redesigned from a single occluding lens disc to real hollow sight housings (reflex sights, a ghost-ring shotgun sight, three-dot pistol notch-and-post) with matching HUD reticles that are now actually visible during ADS (previously none were, for any weapon). The sniper finally has a real scope: a vignette + mil-dot HUD overlay with two visibly distinct zoom stages, since a physically modeled scope tube can't be looked *through* in a raster render. Shield-class players can now see their own shield in first person - previously it only rendered for everyone else. Found and fixed a real bug along the way: 4 of 5 weapons' `optic_tip_local`/`ads_anchor` didn't actually satisfy the alignment invariant, so their sights sat visibly off the crosshair. Full detail, including a follow-up fix pass on the shotgun/pistol sights: "Fifth session" in `devlogs/2026-08-07.md`.
 
 Robert's circular arena is in as the **only** map, ported forward from PR #1 rather than merged.
@@ -82,6 +88,7 @@ Full detail: `devlogs/2026-08-07.md`.
 - `riftline_modes_exercise.gd` now asserts that a non-Runner carrier keeps identical health while simulated and still receives the 0.82x speed multiplier.
 
 **Deferred by explicit user decision to their own sessions - do not start these inline, use the bootstrap files:**
+- `handoffs/NEXT-SESSION-weapon-visual-bugs.md` - **done, see the eleventh session above.** Kept as a record of the diagnosis, not as open work. If a fresh visual pass on the same surfaces is wanted (the pistol-sleeve occlusion, the shield forearm-cuff ring, or long-range shader aliasing noted as remaining), file a new bootstrap rather than reopening this one.
 - `handoffs/NEXT-SESSION-art-ui-redesign.md` - its character-material premise is now partly stale because the live character is a Blender import on `NuclearMaterials`; use it for further character polish and the still-unfinished full UI pass. Visual polish for the main menu/class panel belongs here too.
 - `handoffs/NEXT-SESSION-respawn-logic.md` - respawn *timing* is now resolved (5s minimum + manual respawn). What's left there, if anything, is deeper game-mode-rule interaction, not the base mechanic.
 
