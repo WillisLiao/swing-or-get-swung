@@ -36,9 +36,6 @@ const JUMP_SPEED := 9.3
 # Carrying the nuclear core is the mode's central risk: slow enough that a
 # carrier needs escorts, not so slow that reaching your own base is hopeless.
 const CORE_CARRY_SPEED_MULTIPLIER := 0.82
-# Carrying without the runner's nuclear vest costs steady health in addition
-# to the speed penalty every carrier pays; the vest removes this, not the speed cost.
-const CORE_CARRY_DAMAGE_PER_SECOND := 2.5
 # A shot is airborne when the restored (snapshotted) vertical velocity is
 # clearly off the ground plate. Grounded velocity.y is pinned to -0.1 by
 # _simulate_motion, so this threshold is unambiguous and - unlike
@@ -647,8 +644,6 @@ func _simulate_motion(move_input: Vector2, wants_jump: bool, delta: float) -> vo
 	else:
 		velocity.y = JUMP_SPEED if wants_jump and stance != Stance.PRONE else -0.1
 	move_and_slide()
-	if is_carrying_core() and not has_nuclear_vest:
-		take_damage(CORE_CARRY_DAMAGE_PER_SECOND * delta, null)
 
 func set_stance(next_stance: Stance) -> void:
 	if eliminated or not match_active or stance == next_stance:
@@ -1092,8 +1087,8 @@ func _build_ballistic_shield(dark: Material, brass: Material, glow: Material) ->
 	_add_body_part(_box(Vector3(0.66, 0.9, 0.02)), Vector3(0.0, 1.02, -0.50), brass)
 	_add_body_part(_cylinder(0.07, 0.07, 0.4), Vector3(0.0, 1.02, -0.42), glow, Vector3(PI * 0.5, 0.0, 0.0))
 
-## Runner class equipment: a chest-worn vest that marks who is immune to the
-## carry damage-over-time.
+## Runner class equipment: a chest-worn vest that keeps the class silhouette
+## readable. Core carrying no longer deals damage to any class.
 func _build_nuclear_vest_marker(glow: Material) -> void:
 	_add_body_part(_box(Vector3(0.5, 0.5, 0.46)), Vector3(0.0, 1.05, 0.0), glow)
 
