@@ -20,7 +20,10 @@ This repo is protected on `main` - land changes by branch + PR, not a direct pus
 
 ## Current state (2026-08-07)
 
-**Latest - thirteenth session, objective-aware autonomous bots (Robert, PR #9):**
+**Latest - fourteenth session, High Alert threat warning chip (Robert, PR #8):**
+A universal local passive (no chip-selection UI yet, everyone gets it) that warns the local player when an enemy is aiming at them: alive, opposing team, 55%+ into ADS, within 95m, inside a 5.5-degree aim cone, outside the player's own view, and unobstructed - a pulsing edge arc/chevron plus a `HIGH ALERT` plate. Restyled onto the twelfth session's HUD token/plate system on merge (`HUD_ALERT`, `draw_plate`, `draw_tracked_centered`), same trigger logic and public contract. Full detail: "Fourteenth session" in `devlogs/2026-08-07.md`.
+
+**Thirteenth session, objective-aware autonomous bots (Robert, PR #9):**
 Offline teammates and enemies now understand Nuclear Rush instead of acting as combat-only targets. Each squad assigns deterministic Runner, Escort, Defender, and Raider roles; bots dynamically claim the core, escort a friendly carrier, intercept an enemy carrier, deliver and install at their own pad, defend a launch, or invade and cancel an enemy launch. They reuse the map's route planner, keep fighting opportunistically while moving toward the objective, recover from obstructions, and drive the same authoritative `interact` input used by players. A new end-to-end exercise covers decisions plus real pickup/install/cancel rules. Headless import is clean, all 17 exercises pass, and MCP runtime inspection confirmed the live 4v4 bots moving without game-log errors. Full detail: "Thirteenth session" in `devlogs/2026-08-07.md`.
 
 **Twelfth session - full art/UI redesign via `/sonnet-opus`: Blender MCP weapons, HUD/UI visual pass, sniper scope picture-in-picture rework:**
@@ -93,6 +96,12 @@ Full detail: `devlogs/2026-08-07.md`.
 - The existing 0.82x carrier movement multiplier remains the only universal carry penalty. Runner keeps the nuclear vest as readable class equipment, not damage immunity.
 - `riftline_modes_exercise.gd` now asserts that a non-Runner carrier keeps identical health while simulated and still receives the 0.82x speed multiplier.
 
+**Same day, ninth session - High Alert chip v1:**
+- Every local player currently has the High Alert chip equipped by default; there is no chip-selection screen yet. This is a presentation-only passive and does not change authority, damage, snapshots, or protocol 12.
+- An enemy must be alive, on the opposing team, at least 55% into ADS, within 95m, aiming within a 5.5-degree cone, outside the local camera frustum, and have an unobstructed layer-1 sightline for 0.5 seconds. Cover blocks the warning; the chip never supplies through-wall information.
+- A qualifying threat produces a pulsing amber screen-edge direction arc, `HIGH ALERT` plate, and a short procedural local warning tone. Each attacker must reacquire after losing the target, and its audio cue has a 5-second rearm window.
+- New `scripts/riftline_high_alert.gd` owns the local evaluator. `tools/riftline_high_alert_exercise.gd` covers timing, aim cone/range, behind-camera direction, cover suppression, and HUD state. Headless import is clean, all 17 exercises pass, the visual preview was inspected at 1280x588, and an MCP live main-scene run has no runtime errors.
+
 **Deferred by explicit user decision to their own sessions - do not start these inline, use the bootstrap files:**
 - `handoffs/NEXT-SESSION-weapon-visual-bugs.md` - **done, see the eleventh session above.** Kept as a record of the diagnosis, not as open work. If a fresh visual pass on the same surfaces is wanted (the pistol-sleeve occlusion, the shield forearm-cuff ring, or long-range shader aliasing noted as remaining), file a new bootstrap rather than reopening this one.
 - `handoffs/NEXT-SESSION-art-ui-redesign.md` - its character-material premise is now partly stale because the live character is a Blender import on `NuclearMaterials`; use it for further character polish and the still-unfinished full UI pass. Visual polish for the main menu/class panel belongs here too.
@@ -133,6 +142,7 @@ The rules themselves:
 
 Roles (Shield Operator, Core Carrier, Support Operator, Observer/Marksman) are playstyle labels only.
 No loadout or perk restrictions are enforced.
+High Alert is currently a universal v1 passive, not a selectable or class-restricted perk.
 
 ## The one map
 

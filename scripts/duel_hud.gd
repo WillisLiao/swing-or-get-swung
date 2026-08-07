@@ -213,6 +213,8 @@ var primary_fire_bloom := 0.0
 var damage_direction := Vector2.ZERO
 var damage_direction_intensity := 0.0
 var damage_enemy_team := int(Duelist.Team.BLUE)
+var high_alert_direction := Vector2.DOWN
+var high_alert_intensity := 0.0
 var objective_feedback_pulse := 0.0
 var objective_feedback_team := -1
 var camera_sensitivity := 1.0
@@ -351,6 +353,7 @@ func _process(delta: float) -> void:
 	hit_confirm = maxf(0.0, hit_confirm - delta * 6.5)
 	primary_fire_bloom = maxf(0.0, primary_fire_bloom - delta * 8.5)
 	damage_direction_intensity = maxf(0.0, damage_direction_intensity - delta * 4.0)
+	high_alert_intensity = maxf(0.0, high_alert_intensity - delta * 2.8)
 	objective_feedback_pulse = maxf(0.0, objective_feedback_pulse - delta * 3.0)
 	_objective_message_remaining = maxf(0.0, _objective_message_remaining - delta)
 	_score_pulse = maxf(0.0, _score_pulse - delta * 2.8)
@@ -627,6 +630,15 @@ func show_damage_direction(direction: Vector2, intensity: float, enemy_team: int
 	damage_direction = direction
 	damage_direction_intensity = clampf(intensity, 0.0, 1.0)
 	damage_enemy_team = enemy_team
+	queue_redraw()
+
+func show_high_alert(direction: Vector2, intensity: float = 1.0) -> void:
+	high_alert_direction = direction.normalized() if direction.length_squared() > 0.0001 else Vector2.DOWN
+	high_alert_intensity = maxf(high_alert_intensity, clampf(intensity, 0.0, 1.0))
+	queue_redraw()
+
+func clear_high_alert() -> void:
+	high_alert_intensity = 0.0
 	queue_redraw()
 
 func show_hit_confirm() -> void:
@@ -916,6 +928,8 @@ func _draw_gameplay_hud() -> void:
 		for band in bands:
 			var span := float(band.span)
 			draw_arc(center, float(band.r), edge_angle - span, edge_angle + span, 16, Color(damage_color, damage_direction_intensity * float(band.a)), float(band.w))
+	if high_alert_intensity > 0.0:
+		_draw_high_alert(center)
 	if _match_result_visible:
 		_draw_match_result()
 	elif _match_phase == RiftlineMatch.Phase.OPENING:
@@ -946,6 +960,34 @@ func _draw_stick(origin: Vector2, knob: Vector2, radius: float, friendly: Color,
 
 func _friendly_color() -> Color:
 	return _team_color(_roster_local_team)
+
+## Threat-bearing warning (Robert, PR #8) - restyled onto the token/plate
+## system the rest of the HUD uses instead of its original ad-hoc colour and
+## plain rect, per this HUD's own colour discipline: HUD_ALERT is the danger
+## role, reserved for exactly this kind of warning, not a fourth one-off hue.
+func _draw_high_alert(center: Vector2) -> void:
+	var direction := high_alert_direction if high_alert_direction.length_squared() > 0.01 else Vector2.DOWN
+	var edge_radius := minf(size.x, size.y) * 0.365
+	var edge_angle := atan2(direction.y, direction.x)
+	var pulse := 0.78 + 0.22 * (0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.018))
+	var alert_color := Color(HUD_ALERT, high_alert_intensity * pulse)
+	draw_arc(center, edge_radius, edge_angle - 0.24, edge_angle + 0.24, 18, Color(HUD_VOID, high_alert_intensity * 0.72), 9.0)
+	draw_arc(center, edge_radius, edge_angle - 0.22, edge_angle + 0.22, 18, alert_color, 4.5)
+	var tip := center + direction * (edge_radius - 7.0)
+	var tangent := Vector2(-direction.y, direction.x)
+	var chevron := PackedVector2Array([
+		tip + direction * 10.0,
+		tip - direction * 5.0 + tangent * 7.0,
+		tip - direction * 5.0 - tangent * 7.0,
+	])
+	draw_colored_polygon(chevron, alert_color)
+	var label := "HIGH ALERT"
+	var label_width := hud_font().get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, FS_LABEL).x + label.length() * HUD_TRACK
+	var safe := _safe_rect()
+	var label_center := Vector2(center.x, safe.position.y + 88.0)
+	var label_rect := Rect2(label_center - Vector2(label_width * 0.5 + 11.0, 13.0), Vector2(label_width + 22.0, 26.0))
+	draw_plate(self, label_rect, Color(HUD_INK, high_alert_intensity * 0.94), Color(HUD_ALERT, high_alert_intensity * 0.9), HUD_CUT_SM)
+	draw_tracked_centered(self, label_rect.get_center() + Vector2(0.0, 4.0), label, FS_LABEL, Color(HUD_TEXT, high_alert_intensity))
 
 func _enemy_color() -> Color:
 	return _team_color(Duelist.Team.BLUE if _roster_local_team == int(Duelist.Team.RED) else Duelist.Team.RED)
