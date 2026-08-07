@@ -59,6 +59,11 @@ Full detail: `devlogs/2026-08-07.md`.
 - All 16 exercises still pass, plus a new respawn-gate block in `riftline_modes_exercise.gd`. Full detail: the "Fourth session" entry in `devlogs/2026-08-07.md`.
 - **Not done:** drill squad-size selection (solo/wing/full) isn't reachable from the new main menu (ENTER DRILL goes straight to the real 4v4). No further main-menu/class-panel visual polish - still plain rects/text.
 
+**Same day, fifth session - death cleanup and bot respawn:**
+- Eliminated character visuals now keep the existing powered-down fall for 1.8 seconds, fade over 0.7 seconds, and then hide instead of remaining in the arena indefinitely. Respawning resets visibility, transparency, and the body pose.
+- Bots now automatically call the existing authoritative respawn request when their same 5-second minimum death timer expires. Human players still use the death-screen button and can change class before respawning; that manual flow is unchanged.
+- `tools/riftline_modes_exercise.gd` now covers both bot auto-respawn and death-visual cleanup/reset. Headless import is clean, all 16 exercises pass, and an MCP main-scene launch reports no runtime errors (existing GDScript warnings remain).
+
 **Deferred by explicit user decision to their own sessions - do not start these inline, use the bootstrap files:**
 - `handoffs/NEXT-SESSION-art-ui-redesign.md` - full Halo/Destiny-register art, character/weapon materials off `pulp_lit`, and a full UI pass (not just the settings-panel layout fix already done). **Run after** the weapons/loadouts session (now done) - they touch the same files. Visual polish for the new main menu/class panel belongs here too.
 - `handoffs/NEXT-SESSION-respawn-logic.md` - respawn *timing* is now resolved (5s minimum + manual respawn). What's left there, if anything, is deeper game-mode-rule interaction, not the base mechanic.
@@ -123,8 +128,8 @@ The older `shaders/pulp_lit.gdshader` is the previous illustrative look and is b
 
 ## Tooling
 
-- Godot binary: `/opt/homebrew/bin/godot` (Godot 4.7.1). Always export `GODOT_BIN=/opt/homebrew/bin/godot`.
-- Headless compile check: `GODOT_BIN=/opt/homebrew/bin/godot GODOT_WATCHDOG_SECONDS=45 ./tools/run_godot_serial.sh --path . --headless --import`. An empty grep for `SCRIPT ERROR|Parse Error|Failed to load` means clean.
+- Godot binary on Robert's Mac: `/Users/robertwu/Downloads/Godot.app/Contents/MacOS/Godot` (Godot 4.7.1). Always export `GODOT_BIN=/Users/robertwu/Downloads/Godot.app/Contents/MacOS/Godot` on this machine. The older `/opt/homebrew/bin/godot` path no longer exists.
+- Headless compile check: `GODOT_BIN='/Users/robertwu/Downloads/Godot.app/Contents/MacOS/Godot' GODOT_WATCHDOG_SECONDS=45 ./tools/run_godot_serial.sh --path . --headless --import`. An empty grep for `SCRIPT ERROR|Parse Error|Failed to load` means clean.
 - Run one exercise: same runner with `--headless --script tools/<name>.gd`.
 - Capture a PNG: same runner with `--resolution 2622x1206 -- --capture=/tmp/x.png --after=4`, then read the PNG to inspect it.
 - Deploy: `GODOT_BIN=/opt/homebrew/bin/godot bash deploy.sh <DEVICE_UUID>`. iPhone 15 Pro `47ED6F31-01BC-5659-832A-E0512FAF1031`, iPad Pro 12.9 `78C9B3A4-2E79-5827-A287-5F09C7E29ACA`.

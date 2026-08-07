@@ -25,6 +25,8 @@ func _initialize() -> void:
 	await _test_clock_expiry_tie_enters_sudden_death(root)
 	await _test_launch_during_sudden_death_finishes_match(root)
 	await _test_manual_respawn_gate(root)
+	await _test_bot_auto_respawn(root)
+	await _test_death_visual_cleanup(root)
 	print("Nuclear Rush rules exercise: PASS")
 	quit()
 
@@ -344,3 +346,44 @@ func _test_manual_respawn_gate(root: Node3D) -> void:
 
 	# A second request right after respawning is a no-op (nothing to gate).
 	assert(not match_node.request_respawn("respawn_red"))
+
+func _test_bot_auto_respawn(root: Node3D) -> void:
+	var match_node := _make_match(root, _default_pads())
+	var bot := BotDuelist.new()
+	bot.build(RED, false, false, true)
+	bot.set_actor_id("respawn_bot")
+	bot.position = Vector3(-30, 0.1, 0)
+	root.add_child(bot)
+	bot.set_match_active(true)
+	var blue_d := _make_duelist(root, BLUE, "respawn_bot_enemy", Vector3(30, 0.1, 0))
+	match_node.register_duelist(bot, "respawn_bot")
+	match_node.register_duelist(blue_d, "respawn_bot_enemy")
+	await _go_live(match_node)
+
+	bot.take_damage(Duelist.HEALTH, blue_d)
+	assert(bot.eliminated)
+	match_node._physics_process(RiftlineMatch.RESPAWN_MIN_SECONDS - 0.1)
+	assert(bot.eliminated)
+	match_node._physics_process(0.2)
+	assert(not bot.eliminated)
+	assert(not match_node.can_respawn("respawn_bot"))
+
+func _test_death_visual_cleanup(root: Node3D) -> void:
+	var duelist := Duelist.new()
+	duelist.build(RED, false, true, true)
+	duelist.set_actor_id("death_visual")
+	root.add_child(duelist)
+	duelist.set_match_active(true)
+
+	duelist.take_damage(Duelist.HEALTH, null)
+	assert(duelist.eliminated)
+	assert(duelist.visible)
+	duelist._process(Duelist.DEATH_VISUAL_HOLD_SECONDS + Duelist.DEATH_VISUAL_FADE_SECONDS + 0.1)
+	assert(not duelist.visible)
+
+	duelist.respawn_at(Vector3.ZERO)
+	assert(not duelist.eliminated)
+	assert(duelist.visible)
+	var geometry_nodes: Array[Node] = duelist.find_children("*", "GeometryInstance3D", true, false)
+	for node: Node in geometry_nodes:
+		assert(is_zero_approx((node as GeometryInstance3D).transparency))

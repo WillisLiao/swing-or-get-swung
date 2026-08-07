@@ -188,8 +188,19 @@ func _physics_process(delta: float) -> void:
 			_on_clock_expired()
 
 func _tick_respawn_timers(delta: float) -> void:
-	for actor_id in _respawn_elapsed.keys():
-		_respawn_elapsed[actor_id] = float(_respawn_elapsed[actor_id]) + delta
+	var ready_bots: Array[String] = []
+	for actor_id_value: Variant in _respawn_elapsed.keys():
+		var actor_id := str(actor_id_value)
+		var elapsed := float(_respawn_elapsed[actor_id]) + delta
+		_respawn_elapsed[actor_id] = elapsed
+		var duelist: Variant = _duelists_by_id.get(actor_id, null)
+		if elapsed >= RESPAWN_MIN_SECONDS and duelist is BotDuelist:
+			ready_bots.append(actor_id)
+	# request_respawn() erases from _respawn_elapsed, so defer these calls
+	# until after dictionary iteration. Human actors still use the death-screen
+	# button; only bots auto-request once the same authoritative gate opens.
+	for actor_id: String in ready_bots:
+		request_respawn(actor_id)
 
 func _start_match() -> void:
 	_opening_remaining = OPENING_HOLD_SECONDS
