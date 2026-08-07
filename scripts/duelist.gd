@@ -145,6 +145,11 @@ var _local_camera := false
 var _render_visuals := true
 var _authoritative_collision := true
 var _pending_jump := false
+var _death_visual_elapsed := 0.0
+var _death_visual_hidden := false
+
+const DEATH_VISUAL_HOLD_SECONDS := 1.8
+const DEATH_VISUAL_FADE_SECONDS := 0.7
 
 var head: Node3D
 var camera: Camera3D
@@ -283,6 +288,9 @@ func movement_speed_multiplier() -> float:
 
 func _process(delta: float) -> void:
 	if not _render_visuals:
+		return
+	_tick_death_presentation(delta)
+	if _death_visual_hidden:
 		return
 	if _local_camera and camera != null:
 		var current_aspect := _viewport_aspect()
@@ -597,9 +605,17 @@ func apply_presentation_state(state: Dictionary) -> void:
 	var next_weapon := RiftWeapons.clamp_weapon(int(state.get("weapon", int(weapon))))
 	if weapon != next_weapon:
 		set_weapon_presentation(next_weapon as Weapon)
-	eliminated = bool(state.get("eliminated", eliminated))
+	var next_eliminated := bool(state.get("eliminated", eliminated))
+	if next_eliminated != eliminated:
+		eliminated = next_eliminated
+		if eliminated:
+			_begin_death_presentation()
+		else:
+			_reset_death_presentation()
+	else:
+		eliminated = next_eliminated
 	set_carrying_core(bool(state.get("carrying_core", carrying_core)))
-	visible = _render_visuals
+	visible = _render_visuals and not _death_visual_hidden
 	collision_layer = 0 if eliminated or not _authoritative_collision else 2
 
 func reconcile_from_authority(state: Dictionary, unacknowledged_frames: Array, delta: float) -> void:
@@ -842,7 +858,7 @@ func take_damage(amount: float, attacker: Duelist) -> void:
 		_obstruction_remaining = 0.0
 		_swap_motion = 0.0
 		_pending_authoritative_shot_plan.clear()
-		visible = _render_visuals
+		_begin_death_presentation()
 		collision_layer = 0
 		defeated.emit(self, attacker)
 
@@ -852,7 +868,7 @@ func respawn_at(point: Vector3) -> void:
 	health = HEALTH
 	eliminated = false
 	carrying_core = false
-	visible = true
+	_reset_death_presentation()
 	collision_layer = 2
 	_aiming = false
 	_recoil_remaining = 0.0
@@ -875,6 +891,40 @@ func respawn_at(point: Vector3) -> void:
 	active_slot = 0
 	zoom_index = 0
 	_resolve_loadout_ammo()
+
+func _begin_death_presentation() -> void:
+	_death_visual_elapsed = 0.0
+	_death_visual_hidden = false
+	visible = _render_visuals
+	_set_visual_transparency(0.0)
+
+func _reset_death_presentation() -> void:
+	_death_visual_elapsed = 0.0
+	_death_visual_hidden = false
+	visible = _render_visuals
+	_set_visual_transparency(0.0)
+	if _body_visual_root != null:
+		_body_visual_root.position = Vector3.ZERO
+		_body_visual_root.rotation.z = 0.0
+
+func _tick_death_presentation(delta: float) -> void:
+	if not eliminated or _death_visual_hidden:
+		return
+	_death_visual_elapsed += delta
+	var fade_elapsed := _death_visual_elapsed - DEATH_VISUAL_HOLD_SECONDS
+	if fade_elapsed <= 0.0:
+		return
+	var fade_progress := clampf(fade_elapsed / DEATH_VISUAL_FADE_SECONDS, 0.0, 1.0)
+	_set_visual_transparency(fade_progress)
+	if fade_progress >= 1.0:
+		_death_visual_hidden = true
+		visible = false
+
+func _set_visual_transparency(amount: float) -> void:
+	var geometry_nodes: Array[Node] = find_children("*", "GeometryInstance3D", true, false)
+	for node: Node in geometry_nodes:
+		if node is GeometryInstance3D:
+			(node as GeometryInstance3D).transparency = clampf(amount, 0.0, 1.0)
 	set_weapon_presentation(loadout_slots[0] as Weapon)
 	_apply_stance(Stance.STAND)
 
