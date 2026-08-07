@@ -185,16 +185,18 @@ func _handle_tap(point: Vector2) -> void:
 				cancel_requested.emit()
 
 func _draw() -> void:
-	var safe := _safe_rect()
-	var accent := Color("ffad5d") if _view != View.JOIN_SEARCH and _view != View.JOIN_STAGING else Color("71cfff")
-	var panel := Rect2(safe.position + Vector2(OUTER_MARGIN, 34), Vector2(safe.size.x - OUTER_MARGIN * 2.0, safe.size.y - 68))
-	draw_rect(Rect2(Vector2.ZERO, size), Color("020612", 0.88))
-	draw_rect(panel, Color("09162d", 0.98))
-	draw_line(panel.position, panel.position + Vector2(panel.size.x, 0), accent, 3.0)
-	var font := ThemeDB.fallback_font
-	draw_string(font, panel.position + Vector2(34, 42), "RIFT LINK", HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color("f1f6ff"))
-	draw_string(font, panel.position + Vector2(36, 70), "LOCAL RIFT" if not _squad_mode else "LOCAL SQUAD RIFT", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("a9bfe2"))
-	_draw_status(panel, font, accent)
+	# One system accent for the whole flow. The old panel switched its entire
+	# accent between amber and the BLUE team colour depending on view, which
+	# read as "you are on blue team" rather than "you are searching".
+	var accent := DuelHud.HUD_SIGNAL
+	var panel := _panel_rect()
+	draw_rect(Rect2(Vector2.ZERO, size), Color(DuelHud.HUD_VOID, 0.9))
+	DuelHud.draw_plate(self, panel, Color(DuelHud.HUD_INK, 0.99), Color(DuelHud.HUD_EDGE, 0.95), DuelHud.HUD_CUT, DuelHud.CHAMFER_DIAG, 1.2)
+	DuelHud.draw_brackets(self, panel.grow(-7.0), Color(DuelHud.HUD_EDGE_BRIGHT, 0.5), 18.0, 1.6)
+	DuelHud.draw_accent_edge(self, Rect2(panel.position + Vector2(DuelHud.HUD_CUT, 0.0), Vector2(panel.size.x - DuelHud.HUD_CUT, 3.0)), Color(accent, 0.9), false, 3.0)
+	DuelHud.draw_tracked(self, panel.position + Vector2(34, 46), "RIFT LINK", DuelHud.FS_TITLE, DuelHud.HUD_TEXT, 3.2)
+	DuelHud.draw_tracked(self, panel.position + Vector2(35, 64), "LOCAL RIFT" if not _squad_mode else "LOCAL SQUAD RIFT", DuelHud.FS_MICRO, DuelHud.HUD_TEXT_DIM)
+	_draw_status(panel, ThemeDB.fallback_font, accent)
 	match _view:
 		View.MENU:
 			_draw_menu(panel, accent)
@@ -209,105 +211,128 @@ func _draw() -> void:
 		View.SEVERED:
 			_draw_severed(panel, accent)
 	if _view != View.MENU and _view != View.SEVERED:
-		_draw_cancel(panel, font)
+		_draw_cancel(panel, ThemeDB.fallback_font)
 
-func _draw_status(panel: Rect2, font: Font, color: Color) -> void:
-	draw_string(font, panel.position + Vector2(36, 108), _status, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, color)
-	draw_line(panel.position + Vector2(36, 120), panel.position + Vector2(panel.size.x - 36, 120), Color("20375d"), 1.0)
+func _draw_status(panel: Rect2, _font: Font, color: Color) -> void:
+	# Status reads as a live telemetry line: a blinking carrier pip, the state,
+	# and a rule running out to the panel edge.
+	var pip := panel.position + Vector2(38, 104)
+	var blink := 0.45 + 0.55 * (0.5 + 0.5 * sin(_pulse * 4.4))
+	draw_circle(pip, 3.2, Color(color, blink))
+	DuelHud.draw_tracked(self, panel.position + Vector2(50, 108), _status.to_upper(), DuelHud.FS_MICRO, Color(color, 0.98))
+	var offset := 62.0 + DuelHud.tracked_width(DuelHud.hud_font(), _status.to_upper(), DuelHud.FS_MICRO)
+	draw_line(panel.position + Vector2(offset, 104), panel.position + Vector2(panel.size.x - 36, 104), Color(DuelHud.HUD_EDGE, 0.9), 1.0)
 
 func _draw_menu(panel: Rect2, color: Color) -> void:
-	_draw_icon(panel.position + Vector2(panel.size.x * 0.5, 190), color, false)
-	draw_string(ThemeDB.fallback_font, panel.position + Vector2(0, 250), "NEARBY DEVICES. ONE SHARED RIFT.", HORIZONTAL_ALIGNMENT_CENTER, panel.size.x, 17, Color("f1f6ff"))
-	draw_string(ThemeDB.fallback_font, panel.position + Vector2(0, 278), "LOCAL PLAY STAYS CLOSE TO THE AIR AROUND YOU.", HORIZONTAL_ALIGNMENT_CENTER, panel.size.x, 12, Color("a9bfe2"))
+	_draw_icon(panel.position + Vector2(panel.size.x * 0.5, 186), color, false)
+	DuelHud.draw_tracked_centered(self, panel.position + Vector2(panel.size.x * 0.5, 254), "NEARBY DEVICES. ONE SHARED RIFT.", DuelHud.FS_SUB, DuelHud.HUD_TEXT, 2.6)
+	DuelHud.draw_tracked_centered(self, panel.position + Vector2(panel.size.x * 0.5, 276), "LOCAL PLAY STAYS CLOSE TO THE AIR AROUND YOU.", DuelHud.FS_MICRO, DuelHud.HUD_TEXT_DIM)
 	_draw_action(_host_rect(), "OPEN LOCAL RIFT", color, true, "OPEN")
-	_draw_action(_join_rect(), "FIND LOCAL RIFT", Color("71cfff"), false, "SEEK")
+	_draw_action(_join_rect(), "FIND LOCAL RIFT", DuelHud.HUD_EDGE_BRIGHT, false, "SEEK")
 
 func _draw_search(panel: Rect2, color: Color) -> void:
-	_draw_icon(panel.position + Vector2(panel.size.x * 0.5, 190), color, _has_discovered_session)
+	_draw_icon(panel.position + Vector2(panel.size.x * 0.5, 186), color, _has_discovered_session)
 	var title := "A LOCAL RIFT IS NEAR" if _has_discovered_session else "SEARCHING NEARBY RIFTS"
 	var sub := "ENTER WHEN YOUR CREW IS READY" if _has_discovered_session else "LISTENING FOR A COMPATIBLE SESSION"
-	draw_string(ThemeDB.fallback_font, panel.position + Vector2(0, 250), title, HORIZONTAL_ALIGNMENT_CENTER, panel.size.x, 19, Color("f1f6ff"))
-	draw_string(ThemeDB.fallback_font, panel.position + Vector2(0, 278), sub, HORIZONTAL_ALIGNMENT_CENTER, panel.size.x, 12, Color(color, 0.92))
+	DuelHud.draw_tracked_centered(self, panel.position + Vector2(panel.size.x * 0.5, 254), title, DuelHud.FS_SUB, DuelHud.HUD_TEXT, 2.6)
+	DuelHud.draw_tracked_centered(self, panel.position + Vector2(panel.size.x * 0.5, 276), sub, DuelHud.FS_MICRO, Color(color, 0.92))
 	_draw_action(_join_rect() if _has_discovered_session else _retry_rect(), "ENTER LOCAL RIFT" if _has_discovered_session else "SEARCH AGAIN", color, _has_discovered_session, "ENTER" if _has_discovered_session else "RETRY")
 
 func _draw_staging(panel: Rect2, color: Color) -> void:
-	var font := ThemeDB.fallback_font
-	draw_string(font, panel.position + Vector2(36, 164), "CREW SIGNAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("a9bfe2"))
-	_draw_crew(panel.position + Vector2(36, 196), panel.size.x - 72.0, color)
-	var helper := "CREW SET. READY WHEN SET." if bool(_state.get("complete", false)) else "WAITING FOR THE CREW"
-	draw_string(font, panel.position + Vector2(36, 318), helper, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("f1f6ff"))
-	if bool(_state.get("complete", false)):
+	var complete := bool(_state.get("complete", false))
+	DuelHud.draw_tracked(self, panel.position + Vector2(36, 152), "CREW SIGNAL", DuelHud.FS_MICRO, DuelHud.HUD_TEXT_FAINT)
+	draw_line(panel.position + Vector2(126, 148), panel.position + Vector2(panel.size.x - 36, 148), Color(DuelHud.HUD_EDGE, 0.9), 1.0)
+	_draw_crew(panel.position + Vector2(36, 186), panel.size.x - 72.0, color)
+	var helper := "CREW SET - READY WHEN YOU ARE" if complete else "WAITING FOR THE CREW"
+	DuelHud.draw_tracked(self, panel.position + Vector2(36, 306), helper, DuelHud.FS_BODY, DuelHud.HUD_TEXT, 2.2)
+	if complete:
 		_draw_action(_ready_rect(), "READY" if not _local_ready() else "MARKED READY", color, not _local_ready(), "READY")
 	else:
-		draw_string(font, panel.position + Vector2(36, 370), "THE RIFT OPENS WHEN EVERY CREW MEMBER IS PRESENT.", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("a9bfe2"))
+		DuelHud.draw_tracked(self, panel.position + Vector2(36, 330), "THE RIFT OPENS WHEN EVERY CREW MEMBER IS PRESENT.", DuelHud.FS_MICRO, DuelHud.HUD_TEXT_DIM)
 
 func _draw_arming(panel: Rect2, color: Color) -> void:
-	var center := panel.position + Vector2(panel.size.x * 0.5, panel.size.y * 0.53)
-	var pulse := 0.56 + 0.28 * sin(_pulse * 5.2)
-	draw_circle(center, 58.0, Color(color, 0.08))
-	draw_arc(center, 58.0, -PI * 0.7, PI * 0.7, 32, Color(color, pulse), 3.0)
-	draw_arc(center, 36.0, PI * 0.3, PI * 1.7, 24, Color(color, 0.96), 3.0)
-	draw_line(center + Vector2(-13, 0), center + Vector2(13, 0), color, 2.0)
-	draw_string(ThemeDB.fallback_font, center + Vector2(-120, 102), "RIFT ARMING", HORIZONTAL_ALIGNMENT_CENTER, 240, 20, Color("f1f6ff"))
-	draw_string(ThemeDB.fallback_font, center + Vector2(-200, 128), "HOLDING THE CREW TOGETHER", HORIZONTAL_ALIGNMENT_CENTER, 400, 12, Color(color, 0.92))
+	var center := panel.position + Vector2(panel.size.x * 0.5, panel.size.y * 0.50)
+	var pulse := 0.5 + 0.34 * sin(_pulse * 5.2)
+	# Two counter-rotating arcs inside an octagonal housing: a machine spinning
+	# up, matching the octagonal control language used in the match HUD.
+	DuelHud.draw_control_ring(self, center, 62.0, Color(DuelHud.HUD_VOID, 0.6), Color(color, 0.35), 1.4)
+	draw_arc(center, 52.0, _pulse * 1.7, _pulse * 1.7 + PI * 1.1, 32, Color(color, 0.4 + pulse * 0.4), 3.0)
+	draw_arc(center, 36.0, -_pulse * 2.4, -_pulse * 2.4 + PI * 1.3, 28, Color(color, 0.96), 3.0)
+	DuelHud.draw_control_ring(self, center, 18.0, Color(color, 0.16 + pulse * 0.2), Color(color, 0.95), 1.6)
+	DuelHud.draw_tracked_centered(self, center + Vector2(0, 104), "RIFT ARMING", DuelHud.FS_SUB, DuelHud.HUD_TEXT, 3.0)
+	DuelHud.draw_tracked_centered(self, center + Vector2(0, 126), "HOLDING THE CREW TOGETHER", DuelHud.FS_MICRO, Color(color, 0.92))
 
 func _draw_rematch(panel: Rect2, color: Color) -> void:
-	var font := ThemeDB.fallback_font
-	draw_string(font, panel.position + Vector2(36, 164), "CREW REFORMING", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("f1f6ff"))
-	draw_string(font, panel.position + Vector2(36, 194), "THE NEXT RIFT WAITS FOR EVERYONE.", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(color, 0.92))
-	_draw_crew(panel.position + Vector2(36, 236), panel.size.x - 72.0, color)
+	DuelHud.draw_tracked(self, panel.position + Vector2(36, 158), "CREW REFORMING", DuelHud.FS_TITLE, DuelHud.HUD_TEXT, 3.0)
+	DuelHud.draw_tracked(self, panel.position + Vector2(37, 180), "THE NEXT RIFT WAITS FOR EVERYONE.", DuelHud.FS_MICRO, Color(color, 0.92))
+	_draw_crew(panel.position + Vector2(36, 232), panel.size.x - 72.0, color)
 	_draw_action(_ready_rect(), "READY FOR REMATCH" if not _local_ready() else "REMATCH MARKED", color, not _local_ready(), "REMATCH")
 
 func _draw_severed(panel: Rect2, color: Color) -> void:
-	var font := ThemeDB.fallback_font
-	_draw_icon(panel.position + Vector2(panel.size.x * 0.5, 190), color, true)
-	draw_string(font, panel.position + Vector2(0, 252), "RIFT SEVERED", HORIZONTAL_ALIGNMENT_CENTER, panel.size.x, 22, Color("f1f6ff"))
-	draw_string(font, panel.position + Vector2(0, 282), "THE LOCAL SESSION ENDED SAFELY.", HORIZONTAL_ALIGNMENT_CENTER, panel.size.x, 13, Color(color, 0.92))
+	_draw_icon(panel.position + Vector2(panel.size.x * 0.5, 186), DuelHud.HUD_ALERT, true)
+	DuelHud.draw_tracked_centered(self, panel.position + Vector2(panel.size.x * 0.5, 256), "RIFT SEVERED", DuelHud.FS_TITLE, DuelHud.HUD_TEXT, 3.2)
+	DuelHud.draw_tracked_centered(self, panel.position + Vector2(panel.size.x * 0.5, 280), "THE LOCAL SESSION ENDED SAFELY.", DuelHud.FS_MICRO, DuelHud.HUD_TEXT_DIM)
 	_draw_action(_return_rect(), "RETURN TO TRAINING", color, true, "RETURN")
 
 func _draw_action(rect: Rect2, label: String, color: Color, primary: bool, feedback_key: String) -> void:
 	var feedback := _press_feedback == feedback_key and _feedback_remaining > 0.0
-	draw_rect(rect, Color(color, 0.24 if primary else 0.1) if not feedback else Color(color, 0.4), true)
-	draw_rect(rect, Color(color, 0.96), false, 2.0)
-	var font := ThemeDB.fallback_font
-	var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-	draw_string(font, rect.get_center() + Vector2(-width * 0.5, 6), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, color)
+	var fill := Color(color, 0.34 if feedback else (0.16 if primary else 0.06))
+	DuelHud.draw_plate(self, rect, fill, Color(color, 0.95 if primary else 0.5), DuelHud.HUD_CUT_SM, DuelHud.CHAMFER_DIAG, 1.6 if primary else 1.1)
+	DuelHud.draw_accent_edge(self, rect, Color(color, 0.95 if primary else 0.45), true, 3.0)
+	if primary:
+		DuelHud.draw_brackets(self, rect.grow(-5.0), Color(color, 0.4), 12.0, 1.4)
+	DuelHud.draw_tracked_centered(self, rect.get_center() + Vector2(3, 5), label, DuelHud.FS_BODY, DuelHud.HUD_TEXT if primary else DuelHud.HUD_TEXT_DIM, 2.6)
 
-func _draw_cancel(panel: Rect2, font: Font) -> void:
-	draw_rect(_cancel_rect(), Color("101f3a", 0.7), true)
-	draw_rect(_cancel_rect(), Color("7890b2", 0.8), false, 1.2)
-	draw_string(font, _cancel_rect().get_center() + Vector2(-32, 5), "CANCEL", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("b6c9e8"))
+func _draw_cancel(_panel: Rect2, _font: Font) -> void:
+	var rect := _cancel_rect()
+	DuelHud.draw_plate(self, rect, Color(DuelHud.HUD_VOID, 0.7), Color(DuelHud.HUD_EDGE_BRIGHT, 0.6), DuelHud.HUD_CUT_SM, DuelHud.CHAMFER_DIAG, 1.0)
+	DuelHud.draw_tracked_centered(self, rect.get_center() + Vector2(0, 5), "CANCEL", DuelHud.FS_LABEL, DuelHud.HUD_TEXT_DIM)
 
 func _draw_icon(center: Vector2, color: Color, active: bool) -> void:
-	draw_circle(center, 42.0, Color(color, 0.12 if not active else 0.22))
-	draw_arc(center, 42.0, 0.0, TAU, 32, Color(color, 0.46 if not active else 0.94), 2.0)
-	draw_arc(center, 26.0, -1.1, 1.2, 16, color, 3.0)
-	draw_arc(center, 26.0, 2.0, 4.3, 16, color, 3.0)
-	draw_line(center + Vector2(-10, 0), center + Vector2(10, 0), color, 2.0)
+	# Link emblem: an octagonal housing with two facing brackets closing on a
+	# bar - "two devices, one link" - lit when the link is real.
+	DuelHud.draw_control_ring(self, center, 44.0, Color(color, 0.08 if not active else 0.16), Color(color, 0.4 if not active else 0.9), 1.8)
+	draw_arc(center, 27.0, -1.1, 1.2, 16, Color(color, 0.9), 3.0)
+	draw_arc(center, 27.0, 2.0, 4.3, 16, Color(color, 0.9), 3.0)
+	draw_line(center + Vector2(-11, 0), center + Vector2(11, 0), Color(color, 0.98), 2.4)
+	if active:
+		DuelHud.draw_control_ring(self, center, 52.0, Color(0, 0, 0, 0), Color(color, 0.22 + 0.2 * (0.5 + 0.5 * sin(_pulse * 4.0))), 1.4)
 
-func _draw_crew(origin: Vector2, width: float, color: Color) -> void:
+## Crew slots as machined bays, one row per team. An empty bay is an outlined
+## slot, a filled one is a solid plate in that team's colour, and a ready crew
+## member gets an amber tick above the bay. RED and BLUE keep their existing
+## meaning; only the shape language changed.
+func _draw_crew(origin: Vector2, width: float, _color: Color) -> void:
 	var rows := [Duelist.Team.RED, Duelist.Team.BLUE]
-	var row_height := 48.0
+	var row_height := 50.0
 	for row in rows.size():
 		var team: Duelist.Team = rows[row]
-		var team_color := Color("ff6a57") if team == Duelist.Team.RED else Color("71cfff")
+		var team_color := DuelHud.HUD_TEAM_RED if team == Duelist.Team.RED else DuelHud.HUD_TEAM_BLUE
 		var records := _team_records(team)
 		var count := maxi(1, int(_state.get("team_size", 1)))
-		var gap := minf(42.0, (width - 24.0) / float(count))
+		# Team tag leads the row and the bays follow it, so an under-filled crew
+		# does not leave the tag stranded at the far side of an empty rule.
+		var bays_left := origin.x + 62.0
+		var gap := minf(42.0, (width - 160.0) / float(count))
+		var row_y := origin.y + row * row_height
+		var tag := "RED" if team == Duelist.Team.RED else "BLUE"
+		DuelHud.draw_tracked(self, Vector2(origin.x, row_y + 5.0), tag, DuelHud.FS_MICRO, Color(team_color, 0.95))
+		var filled_count := mini(records.size(), count)
+		DuelHud.draw_tracked(self, Vector2(bays_left + count * gap + 12.0, row_y + 5.0), "%d/%d" % [filled_count, count], DuelHud.FS_MICRO, DuelHud.HUD_TEXT_FAINT)
+		draw_line(Vector2(origin.x, row_y + 22.0), Vector2(origin.x + width, row_y + 22.0), Color(DuelHud.HUD_EDGE, 0.5), 1.0)
 		for index in count:
-			var center := origin + Vector2(index * gap + 18.0, row * row_height)
+			var bay := Rect2(Vector2(bays_left + index * gap, row_y - 12.0), Vector2(28.0, 30.0))
 			var record: Dictionary = records[index] if index < records.size() else {}
 			var filled := not record.is_empty()
 			var ready := filled and bool(record.get("ready", false))
-			if team == Duelist.Team.RED:
-				draw_colored_polygon(PackedVector2Array([center + Vector2(0, -11), center + Vector2(11, 0), center + Vector2(0, 11), center + Vector2(-11, 0)]), Color(team_color, 0.88 if filled else 0.08))
-				draw_polyline(PackedVector2Array([center + Vector2(0, -11), center + Vector2(11, 0), center + Vector2(0, 11), center + Vector2(-11, 0), center + Vector2(0, -11)]), Color(team_color, 0.95), 2.0)
-			else:
-				draw_circle(center, 10.0, Color(team_color, 0.82 if filled else 0.08))
-				draw_arc(center, 10.0, 0.0, TAU, 20, Color(team_color, 0.95), 2.0)
+			DuelHud.draw_plate(self, bay, Color(team_color, 0.72) if filled else Color(DuelHud.HUD_VOID, 0.65), Color(team_color, 0.95 if filled else 0.32), 5.0, DuelHud.CHAMFER_DIAG, 1.4 if filled else 1.0)
+			if filled:
+				# Occupied bays carry an operator mark, so a filled slot is a
+				# person and not just a coloured rectangle.
+				draw_circle(bay.get_center() + Vector2(0.0, -4.0), 3.4, Color(DuelHud.HUD_VOID, 0.72))
+				draw_line(bay.get_center() + Vector2(-5.0, 6.0), bay.get_center() + Vector2(5.0, 6.0), Color(DuelHud.HUD_VOID, 0.72), 3.0)
 			if ready:
-				draw_arc(center, 16.0, -PI * 0.82, -PI * 0.18, 12, Color("f1f6ff", 0.96), 2.0)
-		draw_string(ThemeDB.fallback_font, origin + Vector2(width - 64.0, row * row_height + 5.0), "RED" if team == Duelist.Team.RED else "BLUE", HORIZONTAL_ALIGNMENT_RIGHT, 64, 11, Color(team_color, 0.86))
+				DuelHud.draw_tracked_centered(self, Vector2(bay.get_center().x, bay.position.y - 5.0), "RDY", 9, Color(DuelHud.HUD_SIGNAL, 0.98), DuelHud.HUD_TRACK_TIGHT)
 
 func _team_records(team: Duelist.Team) -> Array:
 	var result: Array = []

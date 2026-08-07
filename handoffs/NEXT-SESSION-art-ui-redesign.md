@@ -12,7 +12,7 @@ Read this fully before doing anything else, then read `handoffs/HANDOFF.md` for 
 > Implement the full art, material, and UI redesign recorded in `handoffs/NEXT-SESSION-art-ui-redesign.md`.
 > Move the game off its current placeholder look (the user's words: "roblox lookin", and the UI reads as "AI slop") toward a realistic register in the style of Halo and Destiny, with light sci-fi accents on weapons, environment, and UI.
 > This covers weapon models (the five weapons from the prior weapons session), character materials (`duelist.gd` is still on the old `pulp_lit` shader while the level geometry moved to `nuclear_pbr`), and the entire HUD/UI.
-> Zero imported art and Mobile renderer are hard constraints - see `handoffs/HANDOFF.md`. Take your time, use MCP editor screenshots to self-review, and feel free to iterate more than once before calling it done - the user explicitly said quality over speed here.
+> **Update (2026-08-07, twelfth session):** the "zero imported art" line below is retired by explicit user decision - Blender-authored assets are now a normal part of the pipeline. Mobile renderer remains a hard constraint. Take your time, use MCP editor screenshots to self-review, and feel free to iterate more than once before calling it done - the user explicitly said quality over speed here.
 
 ## Why this exists
 
@@ -21,8 +21,8 @@ They also said to take real time on this and iterate - it is scoped as its own s
 
 ## Resolved constraints (do not re-litigate these)
 
-- **Zero imported art.** Everything is procedural: shaders, `NuclearMaterials` (`scripts/nuclear_materials.gd`), procedural mesh construction. This has held since project start and is a hard line, not a preference - see `handoffs/HANDOFF.md`.
-- **Mobile renderer only.** No Forward+-only features (SSAO, SSIL, SDFGI, SSR, volumetric fog) - not affordable at 120 Hz on a phone. `handoffs/HANDOFF.md` has the reasoning.
+- **Zero imported art - RETIRED 2026-08-07.** The project used to be all-procedural (shaders, `NuclearMaterials`, procedural mesh construction). The user explicitly lifted this for the twelfth session: Blender-authored assets (via Blender MCP) are now in scope for weapons, character, and environment art. `NuclearMaterials`/`nuclear_pbr` remains the toolkit for procedural surfaces and the material language imported assets should still read as part of - not a reason to avoid Blender.
+- **Mobile renderer only - still hard, unchanged.** No Forward+-only features (SSAO, SSIL, SDFGI, SSR, volumetric fog) - not affordable at 120 Hz on a phone. `handoffs/HANDOFF.md` has the reasoning.
 - **Realistic-but-sci-fi**, Halo/Destiny as the named reference points, not photoreal military sim and not cartoon/stylized.
 - **Level geometry already made this jump.** `shaders/nuclear_pbr.gdshader` + `NuclearMaterials` (metal-roughness PBR, procedural relief, grime/dust, sky ambient/reflection, ACES tonemapping) is the target quality bar and the toolkit to extend, not replace. `shaders/pulp_lit.gdshader` is the old look being retired - `duelist.gd` (character + weapon meshes) is the biggest thing still on it.
 - **The UI is a separate, equally real complaint**, not just "make it look nicer" - the user specifically called out the settings screen's layout as unprofessional (fixed earlier this session, see `devlogs/2026-08-07.md` for the before/after) and the broader HUD/UI aesthetic as "AI slop". This session should treat the whole `duel_hud.gd` visual language (colors, typography, iconography, panel treatment) as in scope, not just the settings panel that already got a structural cleanup.

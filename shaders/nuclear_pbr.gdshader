@@ -8,11 +8,21 @@ shader_type spatial;
 // sky reflections and shadows do the work, exactly as they would for an imported
 // metal-roughness material.
 //
-// Surface relief is a sum of sine bands with an ANALYTIC gradient.  That matters
-// on the mobile renderer at 120 Hz: perturbing the normal from a noise field
-// would need three extra noise samples per fragment, while a sine sum gives the
-// exact derivative for free.  One cheap value-noise octave on top supplies the
-// non-repeating grime that sines alone cannot fake.
+// Surface relief needs an ANALYTIC gradient.  That matters on the mobile
+// renderer at 120 Hz: finite-differencing a height field costs three extra
+// samples per fragment just to tilt the normal.  This used to be paid for with
+// a sum of sine bands, whose derivative is free - but a periodic height field
+// gives a periodic specular response, and once the engine's sky reflections hit
+// it the bands read as diagonal candy-stripes that sweep across every surface as
+// the view angle changes.  Worst on weapons and hands, which are close to the
+// camera and in constant motion, but visible on all cover geometry too.
+//
+// Trilinear value noise solves it without giving up the free derivative: the
+// eight corner hashes an octave already fetches determine the interpolant
+// exactly, so its gradient is available in closed form for a handful of extra
+// mul/adds and no extra taps.  Two octaves drive height AND normal from the same
+// isotropic, non-repeating field, so proud areas are proud in both - and there is
+// no preferred direction left for a stripe to form along.
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
 
 uniform vec4 albedo : source_color = vec4(0.42, 0.45, 0.48, 1.0);
@@ -22,7 +32,9 @@ uniform float roughness : hint_range(0.0, 1.0) = 0.55;
 // large values as brushed or stamped panel work.
 uniform float detail_scale : hint_range(0.05, 12.0) = 1.6;
 // Deliberately small. Albedo variation is what the eye reads as "pattern", so
-// anything above roughly 0.15 turns tactile surface into visible banding.
+// large values turn tactile surface into visible mottling.  It is safer than it
+// used to be now the field is isotropic noise rather than sine bands - there is
+// no direction for it to streak along - but it still wants to stay subtle.
 uniform float detail_strength : hint_range(0.0, 1.0) = 0.10;
 uniform float normal_strength : hint_range(0.0, 3.0) = 1.0;
 uniform float grime_strength : hint_range(0.0, 1.0) = 0.30;
@@ -35,12 +47,21 @@ uniform float emission_energy : hint_range(0.0, 24.0) = 0.0;
 varying vec3 world_position;
 varying vec3 world_normal;
 
-// Four sine bands with deliberately non-harmonic directions so the pattern never
-// resolves into a visible grid at any viewing distance.
-const vec3 BAND_A = vec3(1.000, 0.370, 0.230);
-const vec3 BAND_B = vec3(-0.310, 0.190, 1.170);
-const vec3 BAND_C = vec3(0.730, 1.090, -0.470);
-const vec3 BAND_D = vec3(2.170, -0.630, 1.910);
+// The noise lattice is sampled through this rotation so its cell boundaries
+// never align with the world-axis-aligned cover boxes and floor slabs, which
+// would otherwise let the trilinear cells read as a faint cubic grid.
+const mat3 NOISE_BASIS = mat3(
+	vec3(0.8138, 0.4702, -0.3410),
+	vec3(-0.4702, 0.8757, 0.1057),
+	vec3(0.3410, 0.1057, 0.9341));
+
+// Relief octaves, as multiples of `detail_scale`.  The low octave is the broad
+// cast-surface swell (and doubles as the grime field); the high octave is the
+// fine tooth that catches specular.
+const float OCTAVE_LO = 0.65;
+const float OCTAVE_HI = 3.10;
+const float WEIGHT_LO = 0.62;
+const float WEIGHT_HI = 0.38;
 
 float hash13(vec3 p) {
 	p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
@@ -49,12 +70,19 @@ float hash13(vec3 p) {
 }
 
 // Trilinear value noise - isotropic, so it never resolves into wavefronts the
-// way a sine sum does. This is what drives everything the eye reads directly
-// (albedo, roughness, AO); the sine sum below is used only to tilt the normal.
-float value_noise(vec3 p) {
+// way a sine sum does - returning its value AND its exact gradient.
+//
+// The trilinear interpolant is a polynomial in the smoothstepped coordinates
+// whose eight coefficients k0..k7 fall straight out of the eight corner hashes
+// this function already fetches.  Differentiating that polynomial and applying
+// the chain rule through the smoothstep gives the gradient in closed form, so
+// the derivative costs only mul/adds - no second, third or fourth tap.  That is
+// what makes a noise-driven normal affordable at 120 Hz.
+float value_noise_d(vec3 p, out vec3 gradient) {
 	vec3 cell = floor(p);
 	vec3 f = fract(p);
-	f = f * f * (3.0 - 2.0 * f);
+	vec3 u = f * f * (3.0 - 2.0 * f);
+	vec3 du = 6.0 * f * (1.0 - f);
 	float n000 = hash13(cell + vec3(0.0, 0.0, 0.0));
 	float n100 = hash13(cell + vec3(1.0, 0.0, 0.0));
 	float n010 = hash13(cell + vec3(0.0, 1.0, 0.0));
@@ -63,33 +91,21 @@ float value_noise(vec3 p) {
 	float n101 = hash13(cell + vec3(1.0, 0.0, 1.0));
 	float n011 = hash13(cell + vec3(0.0, 1.0, 1.0));
 	float n111 = hash13(cell + vec3(1.0, 1.0, 1.0));
-	float x00 = mix(n000, n100, f.x);
-	float x10 = mix(n010, n110, f.x);
-	float x01 = mix(n001, n101, f.x);
-	float x11 = mix(n011, n111, f.x);
-	return mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
-}
-
-// Height of the relief, and its exact world-space gradient, in one pass.
-float relief(vec3 p, out vec3 gradient) {
-	vec3 ka = BAND_A * detail_scale;
-	vec3 kb = BAND_B * detail_scale * 2.13;
-	vec3 kc = BAND_C * detail_scale * 4.31;
-	vec3 kd = BAND_D * detail_scale * 8.07;
-	float aa = 0.50;
-	float ab = 0.26;
-	float ac = 0.15;
-	float ad = 0.09;
-	float sa = sin(dot(p, ka));
-	float sb = sin(dot(p, kb));
-	float sc = sin(dot(p, kc));
-	float sd = sin(dot(p, kd));
-	gradient = ka * (aa * cos(dot(p, ka)))
-		+ kb * (ab * cos(dot(p, kb)))
-		+ kc * (ac * cos(dot(p, kc)))
-		+ kd * (ad * cos(dot(p, kd)));
-	// Remap the signed sum into 0..1 so it can drive albedo and AO directly.
-	return (sa * aa + sb * ab + sc * ac + sd * ad) * 0.5 + 0.5;
+	float k0 = n000;
+	float k1 = n100 - n000;
+	float k2 = n010 - n000;
+	float k3 = n001 - n000;
+	float k4 = n000 - n100 - n010 + n110;
+	float k5 = n000 - n010 - n001 + n011;
+	float k6 = n000 - n100 - n001 + n101;
+	float k7 = -n000 + n100 + n010 - n110 + n001 - n101 - n011 + n111;
+	gradient = du * vec3(
+		k1 + k4 * u.y + k6 * u.z + k7 * u.y * u.z,
+		k2 + k4 * u.x + k5 * u.z + k7 * u.z * u.x,
+		k3 + k5 * u.y + k6 * u.x + k7 * u.x * u.y);
+	return k0 + k1 * u.x + k2 * u.y + k3 * u.z
+		+ k4 * u.x * u.y + k5 * u.y * u.z + k6 * u.z * u.x
+		+ k7 * u.x * u.y * u.z;
 }
 
 void vertex() {
@@ -100,8 +116,21 @@ void vertex() {
 void fragment() {
 	vec3 shading_normal = normalize(world_normal);
 
-	vec3 relief_gradient = vec3(0.0);
-	float height = relief(world_position, relief_gradient);
+	// Two octaves of the same isotropic field drive height and normal together,
+	// so a proud area shades proud and reads proud.  Sampling through
+	// NOISE_BASIS keeps the lattice off the world axes.
+	float freq_lo = detail_scale * OCTAVE_LO;
+	float freq_hi = detail_scale * OCTAVE_HI;
+	vec3 sample_point = NOISE_BASIS * world_position;
+	vec3 grad_lo;
+	vec3 grad_hi;
+	float noise_lo = value_noise_d(sample_point * freq_lo, grad_lo);
+	float noise_hi = value_noise_d(sample_point * freq_hi, grad_hi);
+	float height = noise_lo * WEIGHT_LO + noise_hi * WEIGHT_HI;
+	// Chain rule back to world space: scale each octave's gradient by its own
+	// frequency, then undo the basis rotation (v * M == transpose(M) * v).
+	vec3 relief_gradient = (grad_lo * (freq_lo * WEIGHT_LO)
+		+ grad_hi * (freq_hi * WEIGHT_HI)) * NOISE_BASIS;
 
 	// Build a tangent frame from the world normal alone.  Mesh tangents are not
 	// reliable here - the ramps are hand-built ArrayMeshes - so NORMAL_MAP is not
@@ -111,12 +140,18 @@ void fragment() {
 	vec3 bitangent = cross(shading_normal, tangent);
 	// Only the component of the gradient lying in the surface plane tilts the normal.
 	vec2 slope = vec2(dot(relief_gradient, tangent), dot(relief_gradient, bitangent));
-	vec3 perturbed = normalize(shading_normal - (tangent * slope.x + bitangent * slope.y) * normal_strength * 0.06);
+	// 0.07 rather than the sine era's 0.06: the noise gradient runs a little
+	// hotter per unit of `normal_strength`, and this was tuned by eye against the
+	// live render until the surface reads as sandblasted casting rather than
+	// either flat plastic (too low) or camouflage blotching (too high).
+	vec3 perturbed = normalize(shading_normal - (tangent * slope.x + bitangent * slope.y) * normal_strength * 0.07);
 
 	float up_facing = clamp(dot(shading_normal, vec3(0.0, 1.0, 0.0)), 0.0, 1.0);
 
-	// Grime pools in the recesses of the relief and on horizontal surfaces.
-	float grime = value_noise(world_position * detail_scale * 0.65);
+	// Grime pools in the recesses of the relief and on horizontal surfaces.  It
+	// wants exactly the broad octave already computed above, so it reuses that
+	// value rather than paying for a third set of eight hashes.
+	float grime = noise_lo;
 	float recess = 1.0 - height;
 	float dirt = clamp(grime * 0.6 + recess * 0.4, 0.0, 1.0) * grime_strength;
 	float dust = up_facing * edge_wear;
