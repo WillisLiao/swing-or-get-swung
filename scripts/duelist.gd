@@ -131,13 +131,53 @@ const CLASS_LOADOUTS := {
 ## The shotgun has no pistol grip, so its trigger hand wraps the small of the
 ## stock instead and takes a positive (rearward) rake; that is the one entry
 ## whose first term is not copied from a grip block.
+##
+## The pistol is the one weapon whose support hand is a second *pistol-grip*
+## hand rather than a handguard hand, so it is the only entry that does not
+## follow the `support_rot` rule above. It takes the trigger hand's own quarter
+## turn with the opposite sign - a genuinely mirrored glove (see
+## `PISTOL_SUPPORT_MIRRORED` and `_mirror_node_x()`) has its thumb on the
+## opposite side, so +PI/2 is what puts that thumb back up at the top of the
+## grip and lays the back of the hand out to the left. The middle term is a
+## pure rotation *around* the vertical grip axis - Y survives an Euler-Y
+## rotation untouched - so it is the free choice here: how far round the grip
+## the off hand sits, and therefore how far to the left its forearm exits.
 const HAND_GRIP_POSE := {
 	Weapon.RIFLE:   {"grip": Vector3(0.0, -0.118, 0.122), "grip_rot": Vector3(-0.36, 0.0, -PI * 0.5), "support": Vector3(0.0, 0.052, -0.700), "support_rot": Vector3(1.05, -PI * 0.5, 0.0)},
 	Weapon.SMG:     {"grip": Vector3(0.0, -0.096, 0.052), "grip_rot": Vector3(-0.19, 0.0, -PI * 0.5), "support": Vector3(0.0, 0.026, -0.545), "support_rot": Vector3(1.05, -PI * 0.5, 0.0)},
 	Weapon.SHOTGUN: {"grip": Vector3(0.0, -0.046, 0.170), "grip_rot": Vector3(0.42, 0.0, -PI * 0.5), "support": Vector3(0.0, -0.014, -0.460), "support_rot": Vector3(1.05, -PI * 0.5, 0.0)},
-	Weapon.PISTOL:  {"grip": Vector3(0.0, -0.104, 0.096), "grip_rot": Vector3(-0.28, 0.0, -PI * 0.5), "support": Vector3(-0.118, -0.150, 0.062), "support_rot": Vector3(-0.28, 0.0, -PI * 0.5)},
+	Weapon.PISTOL:  {"grip": Vector3(0.0, -0.104, 0.096), "grip_rot": Vector3(-0.28, 0.0, -PI * 0.5), "support": Vector3(-0.060, -0.108, 0.028), "support_rot": Vector3(-0.28, -0.78, PI * 0.5)},
 	Weapon.SNIPER:  {"grip": Vector3(0.0, -0.134, 0.284), "grip_rot": Vector3(-0.32, 0.0, -PI * 0.5), "support": Vector3(0.0, 0.038, -0.680), "support_rot": Vector3(1.05, -PI * 0.5, 0.0)},
 }
+
+## Which weapons get a genuinely mirrored (left) support glove.
+##
+## Only the pistol. Chirality is not free to change per weapon: the glove's
+## thumb sits on its local -X, which for the four long guns' `support_rot`
+## resolves to the muzzle direction - i.e. the unmirrored glove already has its
+## thumb pointing forward down the handguard, which is what a left hand does
+## there. Mirroring those would swing the thumb *rearward* and make four
+## currently-correct hands wrong. The pistol's support hand wraps a vertical
+## grip instead, where the thumb sits at the top of the grip on either hand, so
+## the mirror is both free and necessary: there the two gloves are inches apart
+## and unobstructed, and two identical right hands read immediately as a bug.
+const PISTOL_SUPPORT_MIRRORED := true
+
+## `ads_progress` below which the pistol's support hand is not on the gun at
+## all, and the offset it waits at while it is away.
+##
+## A pistol is a one-handed weapon at the hip and a two-handed weapon on the
+## sights, so the off hand is not merely parked out of frame - it is gone, and
+## it comes back on the aim. The offset takes it down and out to the lower left
+## so the return reads as a hand travelling to the gun rather than a hand
+## fading up on top of it; the dead zone keeps a twitch of the aim button from
+## flickering a whole arm across the bottom of the frame.
+const PISTOL_SUPPORT_JOIN_START := 0.16
+const PISTOL_SUPPORT_APPROACH := Vector3(-0.26, -0.34, 0.16)
+## Folded-away scale for that hand. Small enough to be nothing behind an
+## already-cleared `visible`, but never exactly zero: a zero-determinant basis
+## is what makes Godot start logging degenerate-transform errors every frame.
+const PISTOL_SUPPORT_FOLDED_SCALE := 0.001
 
 var team: Team = Team.RED
 var actor_id := ""
@@ -486,14 +526,39 @@ func _process(delta: float) -> void:
 		# it dragged the fist off the handle and out into the middle of the
 		# frame, taking its whole forearm across the screen with it.
 		if _left_hand_root != null and _local_camera and not is_shield_class():
+			var support_rest := _hand_support_rest
+			if weapon == Weapon.PISTOL:
+				# A pistol is a one-handed weapon until the shooter actually aims
+				# it, so its off hand is not merely parked out of frame the way the
+				# long guns' never-moving support hand is - it is folded away
+				# entirely and brought back on `ads_progress`. Scaling rather than
+				# rebuilding is what makes that affordable: the aim button is tapped
+				# constantly, and `_build_glove_hand()` is around a hundred mesh
+				# parts to throw away and re-make every time it is.
+				var join := clampf((clampf(ads_progress, 0.0, 1.0) - PISTOL_SUPPORT_JOIN_START) / maxf(0.01, 1.0 - PISTOL_SUPPORT_JOIN_START), 0.0, 1.0)
+				join = join * join * (3.0 - 2.0 * join)
+				# A reload is the other time the off hand is genuinely on the
+				# weapon, aimed or not - somebody has to bring the magazine. It
+				# rides the same sine hump the swing below and the magazine mesh
+				# already share, steepened so the hand is fully there for the body
+				# of the reload and only folds away at its two ends.
+				join = maxf(join, clampf(sin(reload_phase * PI) * 2.4, 0.0, 1.0))
+				# The mass arrives ahead of the travel - full size is reached at
+				# roughly half the join - so what the eye reads is a hand moving
+				# onto the gun rather than a hand inflating on top of it.
+				_left_hand_root.visible = join > 0.004
+				_left_hand_root.scale = Vector3.ONE * maxf(PISTOL_SUPPORT_FOLDED_SCALE, minf(1.0, join * 1.9))
+				support_rest += PISTOL_SUPPORT_APPROACH * (1.0 - join)
+			elif not _left_hand_root.visible:
+				_left_hand_root.visible = true
 			if reload_remaining > 0.0:
 				# Support hand sweeps down to the magazine well and back up on a
 				# single sine hump timed to the same reload_phase the magazine
 				# mesh hides/shows on, rather than a second, unsynchronized clock.
 				var mag_hump := sin(reload_phase * PI)
-				_left_hand_root.position = _hand_support_rest + Vector3(-0.025, -0.20, 0.10) * mag_hump
+				_left_hand_root.position = support_rest + Vector3(-0.025, -0.20, 0.10) * mag_hump
 			else:
-				_left_hand_root.position = _left_hand_root.position.lerp(_hand_support_rest, clampf(delta * 12.0, 0.0, 1.0))
+				_left_hand_root.position = _left_hand_root.position.lerp(support_rest, clampf(delta * 12.0, 0.0, 1.0))
 	if _fp_shield_root != null:
 		# Vertical is the resting/reload pose; ADS pitches the plate forward and
 		# down about the camera's right axis until it lies flat as a low
@@ -1513,7 +1578,7 @@ func _build_world_weapon() -> void:
 ## flat box. Every soft mass carries a harder plate floating a few millimetres
 ## proud of it, seated on a darker shelf, so each step reads as a machined seam
 ## instead of a colour change.
-func _build_glove_hand(glove: Material, cuff: Material) -> Node3D:
+func _build_glove_hand(glove: Material, cuff: Material, mirrored: bool = false) -> Node3D:
 	var root := Node3D.new()
 	# Armour and accent roles are mixed here rather than passed in, because
 	# hands are deliberately team-neutral: nothing in this function may ever be
@@ -1626,7 +1691,35 @@ func _build_glove_hand(glove: Material, cuff: Material) -> Node3D:
 	_add_child_part(root, _box(Vector3(0.072, 0.068, 0.156)), Vector3(-0.108, 0.020, -0.062), glove, Vector3(0.62, -0.22, 0.0))
 	_add_child_part(root, _box(Vector3(0.064, 0.062, 0.122)), Vector3(-0.120, -0.076, 0.012), glove, Vector3(0.10, -0.30, 0.0))
 	_add_child_part(root, _box(Vector3(0.026, 0.056, 0.104)), Vector3(-0.152, -0.076, 0.010), plate, Vector3(0.10, -0.30, 0.0))
+	if mirrored:
+		_mirror_node_x(root)
 	return root
+
+## Turns a finished right-hand glove into a genuine left-hand one by mirroring
+## it across its own local YZ plane - the plane the grip axis runs through - so
+## the thumb, the stepped knuckle order and the wrist break all swap sides
+## instead of the hand simply being relocated.
+##
+## The mirror is applied to the *transform hierarchy*, never as a negative
+## scale. Every local transform T becomes F*T*F with F = diag(-1, 1, 1), and
+## because F is its own inverse the composition telescopes -
+## (F*T1*F)*(F*T2*F) = F*(T1*T2)*F - so mirroring each node locally mirrors the
+## whole assembly exactly while every basis keeps a positive determinant. That
+## is the whole point: a -1 scale would mirror it too, but it would also flip
+## triangle winding, so the glove would render inside-out unless each of its
+## ~100 parts carried a back-face-culling override, and the two-material
+## glove/cuff signature this function is called with has nowhere to put that.
+## Nothing about the mesh data has to change either - box, cylinder, sphere and
+## torus are all already symmetric about their own local YZ plane, so only
+## where the parts sit and which way they face moves.
+func _mirror_node_x(node: Node3D) -> void:
+	const FLIP_X := Basis(Vector3(-1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0), Vector3(0.0, 0.0, 1.0))
+	var local := node.transform
+	node.transform = Transform3D(FLIP_X * local.basis * FLIP_X, Vector3(-local.origin.x, local.origin.y, local.origin.z))
+	for child in node.get_children():
+		var child_node := child as Node3D
+		if child_node != null:
+			_mirror_node_x(child_node)
 
 func _add_child_part(root: Node3D, mesh: Mesh, position: Vector3, material: Material, rotation: Vector3 = Vector3.ZERO) -> MeshInstance3D:
 	var instance := MeshInstance3D.new()
@@ -1665,10 +1758,17 @@ func _build_first_person_hands(kit: Dictionary) -> void:
 	if is_shield_class():
 		return
 	_hand_support_rest = pose.support
-	_left_hand_root = _build_glove_hand(glove, cuff)
+	_left_hand_root = _build_glove_hand(glove, cuff, PISTOL_SUPPORT_MIRRORED and weapon == Weapon.PISTOL)
 	_left_hand_root.name = "SupportHand"
 	_left_hand_root.position = _hand_support_rest
 	_left_hand_root.rotation = pose.support_rot
+	# The pistol's off hand is not on the gun at the hip, so it must not be
+	# drawn on the frame the weapon is built either - otherwise every weapon
+	# swap onto the pistol flashes a whole second arm for one frame before
+	# `_process()` folds it away. `_process()` owns it from here.
+	if weapon == Weapon.PISTOL:
+		_left_hand_root.visible = false
+		_left_hand_root.scale = Vector3.ONE * PISTOL_SUPPORT_FOLDED_SCALE
 	_weapon_rig.add_child(_left_hand_root)
 
 ## Rebuilds the equipped weapon's view model. Every weapon uses the
