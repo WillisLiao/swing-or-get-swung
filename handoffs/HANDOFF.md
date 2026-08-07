@@ -136,16 +136,16 @@ It is Robert's layout from PR #1 on the Nuclear-Rush repo, ported forward onto c
 
 ## Art direction
 
-Realistic, in the register of Halo Infinite. Procedural geometry remains the default, with only the user-approved Blender character and Cover V2 review as imported-art exceptions.
-Realism comes from `shaders/nuclear_pbr.gdshader` plus the `NuclearMaterials` factory in `scripts/nuclear_materials.gd`: true metal-roughness response, procedural relief with an analytic normal gradient, grime in recesses, dust on upward faces, material-supplied AO, sky ambient and reflection, ACES tonemapping, soft shadows, bloom.
+Realistic, in the register of Halo Infinite (and, as of the twelfth session below, Destiny). **The "zero imported art" rule is retired as of 2026-08-07, by explicit user decision - Blender-authored assets are now a normal, ongoing part of the pipeline, not a one-off exception.** The Blender character and Cover V2 review were the first two cases of this; they are no longer exceptions to a rule, just the first examples of the rule.
+Realism still comes from `shaders/nuclear_pbr.gdshader` plus the `NuclearMaterials` factory in `scripts/nuclear_materials.gd` for procedural surfaces: true metal-roughness response, procedural relief with an analytic normal gradient, grime in recesses, dust on upward faces, material-supplied AO, sky ambient and reflection, ACES tonemapping, soft shadows, bloom. Imported Blender meshes/materials sit alongside that toolkit wherever they serve the art direction better, and should still target the same PBR/mobile-lit look (bake down to `nuclear_pbr`-compatible materials or vertex data, not baked lightmaps or techniques the Mobile renderer can't afford).
 
-The renderer stays **Mobile**.
+**The renderer stays Mobile - this constraint is unchanged and still hard.**
 SSAO, SSIL, SDFGI, SSR, and volumetric fog are Forward+ only and are not affordable at 120 Hz on a phone.
 Do not reach for them.
 
 The older `shaders/pulp_lit.gdshader` is the previous illustrative look and is being retired in favour of `nuclear_pbr`.
 
-The current exceptions are the Blender Cover V2 **review scene** and the Blender character described above. The character is wired into live play; Cover V2 is still preview-only and should not be treated as approval to replace the procedural shipping map.
+Cover V2 is still preview-only (`scenes/cover_v2_preview.tscn`) and should not be treated as approval to replace the procedural shipping map without a separate decision - that's a gameplay/collision change, not an art one.
 
 ## Also decided, do not undo
 
