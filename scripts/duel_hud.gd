@@ -21,6 +21,185 @@ const MOVABLE_KEYS := ["move", "left_fire", "right_fire", "ads", "jump", "crouch
 # linger in the source as a readable name.
 const LEGACY_LAYOUT_KEY_NAMES := {"interact": "seed" + "_pass"}
 
+# --- Design tokens ---------------------------------------------------------
+#
+# One visual language for every piece of UI chrome in the game: this HUD, the
+# rift-link/lobby panel, the main menu and the class picker. The other three
+# read these constants and the static primitives below off `DuelHud` rather
+# than redeclaring their own palettes, so there is exactly one place to change
+# a colour or a corner treatment. They live here (instead of in a fifth
+# script) because this is the largest consumer and because nothing here
+# depends on the panels, so there is no cycle.
+#
+# Register: Halo-Infinite UNSC industrial - angular chamfered plates, hairline
+# structure, technical letter-spaced type, functional density - with restrained
+# Destiny-style accent glow used only to signal state. Team colour is an
+# identity accent (edges, ticks, glyphs), never a blanket surface fill; the
+# system accent for "this is active/interactive" is amber, so a highlighted
+# button is never mistaken for a team read.
+
+const HUD_VOID := Color("04070d")        # full-screen scrim behind modal chrome
+const HUD_INK := Color("0a1018")         # panel body
+const HUD_INK_RAISE := Color("121b27")   # chips, rows, wells sitting on a panel
+const HUD_EDGE := Color("2b3b50")        # structural hairline
+const HUD_EDGE_BRIGHT := Color("55708c") # emphasised structural line
+const HUD_TEXT := Color("e6edf6")
+const HUD_TEXT_DIM := Color("8ea1b8")
+const HUD_TEXT_FAINT := Color("5c6d82")
+const HUD_SIGNAL := Color("ffb454")      # system accent: active / interactive
+const HUD_ALERT := Color("ff4f3d")       # danger: low vitality, destructive action
+const HUD_OK := Color("74e0a4")
+const HUD_TEAM_RED := Color("ff6a57")
+const HUD_TEAM_BLUE := Color("71cfff")
+
+const HUD_CUT := 10.0                    # panel corner chamfer
+const HUD_CUT_SM := 5.0                  # chip / plate corner chamfer
+const HUD_TRACK := 1.8                   # letter spacing for technical type
+const HUD_TRACK_TIGHT := 0.9
+
+const FS_MICRO := 10
+const FS_LABEL := 12
+const FS_BODY := 14
+const FS_SUB := 18
+const FS_TITLE := 24
+const FS_DISPLAY := 34
+
+# Corner selection for chamfer_points(). The default cuts the two corners on
+# the leading diagonal, which is what makes a plate read as machined rather
+# than as a rounded card.
+const CHAMFER_TL := 1
+const CHAMFER_TR := 2
+const CHAMFER_BR := 4
+const CHAMFER_BL := 8
+const CHAMFER_DIAG := 5
+const CHAMFER_ALL := 15
+
+static func hud_font() -> Font:
+	return ThemeDB.fallback_font
+
+static func chamfer_points(rect: Rect2, cut: float, mask: int = CHAMFER_DIAG) -> PackedVector2Array:
+	var c := maxf(0.0, minf(cut, minf(rect.size.x, rect.size.y) * 0.5))
+	var a := rect.position
+	var b := rect.end
+	var points := PackedVector2Array()
+	if mask & CHAMFER_TL:
+		points.append(Vector2(a.x + c, a.y))
+	else:
+		points.append(a)
+	if mask & CHAMFER_TR:
+		points.append(Vector2(b.x - c, a.y))
+		points.append(Vector2(b.x, a.y + c))
+	else:
+		points.append(Vector2(b.x, a.y))
+	if mask & CHAMFER_BR:
+		points.append(Vector2(b.x, b.y - c))
+		points.append(Vector2(b.x - c, b.y))
+	else:
+		points.append(b)
+	if mask & CHAMFER_BL:
+		points.append(Vector2(a.x + c, b.y))
+		points.append(Vector2(a.x, b.y - c))
+	else:
+		points.append(Vector2(a.x, b.y))
+	if mask & CHAMFER_TL:
+		points.append(Vector2(a.x, a.y + c))
+	return points
+
+## The one plate primitive. Everything with a background in this game's UI is
+## this shape - never a rounded rect, never a nested card.
+static func draw_plate(ci: CanvasItem, rect: Rect2, fill: Color, edge: Color, cut: float = HUD_CUT, mask: int = CHAMFER_DIAG, width: float = 1.0) -> void:
+	var points := chamfer_points(rect, cut, mask)
+	if fill.a > 0.0:
+		ci.draw_colored_polygon(points, fill)
+	if edge.a > 0.0 and points.size() > 1:
+		var loop := points.duplicate()
+		loop.append(points[0])
+		ci.draw_polyline(loop, edge, width)
+
+## Destiny-register accent: a single bright edge on one side of a plate plus a
+## soft outer bleed. This is how "active", "selected" and "alert" are said -
+## not by flooding the plate with saturated colour.
+static func draw_accent_edge(ci: CanvasItem, rect: Rect2, color: Color, vertical: bool = true, thickness: float = 3.0) -> void:
+	if vertical:
+		ci.draw_rect(Rect2(rect.position, Vector2(thickness, rect.size.y)), color, true)
+		ci.draw_rect(Rect2(rect.position - Vector2(2.0, 0.0), Vector2(2.0, rect.size.y)), Color(color, color.a * 0.22), true)
+	else:
+		ci.draw_rect(Rect2(rect.position, Vector2(rect.size.x, thickness)), color, true)
+		ci.draw_rect(Rect2(rect.position - Vector2(0.0, 2.0), Vector2(rect.size.x, 2.0)), Color(color, color.a * 0.22), true)
+
+## Corner brackets. Used sparingly, on the two or three elements per screen
+## that are genuinely the focus - a targeted plate, a modal card, the selected
+## class - so they keep meaning something.
+static func draw_brackets(ci: CanvasItem, rect: Rect2, color: Color, arm: float = 13.0, width: float = 2.0) -> void:
+	var a := rect.position
+	var b := rect.end
+	ci.draw_polyline(PackedVector2Array([Vector2(a.x, a.y + arm), a, Vector2(a.x + arm, a.y)]), color, width)
+	ci.draw_polyline(PackedVector2Array([Vector2(b.x - arm, a.y), Vector2(b.x, a.y), Vector2(b.x, a.y + arm)]), color, width)
+	ci.draw_polyline(PackedVector2Array([Vector2(b.x, b.y - arm), b, Vector2(b.x - arm, b.y)]), color, width)
+	ci.draw_polyline(PackedVector2Array([Vector2(a.x + arm, b.y), Vector2(a.x, b.y), Vector2(a.x, b.y - arm)]), color, width)
+
+static func tracked_width(font: Font, text: String, font_size: int, tracking: float = HUD_TRACK) -> float:
+	var total := 0.0
+	for index in text.length():
+		total += font.get_char_size(text.unicode_at(index), font_size).x + tracking
+	return maxf(0.0, total - tracking)
+
+## Letter-spaced technical type. The fallback font is a plain humanist sans;
+## tracking it out is what turns it into the stencilled machine lettering the
+## reference uses, without importing a typeface.
+static func draw_tracked(ci: CanvasItem, at: Vector2, text: String, font_size: int, color: Color, tracking: float = HUD_TRACK) -> float:
+	var font := hud_font()
+	var x := at.x
+	for index in text.length():
+		var code := text.unicode_at(index)
+		ci.draw_char(font, Vector2(x, at.y), String.chr(code), font_size, color)
+		x += font.get_char_size(code, font_size).x + tracking
+	return x - at.x - tracking
+
+static func draw_tracked_centered(ci: CanvasItem, at: Vector2, text: String, font_size: int, color: Color, tracking: float = HUD_TRACK) -> void:
+	var width := tracked_width(hud_font(), text, font_size, tracking)
+	draw_tracked(ci, at - Vector2(width * 0.5, 0.0), text, font_size, color, tracking)
+
+## Plain (untracked) proportional text, for sentence-case body copy where
+## tracking would hurt readability rather than help it.
+static func draw_body(ci: CanvasItem, at: Vector2, text: String, font_size: int, color: Color, width: float = -1.0) -> void:
+	ci.draw_string(hud_font(), at, text, HORIZONTAL_ALIGNMENT_LEFT, width, font_size, color)
+
+static func body_width(text: String, font_size: int) -> float:
+	return hud_font().get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+
+## A section rule: short bright stub, long dim run. Reads as a technical
+## divider rather than a generic 1px line.
+static func draw_rule(ci: CanvasItem, from: Vector2, length: float, color: Color) -> void:
+	ci.draw_line(from, from + Vector2(minf(26.0, length), 0.0), color, 1.6)
+	ci.draw_line(from + Vector2(minf(26.0, length) + 5.0, 0.0), from + Vector2(length, 0.0), Color(color, color.a * 0.3), 1.0)
+
+static func polygon_ring(center: Vector2, radius: float, sides: int, phase: float) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	for index in sides:
+		points.append(center + Vector2.from_angle(phase + TAU * float(index) / float(sides)) * radius)
+	return points
+
+## Touch controls are drawn as octagons rather than circles so they belong to
+## the same machined language as the plates, while their hit test stays the
+## radial one the touch router and the regression tests rely on: the octagon's
+## vertices sit exactly on the hit circle's radius.
+## `backing` lays a dark stroke under the bright one. Without it a thin HUD
+## outline vanishes completely against the arena's pale concrete and the
+## launch pad's bright emissive - the same problem the reticle solves with its
+## double stroke.
+static func draw_control_ring(ci: CanvasItem, center: Vector2, radius: float, fill: Color, edge: Color, width: float, backing: float = 0.0) -> void:
+	var points := polygon_ring(center, radius, 8, PI / 8.0)
+	if fill.a > 0.0:
+		ci.draw_colored_polygon(points, fill)
+	if edge.a <= 0.0:
+		return
+	var loop := points.duplicate()
+	loop.append(points[0])
+	if backing > 0.0:
+		ci.draw_polyline(loop, Color(HUD_VOID, backing), width + 2.6)
+	ci.draw_polyline(loop, edge, width)
+
 var movement := Vector2.ZERO
 var fire_held := false
 var aim_held := false
@@ -121,6 +300,9 @@ var _zoom_index := 0
 ## arena each frame alongside _ads_progress/_zoom_index. See set_recoil_state().
 var _recoil_kick := 0.0
 var _recoil_lateral := 0.0
+## Duelist._scope_camera's render, pushed in by the arena each frame. See
+## set_scope_texture() and _draw_scope_overlay().
+var _scope_texture: Texture2D = null
 var _settings_open := false
 var _layout_editor := false
 var _aim_toggle := false
@@ -355,6 +537,14 @@ func set_recoil_state(recoil: Vector2) -> void:
 	_recoil_kick = next_kick
 	_recoil_lateral = next_lateral
 	queue_redraw()
+
+## Pushes Duelist._scope_camera's live render in each frame while scoped;
+## null the rest of the time (see Duelist.scope_viewport_texture()). Not
+## redraw-gated like the scalar setters above - a SubViewport's ViewportTexture
+## updates its own pixels without a new reference, so equality-checking the
+## reference would never catch the picture actually changing frame to frame.
+func set_scope_texture(texture: Texture2D) -> void:
+	_scope_texture = texture
 
 func set_view_fov(value: float, persist: bool = true) -> void:
 	var next := clampf(value, Duelist.MIN_HORIZONTAL_FOV, Duelist.MAX_HORIZONTAL_FOV) if is_finite(value) else Duelist.DEFAULT_HORIZONTAL_FOV
@@ -645,13 +835,16 @@ func _draw_gameplay_hud() -> void:
 
 	_draw_reticle(center)
 	if hit_confirm > 0.0:
-		var confirm_color := Color("fff0b0", 0.95 * hit_confirm)
-		var confirm_radius := 23.0 + (1.0 - hit_confirm) * 7.0
-		for angle in [0.0, PI * 0.5, PI, PI * 1.5]:
+		# Four diagonal ticks flaring outward, dark-haloed like the reticle
+		# strokes so the confirm survives a bright wall behind it.
+		var confirm_color := Color(HUD_SIGNAL, 0.98 * hit_confirm)
+		var confirm_radius := 22.0 + (1.0 - hit_confirm) * 9.0
+		for angle in [PI * 0.25, PI * 0.75, PI * 1.25, PI * 1.75]:
 			var direction := Vector2.RIGHT.rotated(angle)
 			var inner := center + direction * (confirm_radius - 7.0)
 			var outer := center + direction * confirm_radius
-			draw_line(inner, outer, confirm_color, 2.5)
+			draw_line(inner, outer, Color(RETICLE_INK, 0.5 * hit_confirm), 4.5)
+			draw_line(inner, outer, confirm_color, 2.2)
 
 	var stick_anchor := _control_center("move")
 	var stick_radius := _stick_radius()
@@ -668,32 +861,37 @@ func _draw_gameplay_hud() -> void:
 	elif _touch_preview == "floating-edge":
 		stick_center = _preview_stick_origin(Vector2(28.0, 430.0), stick_radius)
 		knob = stick_center + Vector2(32.0, -12.0)
-	draw_circle(stick_center, stick_radius, Color("08142a", 0.42 * stick_alpha))
-	draw_arc(stick_center, stick_radius, 0.0, TAU, 32, Color(friendly, 0.38 * stick_alpha), 2.0)
-	if _stick_mode == MobileTouchRouter.StickMode.FIXED or stick_is_active or _stick_visual_opacity > 0.01:
-		draw_circle(knob, 24.0 * _control_scale("move"), Color(friendly, 0.34 * stick_alpha))
-		draw_arc(knob, 24.0 * _control_scale("move"), 0.0, TAU, 24, Color(friendly, 0.9 * stick_alpha), 2.0)
+	_draw_stick(stick_center, knob, stick_radius, friendly, stick_alpha, _stick_mode == MobileTouchRouter.StickMode.FIXED or stick_is_active or _stick_visual_opacity > 0.01)
 
+	# Three colour roles on the control cluster and no more: your own team
+	# colour on the two things that are you shooting and moving, amber on
+	# anything that is a mode or a prompt, steel on everything else. The old
+	# scheme put the *enemy* colour on your own ADS button and a fifth
+	# unexplained purple on swap.
 	_draw_button("left_fire", friendly, _left_fire_touch >= 0)
 	_draw_button("right_fire", friendly, _right_fire_touch >= 0)
 	# Every weapon ADS's through an optic now, so the ADS button is no longer
 	# weapon-gated the way it was when only the carbine could aim.
-	_draw_button("ads", enemy, aim_held)
-	_draw_button("jump", enemy, _jump_touch >= 0)
+	_draw_button("ads", HUD_SIGNAL, aim_held)
+	_draw_button("jump", HUD_TEXT_DIM, _jump_touch >= 0)
 	_draw_button("crouch", friendly, _stance == Duelist.Stance.CROUCH)
 	_draw_button("prone", friendly, _stance == Duelist.Stance.PRONE)
-	_draw_button("swap", Color("c292ff"), _switch_touch >= 0)
+	_draw_button("swap", HUD_TEXT_DIM, _switch_touch >= 0)
 	if _interact_available:
-		_draw_button("interact", friendly, _interact_touch >= 0)
-	_draw_button_fixed(_reload_center(), _reload_radius(), Color("e6a25b"), reload_remaining > 0.0, "reload")
-	_draw_button_fixed(_melee_center(), _melee_radius(), Color("8fd6a8"), _melee_touch >= 0, "melee")
+		# The one control that appears and disappears with context earns a
+		# pulsing outer ring, so it is noticed without a text prompt.
+		var interact_pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.005)
+		draw_control_ring(self, _control_center("interact"), _control_radius("interact") + 7.0, Color(0, 0, 0, 0), Color(HUD_SIGNAL, 0.16 + 0.28 * interact_pulse), 1.6)
+		_draw_button("interact", HUD_SIGNAL, _interact_touch >= 0)
+	_draw_button_fixed(_reload_center(), _reload_radius(), HUD_SIGNAL, reload_remaining > 0.0, "reload")
+	_draw_button_fixed(_melee_center(), _melee_radius(), HUD_TEXT_DIM, _melee_touch >= 0, "melee")
 	_draw_weapon_indicator(friendly)
-	_draw_button_fixed(_settings_center(), 24.0, enemy, _settings_open, "settings")
+	_draw_button_fixed(_settings_center(), 24.0, HUD_TEXT_FAINT, _settings_open, "settings")
 	if _touch_preview in ["two-thumb", "four-finger"]:
 		_draw_button_preview("left_fire", friendly)
 		_draw_button_preview("right_fire", friendly)
 	if _touch_preview == "reloading":
-		_draw_reload_sweep(_reload_center(), _reload_radius(), Color("fff0b0"), reload_progress_for(reload_remaining))
+		_draw_reload_sweep(_reload_center(), _reload_radius(), HUD_SIGNAL, reload_progress_for(reload_remaining))
 	if _touch_preview in ["floating-left", "floating-edge"]:
 		_draw_preview_floating_stick(friendly)
 
@@ -703,21 +901,48 @@ func _draw_gameplay_hud() -> void:
 	if _squad_readability:
 		_draw_team_life_strip(safe, friendly, enemy)
 	if damage_direction_intensity > 0.0:
+		# A tapered three-band wedge instead of one flat arc: the bands fall off
+		# outward so the indicator reads as a threat bearing rather than as a
+		# stray coloured stripe, and it stays legible over a bright wall.
 		var damage_color := _team_color(damage_enemy_team)
 		var direction := damage_direction if damage_direction.length_squared() > 0.01 else Vector2.DOWN
 		var edge_radius := minf(size.x, size.y) * 0.44
 		var edge_angle := atan2(direction.y, direction.x)
-		draw_arc(center, edge_radius, edge_angle - 0.18, edge_angle + 0.18, 14, Color(damage_color, damage_direction_intensity * 0.9), 7.0)
+		var bands := [
+			{"r": edge_radius - 9.0, "span": 0.20, "a": 0.30, "w": 3.0},
+			{"r": edge_radius, "span": 0.15, "a": 0.95, "w": 5.0},
+			{"r": edge_radius + 8.0, "span": 0.09, "a": 0.42, "w": 2.5},
+		]
+		for band in bands:
+			var span := float(band.span)
+			draw_arc(center, float(band.r), edge_angle - span, edge_angle + span, 16, Color(damage_color, damage_direction_intensity * float(band.a)), float(band.w))
 	if _match_result_visible:
 		_draw_match_result()
 	elif _match_phase == RiftlineMatch.Phase.OPENING:
 		_draw_round_beat("ROUND START", "FIGHT", friendly)
 	if not _connection_message.is_empty():
-		var message_rect := Rect2(Vector2(size.x * 0.5 - 170.0, _safe_rect().position.y + 52.0), Vector2(340.0, 46.0))
-		draw_rect(message_rect, Color("0b1730", 0.94))
-		draw_line(message_rect.position, message_rect.position + Vector2(message_rect.size.x, 0), enemy, 2.0)
-		var font := ThemeDB.fallback_font
-		draw_string(font, message_rect.get_center() + Vector2(-font.get_string_size(_connection_message, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x * 0.5, 5), _connection_message, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("f1f6ff"))
+		var message_rect := Rect2(Vector2(size.x * 0.5 - 170.0, safe.position.y + 178.0), Vector2(340.0, 40.0))
+		draw_plate(self, message_rect, Color(HUD_INK, 0.94), Color(HUD_EDGE, 0.9), HUD_CUT_SM)
+		draw_accent_edge(self, message_rect, Color(HUD_SIGNAL, 0.9), true, 3.0)
+		draw_tracked_centered(self, message_rect.get_center() + Vector2(0.0, 5.0), _connection_message.to_upper(), FS_LABEL, HUD_TEXT)
+
+## The virtual stick. A ring rather than a disc, with cardinal ticks so the
+## axes are readable at a glance, and an octagonal knob matching the buttons.
+func _draw_stick(origin: Vector2, knob: Vector2, radius: float, friendly: Color, alpha: float, knob_visible: bool) -> void:
+	if alpha <= 0.005:
+		return
+	draw_circle(origin, radius, Color(HUD_VOID, 0.5 * alpha))
+	draw_arc(origin, radius, 0.0, TAU, 40, Color(HUD_VOID, 0.5 * alpha), 3.6)
+	draw_arc(origin, radius, 0.0, TAU, 40, Color(HUD_EDGE_BRIGHT, 0.7 * alpha), 1.4)
+	draw_arc(origin, radius - 6.0, 0.0, TAU, 40, Color(friendly, 0.24 * alpha), 1.0)
+	for index in 4:
+		var axis := Vector2.from_angle(TAU * float(index) / 4.0)
+		draw_line(origin + axis * (radius - 9.0), origin + axis * (radius - 2.0), Color(friendly, 0.6 * alpha), 1.6)
+	if not knob_visible:
+		return
+	var knob_radius := 22.0 * _control_scale("move")
+	draw_control_ring(self, knob, knob_radius, Color(HUD_INK_RAISE, 0.85 * alpha), Color(friendly, 0.95 * alpha), 2.0, 0.55 * alpha)
+	draw_circle(knob, 2.6, Color(friendly, 0.9 * alpha))
 
 func _friendly_color() -> Color:
 	return _team_color(_roster_local_team)
@@ -730,95 +955,149 @@ func _draw_vitality_strip(safe: Rect2, friendly: Color) -> void:
 	# not a chunked "hits remaining" meter, since damage varies per weapon
 	# (SMG/pistol chip damage vs. sniper one-shots) and a fixed hit count
 	# would lie about how much health is actually left.
-	var bar_size := Vector2(132.0, 14.0)
-	var origin := Vector2(safe.get_center().x - bar_size.x * 0.5, safe.end.y - 46.0)
+	var bar_size := Vector2(186.0, 12.0)
+	var origin := Vector2(safe.get_center().x - bar_size.x * 0.5 + 21.0, safe.end.y - 44.0)
 	var track := Rect2(origin, bar_size)
 	var fraction := clampf(health / Duelist.HEALTH, 0.0, 1.0)
-	var low_pulse := 0.7 + sin(Time.get_ticks_msec() * 0.012) * 0.3 if health <= 30.0 else 1.0
-	var fill_color := Color("ef8b78", low_pulse) if health <= 30.0 else Color("f5e6bd") if health <= 60.0 else friendly
-	draw_rect(track, Color("0b1730", 0.72))
+	var critical := health <= 30.0
+	var low_pulse := 0.72 + sin(Time.get_ticks_msec() * 0.012) * 0.28 if critical else 1.0
+	var fill_color := HUD_ALERT if critical else (HUD_SIGNAL if health <= 60.0 else friendly)
+	# The numeral is the primary read at a glance, the bar is the secondary
+	# one, so the numeral is large, tracked and left of the bar on the same
+	# optical baseline instead of a 12px caption floating above it.
+	var label := str(maxi(0, ceili(health)))
+	var label_width := tracked_width(hud_font(), label, FS_TITLE, HUD_TRACK_TIGHT)
+	draw_tracked(self, Vector2(track.position.x - 14.0 - label_width, track.end.y + 2.0), label, FS_TITLE, Color(fill_color, low_pulse), HUD_TRACK_TIGHT)
+	draw_tracked(self, Vector2(track.position.x, track.position.y - 7.0), "VITALS", FS_MICRO, HUD_TEXT_FAINT)
+	# Skewed ends: the well is a parallelogram, which is what stops a health
+	# bar from reading as a browser progress element.
+	draw_plate(self, track, Color(HUD_VOID, 0.78), Color(HUD_EDGE, 0.95), 6.0, CHAMFER_DIAG)
 	if fraction > 0.0:
-		draw_rect(Rect2(track.position, Vector2(track.size.x * fraction, track.size.y)), Color(fill_color, 0.92))
-	var ticks: Array[float] = [0.25, 0.5, 0.75]
-	for tick in ticks:
+		var fill := Rect2(track.position + Vector2(2.0, 2.0), Vector2(maxf(2.0, (track.size.x - 4.0) * fraction), track.size.y - 4.0))
+		draw_plate(self, fill, Color(fill_color, 0.9 * low_pulse), Color(0, 0, 0, 0), 4.0, CHAMFER_DIAG)
+		if critical:
+			draw_plate(self, fill.grow(2.0), Color(0, 0, 0, 0), Color(HUD_ALERT, 0.5 * low_pulse), 5.0, CHAMFER_DIAG, 1.0)
+	# Quarter marks read as machined graduations cut into the well.
+	for tick in [0.25, 0.5, 0.75]:
 		var tick_x: float = track.position.x + track.size.x * tick
-		draw_line(Vector2(tick_x, track.position.y), Vector2(tick_x, track.end.y), Color("0b1730", 0.55), 1.0)
-	draw_rect(track, Color("f1f6ff", 0.7), false, 1.2)
-	var label := str(ceili(health))
-	var font := ThemeDB.fallback_font
-	var label_width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-	draw_string(font, Vector2(track.get_center().x - label_width * 0.5, track.position.y - 5.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("f1f6ff", 0.9))
+		draw_line(Vector2(tick_x, track.position.y + 1.0), Vector2(tick_x, track.end.y - 1.0), Color(HUD_VOID, 0.8), 1.0)
 
 
 func _team_color(team: int) -> Color:
 	return Color("ff6a57") if team == int(Duelist.Team.RED) else Color("71cfff")
 
+## The match bar. One chamfered plate at the top edge carrying the two team
+## scores as pip ladders either side of the clock, so score and time are a
+## single object rather than three unrelated pieces of floating text.
 func _draw_objective_strip(safe: Rect2, friendly: Color, enemy: Color) -> void:
-	var center := Vector2(size.x * 0.5, safe.position.y + 18.0)
-	var font := get_theme_font("font", "Label")
-	var small_font := ThemeDB.fallback_font
-	draw_string(font, center + Vector2(-96.0, 6.0), "%d/%d" % [_red_score, RiftlineMatch.POINTS_TO_WIN], HORIZONTAL_ALIGNMENT_CENTER, -1, 20, friendly)
-	draw_string(font, center + Vector2(96.0, 6.0), "%d/%d" % [_blue_score, RiftlineMatch.POINTS_TO_WIN], HORIZONTAL_ALIGNMENT_CENTER, -1, 20, enemy)
+	var bar := Rect2(Vector2(size.x * 0.5 - 132.0, safe.position.y), Vector2(264.0, 40.0))
+	var center := bar.get_center()
 	var sudden_death := bool(_objective_state.get("sudden_death", false))
+	draw_plate(self, bar, Color(HUD_INK, 0.86), Color(HUD_EDGE, 0.9), HUD_CUT_SM, CHAMFER_ALL)
+	# Team identity is carried by two short colour bars on the outer edges of
+	# the plate, not by tinting the plate itself.
+	draw_rect(Rect2(bar.position + Vector2(0.0, 8.0), Vector2(2.5, bar.size.y - 16.0)), Color(_team_color(Duelist.Team.RED), 0.95), true)
+	draw_rect(Rect2(Vector2(bar.end.x - 2.5, bar.position.y + 8.0), Vector2(2.5, bar.size.y - 16.0)), Color(_team_color(Duelist.Team.BLUE), 0.95), true)
+	_draw_score_pips(Vector2(bar.position.x + 13.0, center.y), _red_score, _team_color(Duelist.Team.RED), 1.0)
+	_draw_score_pips(Vector2(bar.end.x - 13.0, center.y), _blue_score, _team_color(Duelist.Team.BLUE), -1.0)
 	if sudden_death:
-		var pulse := 0.55 + 0.45 * (0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006))
-		var label := "SUDDEN DEATH"
-		var label_width := small_font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		draw_string(small_font, center + Vector2(-label_width * 0.5, 6.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("ff6b57", pulse))
+		var pulse := 0.6 + 0.4 * (0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006))
+		draw_tracked_centered(self, center + Vector2(0.0, -1.0), "SUDDEN", FS_MICRO, Color(HUD_ALERT, pulse))
+		draw_tracked_centered(self, center + Vector2(0.0, 11.0), "DEATH", FS_MICRO, Color(HUD_ALERT, pulse))
 	else:
 		var match_remaining := float(_objective_state.get("match_remaining", RiftlineMatch.MATCH_SECONDS))
-		var clock := _format_clock(match_remaining)
-		var clock_width := small_font.get_string_size(clock, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
-		draw_string(small_font, center + Vector2(-clock_width * 0.5, 6.0), clock, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("fff4c7", 0.92))
-	_draw_core_status(Vector2(center.x, center.y + 20.0), friendly, enemy)
+		var urgent := match_remaining <= 60.0
+		draw_tracked_centered(self, center + Vector2(0.0, 8.0), _format_clock(match_remaining), FS_SUB, HUD_ALERT if urgent else HUD_TEXT, HUD_TRACK_TIGHT)
+		draw_tracked_centered(self, center + Vector2(0.0, -9.0), "MATCH", 9, HUD_TEXT_FAINT)
+	_draw_core_status(Vector2(center.x, bar.end.y + 4.0), friendly, enemy)
 	if _score_pulse > 0.0:
-		draw_arc(center, 10.0 + (1.0 - _score_pulse) * 14.0, 0.0, TAU, 24, Color("fff4c7", _score_pulse * 0.85), 2.0)
+		draw_plate(self, bar.grow(2.0 + (1.0 - _score_pulse) * 8.0), Color(0, 0, 0, 0), Color(HUD_SIGNAL, _score_pulse * 0.8), HUD_CUT_SM, CHAMFER_ALL, 2.0)
 	if objective_feedback_pulse > 0.0:
-		var feedback_color := _team_color(objective_feedback_team) if objective_feedback_team >= 0 else Color("fff0b0")
-		draw_arc(center, 10.0 + (1.0 - objective_feedback_pulse) * 18.0, 0.0, TAU, 24, Color(feedback_color, objective_feedback_pulse * 0.9), 2.5)
+		var feedback_color := _team_color(objective_feedback_team) if objective_feedback_team >= 0 else HUD_SIGNAL
+		draw_plate(self, bar.grow(2.0 + (1.0 - objective_feedback_pulse) * 12.0), Color(0, 0, 0, 0), Color(feedback_color, objective_feedback_pulse * 0.85), HUD_CUT_SM, CHAMFER_ALL, 2.0)
 
+## Points-to-win as a ladder of chevron pips, filled for points held. Reading
+## "how close is either team to winning" off a shape is faster than parsing
+## "2/3" twice, and it is the read that decides how you play the next minute.
+func _draw_score_pips(anchor: Vector2, score: int, color: Color, direction: float) -> void:
+	var pitch := 11.0
+	for index in RiftlineMatch.POINTS_TO_WIN:
+		var x := anchor.x + direction * float(index) * pitch
+		var held := index < score
+		var pip := PackedVector2Array([
+			Vector2(x - direction * 3.0, anchor.y - 8.0),
+			Vector2(x + direction * 3.0, anchor.y - 8.0),
+			Vector2(x + direction * 3.0, anchor.y + 4.0),
+			Vector2(x, anchor.y + 8.0),
+			Vector2(x - direction * 3.0, anchor.y + 4.0),
+		])
+		if held:
+			draw_colored_polygon(pip, Color(color, 0.95))
+		else:
+			var loop := pip.duplicate()
+			loop.append(pip[0])
+			draw_polyline(loop, Color(color, 0.3), 1.2)
+
+## Core state as a compact tag hung under the match bar: a state glyph, the
+## state itself, and the owning team where one exists. Amber is the neutral
+## "system knows something" colour; team colour only appears when a team
+## actually owns the core.
 func _draw_core_status(point: Vector2, friendly: Color, enemy: Color) -> void:
-	var font := ThemeDB.fallback_font
 	var core_state := int(_objective_state.get("core_state", int(RiftlineMatch.CoreState.AT_CENTER)))
-	var text := "CORE AT CENTER"
-	var accent := Color("fff4c7")
+	var text := "CORE // CENTER"
+	var accent := HUD_TEXT_DIM
 	match core_state:
 		int(RiftlineMatch.CoreState.CARRIED):
 			var carrier_team := int(_objective_state.get("core_carrier_team", int(Duelist.Team.RED)))
 			accent = _team_color(carrier_team)
-			text = "CORE CARRIED - %s" % ("RED" if carrier_team == int(Duelist.Team.RED) else "BLUE")
+			text = "CORE // %s CARRY" % ("RED" if carrier_team == int(Duelist.Team.RED) else "BLUE")
 		int(RiftlineMatch.CoreState.DROPPED):
-			text = "CORE DROPPED"
-			accent = Color("ff9b57")
+			text = "CORE // DROPPED"
+			accent = HUD_SIGNAL
 		int(RiftlineMatch.CoreState.INSTALLED):
 			var installed_team := int(_objective_state.get("installed_team", int(Duelist.Team.RED)))
 			accent = _team_color(installed_team)
-			text = "LAUNCHING - %s" % ("RED" if installed_team == int(Duelist.Team.RED) else "BLUE")
+			text = "LAUNCH // %s" % ("RED" if installed_team == int(Duelist.Team.RED) else "BLUE")
 		int(RiftlineMatch.CoreState.RESPAWNING):
-			text = "CORE RETURNING"
-			accent = Color("9bb2d1")
-	var text_width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-	draw_string(font, point + Vector2(-text_width * 0.5, 12.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, accent)
+			text = "CORE // RETURNING"
+			accent = HUD_TEXT_FAINT
+	var text_width := tracked_width(hud_font(), text, FS_MICRO)
+	var tag := Rect2(Vector2(point.x - text_width * 0.5 - 22.0, point.y), Vector2(text_width + 32.0, 20.0))
+	draw_plate(self, tag, Color(HUD_INK, 0.8), Color(accent, 0.42), 4.0, CHAMFER_DIAG)
+	_draw_core_glyph(Vector2(tag.position.x + 11.0, tag.get_center().y), accent, core_state == int(RiftlineMatch.CoreState.INSTALLED))
+	draw_tracked(self, Vector2(tag.position.x + 22.0, tag.get_center().y + 4.0), text, FS_MICRO, Color(accent, 0.98))
 
 	var install_progress := float(_objective_state.get("install_progress", 0.0))
 	var cancel_progress := float(_objective_state.get("cancel_progress", 0.0))
 	if install_progress > 0.0:
-		_draw_hold_arc(point + Vector2(0.0, 30.0), install_progress, friendly)
+		_draw_hold_arc(Vector2(point.x, tag.end.y + 20.0), install_progress, friendly)
 	if cancel_progress > 0.0:
-		_draw_hold_arc(point + Vector2(0.0, 30.0), cancel_progress, enemy)
+		_draw_hold_arc(Vector2(point.x, tag.end.y + 20.0), cancel_progress, enemy)
 
 	if core_state == int(RiftlineMatch.CoreState.INSTALLED):
 		var launch_remaining := float(_objective_state.get("launch_remaining", 0.0))
 		var installed_team := int(_objective_state.get("installed_team", int(Duelist.Team.RED)))
 		var launch_color := _team_color(installed_team)
-		var launch_text := _format_clock(launch_remaining)
-		var launch_width := font.get_string_size(launch_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
-		draw_string(font, point + Vector2(-launch_width * 0.5, 58.0), launch_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, launch_color)
+		var launch_center := Vector2(point.x, tag.end.y + 30.0)
+		draw_tracked_centered(self, launch_center + Vector2(0.0, -12.0), "LAUNCH IN", 9, Color(launch_color, 0.85))
+		draw_tracked_centered(self, launch_center + Vector2(0.0, 18.0), _format_clock(launch_remaining), FS_TITLE, launch_color, HUD_TRACK_TIGHT)
+
+func _draw_core_glyph(center: Vector2, color: Color, energised: bool) -> void:
+	var hex := polygon_ring(center, 6.0, 6, PI / 6.0)
+	draw_colored_polygon(hex, Color(color, 0.2))
+	var loop := hex.duplicate()
+	loop.append(hex[0])
+	draw_polyline(loop, Color(color, 0.95), 1.4)
+	if energised:
+		draw_circle(center, 2.2, Color(color, 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.008)))
 
 func _draw_hold_arc(center: Vector2, progress: float, color: Color) -> void:
-	var radius := 13.0
-	draw_arc(center, radius, 0.0, TAU, 24, Color(color, 0.22), 1.4)
-	draw_arc(center, radius, -PI * 0.5, -PI * 0.5 + TAU * clampf(progress, 0.0, 1.0), 20, color, 3.0)
+	# Octagonal well matching the control language, with a bright sweeping arc
+	# riding just inside it.
+	var radius := 15.0
+	draw_control_ring(self, center, radius, Color(HUD_VOID, 0.7), Color(color, 0.3), 1.2)
+	draw_arc(center, radius - 3.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(progress, 0.0, 1.0), 24, color, 3.0)
+	draw_tracked_centered(self, center + Vector2(0.0, 4.0), "%d" % int(round(clampf(progress, 0.0, 1.0) * 100.0)), 9, Color(color, 0.9))
 
 static func _format_clock(seconds: float) -> String:
 	var total := maxi(0, int(floor(maxf(seconds, 0.0))))
@@ -826,58 +1105,64 @@ static func _format_clock(seconds: float) -> String:
 	var secs := total % 60
 	return "%d:%02d" % [minutes, secs]
 
+## Squad life. Hung off the two outer flanks of the match bar rather than
+## stacked under it, so it never collides with the core tag and so each team's
+## roster sits on that team's side of the score.
 func _draw_team_life_strip(safe: Rect2, friendly: Color, enemy: Color) -> void:
-	var center := Vector2(size.x * 0.5, safe.position.y + 45.0)
+	var line_y := safe.position.y + 20.0
 	var red_index := 0
 	var blue_index := 0
 	for record in _roster_state:
 		var team := int(record.get("team", -1))
 		var eliminated := bool(record.get("eliminated", false))
 		var is_local_team := team == _roster_local_team
-		var color := friendly if team == int(Duelist.Team.RED) else enemy
-		var slot := red_index if team == int(Duelist.Team.RED) else blue_index
-		var direction := -1.0 if team == int(Duelist.Team.RED) else 1.0
-		var point := center + Vector2(direction * (34.0 + slot * 15.0), 0.0)
+		var is_red := team == int(Duelist.Team.RED)
+		var color := _team_color(team)
+		var slot := red_index if is_red else blue_index
+		var direction := -1.0 if is_red else 1.0
+		var point := Vector2(size.x * 0.5 + direction * (140.0 + slot * 13.0), line_y)
 		_draw_team_marker(point, color, not eliminated, is_local_team)
-		if team == int(Duelist.Team.RED):
+		if is_red:
 			red_index += 1
 		else:
 			blue_index += 1
 
 func _draw_team_marker(center: Vector2, color: Color, living: bool, friendly_marker: bool) -> void:
-	var half_width := 5.0 if friendly_marker else 4.0
-	var height := 5.0 if living else 4.0
-	var chevron := PackedVector2Array([
-		center + Vector2(-half_width, -height),
-		center + Vector2(half_width, 0.0),
-		center + Vector2(-half_width, height),
-	])
+	# A filled bar for a living operator, a hollow stub for a downed one. The
+	# local player's own team gets slightly taller marks so your side of the
+	# fight is the one you read first.
+	var height := 9.0 if friendly_marker else 7.0
+	var slab := Rect2(center - Vector2(4.0, height * 0.5), Vector2(8.0, height))
 	if living:
-		draw_colored_polygon(chevron, Color(color, 0.72))
+		draw_plate(self, slab, Color(color, 0.9), Color(color, 0.98), 3.0, CHAMFER_DIAG, 1.0)
 	else:
-		draw_polyline(chevron, Color(color, 0.72), 1.4)
-		draw_line(center + Vector2(-half_width * 0.5, 0.0), center + Vector2(half_width * 0.5, 0.0), Color("f1f6ff", 0.76), 1.0)
+		draw_plate(self, slab, Color(HUD_VOID, 0.6), Color(color, 0.4), 3.0, CHAMFER_DIAG, 1.0)
+		draw_line(center + Vector2(-3.0, 0.0), center + Vector2(3.0, 0.0), Color(color, 0.55), 1.2)
 
 func _draw_button(key: String, color: Color, active: bool) -> void:
-	var spec: Dictionary = _control_specs()[key]
 	_draw_button_fixed(_control_center(key), _control_radius(key), color, active, key, _control_opacity(key))
 
+## Every touch control is an octagonal machined pad. The polygon's vertices sit
+## exactly on `radius`, which is the same radius the hit tests in
+## `_action_key_at()` / `_pressed_circle()` use, so what is drawn and what is
+## pressable cannot drift apart.
 func _draw_button_fixed(center: Vector2, radius: float, color: Color, active: bool, label: String, opacity: float = 1.0) -> void:
-	var fill_alpha := 0.56 if active else 0.20
-	var outline_alpha := 0.95 if active else 0.34
-	draw_circle(center, radius, Color("071126", fill_alpha * opacity))
-	draw_arc(center, radius, 0.0, TAU, 32, Color(color, outline_alpha * opacity), 2.5 if active else 1.35)
+	var fill := Color(HUD_INK_RAISE if active else HUD_VOID, (0.84 if active else 0.62) * opacity)
+	var edge := Color(color, (0.98 if active else 0.7) * opacity)
+	draw_control_ring(self, center, radius, fill, edge, 2.2 if active else 1.6, 0.55 * opacity)
+	# Inner hairline shoulder: gives the pad a machined bevel instead of a flat
+	# stroked outline, and it is where the "pressed" glow lives.
+	draw_control_ring(self, center, radius - 5.0, Color(0, 0, 0, 0), Color(color, (0.42 if active else 0.16) * opacity), 1.0)
+	if active:
+		draw_control_ring(self, center, radius + 3.0, Color(0, 0, 0, 0), Color(color, 0.28 * opacity), 1.6)
 	if _control_specs().has(label) or label == "reload" or label == "settings" or label == "melee":
 		_draw_control_glyph(center, radius, color, label, active, opacity)
 		return
-	var font := ThemeDB.fallback_font
-	var font_size := 13 if label.length() > 1 else 20
-	var text_width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-	draw_string(font, center + Vector2(-text_width * 0.5, font_size * 0.36), label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(color, 0.98 * opacity))
+	draw_tracked_centered(self, center + Vector2(0.0, 5.0), label.to_upper(), FS_LABEL, Color(color, 0.98 * opacity))
 
 func _draw_control_glyph(center: Vector2, radius: float, color: Color, key: String, active: bool, opacity: float) -> void:
-	var glyph_color := Color(color, (0.98 if active else 0.58) * opacity)
-	var weight := 3.0 if active else 1.8
+	var glyph_color := Color(color, (0.98 if active else 0.76) * opacity)
+	var weight := 2.8 if active else 1.9
 	match key:
 		"left_fire", "right_fire":
 			draw_circle(center, radius * 0.18, glyph_color)
@@ -926,7 +1211,7 @@ func _draw_control_glyph(center: Vector2, radius: float, color: Color, key: Stri
 				var spoke_end := center + Vector2.from_angle(angle) * radius * 0.50
 				draw_line(spoke_start, spoke_end, glyph_color, weight)
 			draw_circle(center, radius * 0.28, glyph_color, false, weight)
-			draw_circle(center, radius * 0.10, Color("071126", 0.72 * opacity))
+			draw_circle(center, radius * 0.10, Color(HUD_VOID, 0.85 * opacity))
 
 func reload_indicator_animates() -> bool:
 	return reload_remaining > 0.0
@@ -948,21 +1233,25 @@ func set_loadout_slots(slots: Array) -> void:
 	_loadout_slots = slots.duplicate()
 	queue_redraw()
 
+## Bottom-right weapon block: the ammunition readout is the headline (a large
+## tracked magazine count with the reserve beside it, the way an actual combat
+## HUD states it), with the loadout slot plates sitting under it as the
+## secondary read. Previously ammunition was only five anonymous pips, which
+## meant the single number a player checks most often was not on screen.
 func _draw_weapon_indicator(color: Color) -> void:
 	var safe := _safe_rect()
 	var center := Vector2(safe.end.x - 170.0, safe.end.y - 74.0)
-	if _loadout_slots.size() == 1:
-		_draw_loadout_plate(center, RiftWeapons.clamp_weapon(int(_loadout_slots[0])) as Duelist.Weapon, color)
-		_draw_magazine_read(center + Vector2(0.0, 30.0), color)
+	var single := _loadout_slots.size() == 1
+	_draw_magazine_read(Vector2(center.x, center.y - 20.0), color)
+	if single:
+		_draw_loadout_plate(center + Vector2(0.0, 26.0), RiftWeapons.clamp_weapon(int(_loadout_slots[0])) as Duelist.Weapon, color)
 		if reload_remaining > 0.0:
-			_draw_reload_sweep(center, 24.0, Color("fff0b0"), reload_progress_for(reload_remaining, float(RiftWeapons.row(int(_weapon)).reload_seconds)))
+			_draw_reload_sweep(Vector2(center.x, center.y - 20.0), 30.0, HUD_SIGNAL, reload_progress_for(reload_remaining, float(RiftWeapons.row(int(_weapon)).reload_seconds)))
 		return
-	_draw_loadout_plate(center - Vector2(48.0, 0.0), RiftWeapons.clamp_weapon(int(_loadout_slots[0])) as Duelist.Weapon, color)
-	_draw_loadout_plate(center + Vector2(48.0, 0.0), RiftWeapons.clamp_weapon(int(_loadout_slots[1])) as Duelist.Weapon, color)
-	var active_offset := Vector2(-48.0, 0.0) if int(_weapon) == RiftWeapons.clamp_weapon(int(_loadout_slots[0])) else Vector2(48.0, 0.0)
-	_draw_magazine_read(center + active_offset + Vector2(0.0, 30.0), color)
+	_draw_loadout_plate(center + Vector2(-40.0, 26.0), RiftWeapons.clamp_weapon(int(_loadout_slots[0])) as Duelist.Weapon, color)
+	_draw_loadout_plate(center + Vector2(40.0, 26.0), RiftWeapons.clamp_weapon(int(_loadout_slots[1])) as Duelist.Weapon, color)
 	if reload_remaining > 0.0:
-		_draw_reload_sweep(center + active_offset, 24.0, Color("fff0b0"), reload_progress_for(reload_remaining, float(RiftWeapons.row(int(_weapon)).reload_seconds)))
+		_draw_reload_sweep(Vector2(center.x, center.y - 20.0), 30.0, HUD_SIGNAL, reload_progress_for(reload_remaining, float(RiftWeapons.row(int(_weapon)).reload_seconds)))
 
 # --- Sight pictures -------------------------------------------------------
 #
@@ -1122,11 +1411,26 @@ func _draw_scope_overlay(center: Vector2, ads: float, reticle_center: Vector2) -
 	# is legible the instant it happens.
 	var target := short_edge * (0.430 if _zoom_index < 1 else 0.335)
 	var radius := lerpf(short_edge * 0.95, target, seated)
-	# One stroked annulus from the circle out past the farthest corner masks
-	# the whole surround in a single call, with no overlapping alpha to seam.
-	var reach := center.length() + 8.0
-	if reach > radius:
-		draw_arc(center, (radius + reach) * 0.5, 0.0, TAU, 96, Color(0.010, 0.018, 0.030, seated), reach - radius)
+	# The picture inside the tube is `Duelist._scope_camera`'s own render, a
+	# real second camera at the zoomed FOV - not the main view zoomed and
+	# masked - so it is drawn as a small square exactly `2*radius` across,
+	# not a full-screen quad. That is what keeps the masking below contained
+	# to the tube's own footprint instead of covering the real, unmagnified
+	# background the main camera is still rendering everywhere else.
+	var picture_rect := Rect2(center - Vector2.ONE * radius, Vector2.ONE * radius * 2.0)
+	if _scope_texture != null:
+		draw_texture_rect(_scope_texture, picture_rect, false, Color(1.0, 1.0, 1.0, seated))
+	else:
+		draw_rect(picture_rect, Color(0.010, 0.018, 0.030, seated))
+	# One stroked annulus from the circle out to the square's own corner
+	# masks exactly the four corner triangles between the ocular circle and
+	# its bounding square - by construction (a circle inscribed in a square
+	# always sits at distance `radius` along each edge midpoint and
+	# `radius * sqrt(2)` at each corner) this never reaches past the square's
+	# own bounds, so nothing outside the tube's footprint is touched and the
+	# real environment keeps showing through everywhere else on screen.
+	var reach := radius * 1.4143
+	draw_arc(center, (radius + reach) * 0.5, 0.0, TAU, 96, Color(0.010, 0.018, 0.030, seated), reach - radius)
 	# Tube wall, the soft shadow a real ocular throws inside the edge, and a
 	# single cold highlight so the rim is not a flat black band.
 	draw_arc(center, radius - 1.0, 0.0, TAU, 96, Color(0.03, 0.05, 0.08, seated), 6.0)
@@ -1178,9 +1482,11 @@ func _draw_scope_reticle(center: Vector2, radius: float, opacity: float) -> void
 ## instead of a generic rectangle.
 func _draw_loadout_plate(center: Vector2, slot: Duelist.Weapon, color: Color) -> void:
 	var held := int(_weapon) == int(slot)
-	var plate_color := color if held else Color("9bb2d1")
-	draw_rect(Rect2(center - Vector2(32.0, 22.0), Vector2(64.0, 44.0)), Color("071126", 0.72), true)
-	draw_rect(Rect2(center - Vector2(32.0, 22.0), Vector2(64.0, 44.0)), Color(plate_color, 0.95 if held else 0.34), false, 2.0 if held else 1.0)
+	var plate_color := HUD_SIGNAL if held else HUD_TEXT_FAINT
+	var rect := Rect2(center - Vector2(36.0, 19.0), Vector2(72.0, 38.0))
+	draw_plate(self, rect, Color(HUD_INK_RAISE if held else HUD_VOID, 0.86), Color(plate_color, 0.9 if held else 0.32), HUD_CUT_SM, CHAMFER_DIAG, 1.4 if held else 1.0)
+	if held:
+		draw_accent_edge(self, Rect2(rect.position, Vector2(rect.size.x, 2.0)), Color(HUD_SIGNAL, 0.95), false, 2.0)
 	match slot:
 		Duelist.Weapon.RIFLE, Duelist.Weapon.SMG:
 			draw_rect(Rect2(center - Vector2(17.0, 4.0), Vector2(30.0, 8.0)), plate_color)
@@ -1199,29 +1505,47 @@ func _draw_loadout_plate(center: Vector2, slot: Duelist.Weapon, color: Color) ->
 			draw_circle(center + Vector2(4.0, -7.0), 6.0, Color("071126", 0.9))
 			draw_arc(center + Vector2(4.0, -7.0), 6.0, 0.0, TAU, 16, plate_color, 1.8)
 
+## Magazine as a real number, reserve as a smaller number behind a divider,
+## plus a graduated depletion strip underneath. The strip is capacity-relative
+## and turns amber then red as the magazine empties, so "reload now" is a
+## colour change and not an arithmetic problem.
 func _draw_magazine_read(center: Vector2, color: Color) -> void:
 	var capacity := int(RiftWeapons.row(int(_weapon)).magazine_size)
 	var reserve_capacity := int(RiftWeapons.row(int(_weapon)).reserve_ammo)
 	var magazine_ratio := clampf(float(magazine_rounds) / float(maxi(1, capacity)), 0.0, 1.0)
-	var filled_segments := ceili(magazine_ratio * 5.0) if magazine_rounds > 0 else 0
-	for index in 5:
-		var segment := Rect2(center + Vector2(-28.0 + index * 12.0, -4.0), Vector2(9.0, 8.0))
-		draw_rect(segment, Color(color, 0.88 if index < filled_segments else 0.14), index < filled_segments)
-		draw_rect(segment, Color(color, 0.56), false, 1.0)
+	var ammo_color := HUD_ALERT if magazine_ratio <= 0.2 else (HUD_SIGNAL if magazine_ratio <= 0.45 else HUD_TEXT)
+	var magazine_text := "%02d" % clampi(magazine_rounds, 0, 99)
+	var magazine_width := tracked_width(hud_font(), magazine_text, FS_DISPLAY, HUD_TRACK_TIGHT)
+	draw_tracked(self, Vector2(center.x - magazine_width - 6.0, center.y + 12.0), magazine_text, FS_DISPLAY, ammo_color, HUD_TRACK_TIGHT)
+	draw_line(Vector2(center.x, center.y - 12.0), Vector2(center.x + 6.0, center.y + 12.0), Color(HUD_EDGE_BRIGHT, 0.8), 1.4)
+	draw_tracked(self, Vector2(center.x + 14.0, center.y - 1.0), "RSV", 9, HUD_TEXT_FAINT)
+	draw_tracked(self, Vector2(center.x + 14.0, center.y + 14.0), "%02d" % clampi(reserve_ammo, 0, 99), FS_SUB, HUD_TEXT_DIM, HUD_TRACK_TIGHT)
+	# Depletion strip. Graduation count is capped by available width so the
+	# marks never collapse into a grey hatch - at 30 rounds they were 4px apart
+	# and read as noise rather than as rounds.
+	var strip := Rect2(Vector2(center.x - magazine_width - 6.0, center.y + 20.0), Vector2(magazine_width + 12.0, 5.0))
+	draw_rect(strip, Color(HUD_VOID, 0.8), true)
+	draw_rect(Rect2(strip.position, Vector2(strip.size.x * magazine_ratio, strip.size.y)), Color(ammo_color, 0.92), true)
+	draw_rect(strip, Color(HUD_EDGE, 0.8), false, 1.0)
+	var graduations := clampi(capacity, 2, maxi(2, int(strip.size.x / 11.0)))
+	for index in range(1, graduations):
+		var mark_x := strip.position.x + strip.size.x * (float(index) / float(graduations))
+		draw_line(Vector2(mark_x, strip.position.y), Vector2(mark_x, strip.end.y), Color(HUD_VOID, 0.9), 1.0)
 	var reserve_ratio := clampf(float(reserve_ammo) / float(maxi(1, reserve_capacity)), 0.0, 1.0)
-	var reserve_blocks := ceili(reserve_ratio * 3.0) if reserve_ammo > 0 else 0
-	for index in 3:
-		var block := Rect2(center + Vector2(-17.0 + index * 12.0, 10.0), Vector2(8.0, 4.0))
-		draw_rect(block, Color("fff0b0", 0.7 if index < reserve_blocks else 0.12), index < reserve_blocks)
-		draw_rect(block, Color("fff0b0", 0.42), false, 1.0)
+	var reserve_track := Rect2(Vector2(center.x + 14.0, center.y + 20.0), Vector2(30.0, 3.0))
+	draw_rect(reserve_track, Color(HUD_VOID, 0.75), true)
+	draw_rect(Rect2(reserve_track.position, Vector2(reserve_track.size.x * reserve_ratio, reserve_track.size.y)), Color(HUD_TEXT_DIM, 0.8), true)
 
 static func reload_progress_for(remaining: float, reload_seconds: float = 2.0) -> float:
 	return clampf(1.0 - remaining / maxf(0.05, reload_seconds), 0.0, 1.0)
 
 func _draw_reload_sweep(center: Vector2, radius: float, color: Color, progress: float) -> void:
 	var phase := clampf(progress, 0.0, 1.0)
-	draw_arc(center, radius + 5.0, -PI * 0.5, -PI * 0.5 + TAU * phase, 24, Color(color, 0.92), 3.0)
-	draw_line(center + Vector2(-radius * 0.42, radius * 0.42), center + Vector2(radius * 0.42, radius * 0.42), Color(color, 0.82), 2.0)
+	draw_arc(center, radius + 5.0, 0.0, TAU, 32, Color(color, 0.18), 3.0)
+	draw_arc(center, radius + 5.0, -PI * 0.5, -PI * 0.5 + TAU * phase, 28, Color(color, 0.95), 3.0)
+	# Leading pip on the sweep head, so a reload reads as running even when the
+	# arc is short.
+	draw_circle(center + Vector2.from_angle(-PI * 0.5 + TAU * phase) * (radius + 5.0), 2.4, Color(color, 0.98))
 
 func _draw_button_preview(key: String, color: Color) -> void:
 	var center := _control_center(key)
@@ -1252,61 +1576,76 @@ func _draw_coach_cue(friendly: Color, enemy: Color) -> void:
 		var pulse := 0.38 + 0.32 * (0.5 + 0.5 * sin(Time.get_ticks_msec() / 180.0))
 		for key in ["left_fire", "right_fire"]:
 			draw_arc(_control_center(key), _control_radius(key) + 10.0, 0.0, TAU, 32, Color(accent, pulse * cue_alpha), 2.0)
-	var rect := Rect2(Vector2(size.x * 0.5 - 190.0, safe.position.y + 62.0), Vector2(380.0, 30.0))
+	# The plate is sized to its message rather than to a fixed 380px, so a short
+	# cue is not a wide slab with a stranded label floating in the middle.
+	var cue_text := str(_coach_display_cue.get("text", "")).to_upper()
+	var plate_width := tracked_width(hud_font(), cue_text, FS_LABEL) + 56.0
+	var rect := Rect2(Vector2(size.x * 0.5 - plate_width * 0.5, safe.position.y + 132.0), Vector2(plate_width, 32.0))
 	if region == "seed":
-		rect = Rect2(Vector2(size.x * 0.5 - 260.0, safe.end.y - 148.0), Vector2(520.0, 30.0))
-	draw_rect(rect, Color("071126", 0.72 * cue_alpha), true)
-	draw_line(rect.position, rect.position + Vector2(rect.size.x, 0), Color(accent, 0.75 * cue_alpha), 1.5)
-	var font := ThemeDB.fallback_font
-	var text := str(_coach_display_cue.get("text", ""))
-	var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-	draw_string(font, rect.get_center() + Vector2(-width * 0.5, 5.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("f1f6ff", 0.95 * cue_alpha))
+		rect = Rect2(Vector2(size.x * 0.5 - plate_width * 0.5, safe.end.y - 148.0), Vector2(plate_width, 32.0))
+	draw_plate(self, rect, Color(HUD_INK, 0.86 * cue_alpha), Color(HUD_EDGE, 0.9 * cue_alpha), HUD_CUT_SM)
+	draw_accent_edge(self, rect, Color(accent, 0.9 * cue_alpha), true, 3.0)
+	draw_tracked_centered(self, rect.get_center() + Vector2(4.0, 5.0), cue_text, FS_LABEL, Color(HUD_TEXT, 0.96 * cue_alpha))
 
 func _draw_match_result() -> void:
 	var accent := _friendly_color() if _match_result_victory else _enemy_color()
 	var card := _match_result_card()
-	draw_rect(Rect2(Vector2.ZERO, size), Color("020612", 0.78))
-	draw_rect(card, Color("0b1730", 0.99))
-	draw_line(card.position, card.position + Vector2(card.size.x, 0), accent, 3.0)
-	var emblem := card.position + Vector2(54, 62)
+	draw_rect(Rect2(Vector2.ZERO, size), Color(HUD_VOID, 0.82))
+	draw_plate(self, card, Color(HUD_INK, 0.99), Color(HUD_EDGE, 0.95), HUD_CUT, CHAMFER_DIAG, 1.2)
+	draw_brackets(self, card.grow(-8.0), Color(accent, 0.55), 18.0, 2.0)
+	draw_accent_edge(self, Rect2(card.position + Vector2(HUD_CUT, 0.0), Vector2(card.size.x - HUD_CUT, 3.0)), Color(accent, 0.95), false, 3.0)
+	# The result emblem sits in its own well, so it reads as a stamped mark
+	# rather than as a shape floating next to the words.
+	var emblem_well := Rect2(card.position + Vector2(28.0, 34.0), Vector2(56.0, 56.0))
+	draw_plate(self, emblem_well, Color(HUD_VOID, 0.7), Color(accent, 0.4), HUD_CUT_SM)
+	var emblem := emblem_well.get_center()
 	if _match_result_victory:
-		var diamond := PackedVector2Array([emblem + Vector2(0, -22), emblem + Vector2(22, 0), emblem + Vector2(0, 22), emblem + Vector2(-22, 0)])
-		draw_colored_polygon(diamond, Color(accent, 0.26))
-		draw_polyline(diamond, Color(accent, 0.96), 2.5)
+		var wreath := PackedVector2Array([emblem + Vector2(0, -18), emblem + Vector2(16, -6), emblem + Vector2(11, 16), emblem + Vector2(-11, 16), emblem + Vector2(-16, -6)])
+		draw_colored_polygon(wreath, Color(accent, 0.2))
+		var wreath_loop := wreath.duplicate()
+		wreath_loop.append(wreath[0])
+		draw_polyline(wreath_loop, Color(accent, 0.96), 2.0)
+		draw_polyline(PackedVector2Array([emblem + Vector2(-7, 1), emblem + Vector2(-2, 7), emblem + Vector2(8, -6)]), Color(accent, 0.98), 2.6)
 	else:
-		draw_circle(emblem, 22.0, Color(accent, 0.2))
-		draw_arc(emblem, 22.0, 0.0, TAU, 24, accent, 2.5)
-		draw_line(emblem + Vector2(-10, -10), emblem + Vector2(10, 10), accent, 2.5)
-		draw_line(emblem + Vector2(10, -10), emblem + Vector2(-10, 10), accent, 2.5)
-	var font := ThemeDB.fallback_font
-	var title := "VICTORY" if _match_result_victory else "DEFEAT"
-	draw_string(font, card.position + Vector2(98, 67), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color("f1f6ff"))
-	draw_string(font, card.position + Vector2(100, 94), "THE RIFT HOLDS" if _match_result_victory else "THE RIFT PUSHES BACK", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(accent, 0.92))
-	draw_string(font, card.position + Vector2(32, 128), "RESET THE DUEL AND TRY A NEW LINE", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("b6c9e8"))
-	draw_rect(_rematch_rect(), Color(accent, 0.16), true)
-	draw_rect(_rematch_rect(), Color(accent, 0.92), false, 1.8)
-	var label := "REMATCH"
-	var label_width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-	draw_string(font, _rematch_rect().get_center() + Vector2(-label_width * 0.5, 6), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, accent)
+		draw_control_ring(self, emblem, 17.0, Color(accent, 0.14), Color(accent, 0.9), 2.0)
+		draw_line(emblem + Vector2(-8, -8), emblem + Vector2(8, 8), Color(accent, 0.96), 2.4)
+		draw_line(emblem + Vector2(8, -8), emblem + Vector2(-8, 8), Color(accent, 0.96), 2.4)
+	var text_x := card.position.x + 104.0
+	draw_tracked(self, Vector2(text_x, card.position.y + 62.0), "VICTORY" if _match_result_victory else "DEFEAT", FS_DISPLAY, HUD_TEXT, 3.0)
+	draw_tracked(self, Vector2(text_x + 2.0, card.position.y + 84.0), "NUCLEAR RUSH // %s" % ("OBJECTIVE HELD" if _match_result_victory else "OBJECTIVE LOST"), FS_MICRO, Color(accent, 0.95))
+	draw_rule(self, card.position + Vector2(28.0, 110.0), card.size.x - 56.0, Color(HUD_EDGE_BRIGHT, 0.8))
+	draw_tracked(self, card.position + Vector2(28.0, 132.0), "FINAL", 9, HUD_TEXT_FAINT)
+	_draw_result_score_row(card.position + Vector2(28.0, 158.0), "RED", _red_score, _team_color(Duelist.Team.RED))
+	_draw_result_score_row(card.position + Vector2(28.0, 186.0), "BLUE", _blue_score, _team_color(Duelist.Team.BLUE))
+	var rematch := _rematch_rect()
+	draw_plate(self, rematch, Color(accent, 0.14), Color(accent, 0.95), HUD_CUT_SM, CHAMFER_DIAG, 1.6)
+	draw_accent_edge(self, rematch, Color(accent, 0.95), true, 3.0)
+	draw_tracked_centered(self, rematch.get_center() + Vector2(4.0, 5.0), "REMATCH", FS_BODY, HUD_TEXT, 2.4)
+
+## One final-score row: team tag, a hairline lane, and the point total set in
+## the team's colour at display weight.
+func _draw_result_score_row(at: Vector2, tag: String, score: int, color: Color) -> void:
+	draw_tracked(self, at, tag, FS_LABEL, Color(color, 0.95))
+	draw_line(Vector2(at.x + 62.0, at.y - 5.0), Vector2(at.x + 150.0, at.y - 5.0), Color(HUD_EDGE, 0.9), 1.0)
+	draw_tracked(self, Vector2(at.x + 160.0, at.y + 3.0), str(score), FS_SUB, Color(color, 0.98), HUD_TRACK_TIGHT)
 
 func _draw_round_beat(title: String, subtitle: String, accent: Color) -> void:
-	var center := size * 0.5 + Vector2(0, 72)
-	var width := 290.0 if title == "READY" else 380.0
-	var rect := Rect2(center - Vector2(width * 0.5, 28), Vector2(width, 56))
-	draw_rect(rect, Color("071126", 0.72))
-	draw_line(rect.position, rect.position + Vector2(rect.size.x, 0), accent, 2.0)
-	var font := ThemeDB.fallback_font
-	var title_width := font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
-	draw_string(font, center + Vector2(-title_width * 0.5, 2), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("f1f6ff"))
-	var subtitle_width := font.get_string_size(subtitle, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-	draw_string(font, center + Vector2(-subtitle_width * 0.5, 20), subtitle, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(accent, 0.9))
+	var center := size * 0.5 + Vector2(0, 84)
+	var width := 290.0 if title == "READY" else 340.0
+	var rect := Rect2(center - Vector2(width * 0.5, 26), Vector2(width, 52))
+	draw_plate(self, rect, Color(HUD_INK, 0.8), Color(HUD_EDGE, 0.85), HUD_CUT_SM)
+	draw_accent_edge(self, Rect2(rect.position + Vector2(HUD_CUT_SM, 0.0), Vector2(rect.size.x - HUD_CUT_SM, 2.0)), Color(accent, 0.9), false, 2.0)
+	draw_tracked_centered(self, center + Vector2(0.0, 0.0), title, FS_SUB, HUD_TEXT, 3.0)
+	draw_tracked_centered(self, center + Vector2(0.0, 18.0), subtitle, FS_MICRO, Color(accent, 0.92))
 
 func _match_result_card() -> Rect2:
 	return Rect2(size * 0.5 - Vector2(260, 130), Vector2(520, 260))
 
 func _rematch_rect() -> Rect2:
 	var card := _match_result_card()
-	return Rect2(card.position + Vector2(140, 174), Vector2(240, 54))
+	# Right-aligned to the card's margin so the action sits on the card's own
+	# grid rather than floating between the score column and the edge.
+	return Rect2(card.position + Vector2(card.size.x - 268.0, 174.0), Vector2(240, 54))
 
 func _pressed_circle(point: Vector2, center: Vector2, radius: float) -> bool:
 	return point.distance_squared_to(center) <= radius * radius
@@ -1361,9 +1700,13 @@ func _settings_control_at(panel: Rect2, point: Vector2) -> String:
 		return "camera_slider"
 	if _ads_track_rect(panel).grow(12.0).has_point(point):
 		return "ads_slider"
-	if Rect2(panel.position + Vector2(24, 188), Vector2(142, 44)).has_point(point):
+	# Aim and gyro used to be hit-tested against two hand-written rectangles
+	# that no longer matched where the grid actually drew them - the exact
+	# drawn-versus-pressable divergence this HUD has a regression suite for.
+	# They now resolve through the same helpers that draw them.
+	if _aim_rect(panel).has_point(point):
 		return "aim_chip"
-	if Rect2(panel.position + Vector2(184, 188), Vector2(142, 44)).has_point(point):
+	if _gyro_rect(panel).has_point(point):
 		return "gyro_chip"
 	if _effects_rect(panel).has_point(point):
 		return "effects_chip"
@@ -1382,10 +1725,10 @@ func _settings_control_at(panel: Rect2, point: Vector2) -> String:
 	return ""
 
 func _camera_track_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(154, 108), Vector2(panel.size.x - 190, 24))
+	return Rect2(panel.position + Vector2(154, 114), Vector2(panel.size.x - 220, 24))
 
 func _ads_track_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(154, 154), Vector2(panel.size.x - 190, 24))
+	return Rect2(panel.position + Vector2(154, 136), Vector2(panel.size.x - 220, 24))
 
 ## Applied exactly once, on the down event that captured `control`.  Sliders
 ## take their value from the touch point; chips and action buttons fire here
@@ -1461,111 +1804,164 @@ func _apply_ads_sensitivity(point: Vector2, panel: Rect2) -> void:
 	ads_sensitivity = next
 	_save_control_settings()
 
-func _draw_settings_panel(friendly: Color, enemy: Color) -> void:
+func _draw_settings_panel(friendly: Color, _enemy: Color) -> void:
 	var panel := _settings_panel()
-	draw_rect(Rect2(Vector2.ZERO, size), Color("020612", 0.68))
-	draw_rect(panel, Color("0b1730", 0.98))
-	draw_line(panel.position, panel.position + Vector2(panel.size.x, 0), friendly, 2.0)
-	var font := ThemeDB.fallback_font
-	draw_string(font, panel.position + Vector2(24, 34), "COMBAT SETTINGS", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("f1f6ff"))
-	draw_string(font, panel.position + Vector2(24, 68), "VIEW", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, enemy)
-	_draw_view_slider(_view_track_rect(panel), friendly)
-	draw_string(font, panel.position + Vector2(24, 111), "CAMERA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, enemy)
-	draw_string(font, panel.position + Vector2(24, 157), "ADS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, enemy)
-	_draw_setting_slider(_camera_track_rect(panel).position, panel.size.x - 190, camera_sensitivity, friendly)
-	_draw_setting_slider(_ads_track_rect(panel).position, panel.size.x - 190, ads_sensitivity, friendly)
-	draw_string(font, panel.position + Vector2(24, SETTINGS_TOGGLES_TOP - SETTINGS_LABEL_GAP), "CONTROLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("92a7c7"))
-	_draw_setting_chip(_aim_rect(panel), "AIM %s" % ("TAP" if _aim_toggle else "HOLD"), friendly, _aim_toggle)
-	_draw_setting_chip(_gyro_rect(panel), "GYRO %s" % ("ON" if gyro_enabled else "OFF"), Color("c292ff"), gyro_enabled)
-	_draw_setting_chip(_effects_rect(panel), "EFFECTS %s" % ("ON" if effects_enabled else "OFF"), friendly, effects_enabled)
-	_draw_setting_chip(_stick_mode_rect(panel), "STICK %s" % ("FLOAT" if _stick_mode == MobileTouchRouter.StickMode.FLOATING else "FIXED"), friendly, _stick_mode == MobileTouchRouter.StickMode.FLOATING)
-	_draw_setting_chip(_ads_look_rect(panel), "ADS LOOK %s" % ("ON" if ads_button_look else "OFF"), Color("c292ff"), ads_button_look)
-	draw_string(font, panel.position + Vector2(24, _settings_actions_top() - SETTINGS_LABEL_GAP), "ACTIONS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("92a7c7"))
-	_draw_setting_chip(_hud_layout_rect(panel), "HUD LAYOUT", enemy, true)
-	_draw_setting_chip(_rift_link_rect(panel), "RIFT LINK", Color("71cfff"), false)
-	_draw_setting_chip(_reset_training_rect(panel), "RESET TRAINING", Color("e57c70"), false)
-	_draw_setting_chip(_main_menu_rect(panel), "MAIN MENU", Color("e57c70"), false)
-	draw_string(font, panel.position + Vector2(24, panel.size.y - 22), "Tap outside to return", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("92a7c7"))
+	draw_rect(Rect2(Vector2.ZERO, size), Color(HUD_VOID, 0.74))
+	draw_plate(self, panel, Color(HUD_INK, 0.99), Color(HUD_EDGE, 0.95), HUD_CUT, CHAMFER_DIAG, 1.2)
+	draw_brackets(self, panel.grow(-7.0), Color(HUD_EDGE_BRIGHT, 0.5), 16.0, 1.6)
+	# Header band: title left, a technical system tag right, one rule under.
+	draw_accent_edge(self, Rect2(panel.position + Vector2(HUD_CUT, 0.0), Vector2(panel.size.x - HUD_CUT, 3.0)), Color(HUD_SIGNAL, 0.9), false, 3.0)
+	draw_tracked(self, panel.position + Vector2(24, 40), "COMBAT SETTINGS", FS_TITLE, HUD_TEXT, 2.6)
+	var tag := "OPERATOR // %s" % ("RED" if _roster_local_team == int(Duelist.Team.RED) else "BLUE")
+	draw_tracked(self, panel.position + Vector2(panel.size.x - 24.0 - tracked_width(hud_font(), tag, FS_MICRO), 38.0), tag, FS_MICRO, Color(friendly, 0.9))
+	draw_rule(self, panel.position + Vector2(24, 54), panel.size.x - 48.0, Color(HUD_EDGE_BRIGHT, 0.8))
 
-func _draw_setting_slider(position: Vector2, width: float, value: float, color: Color) -> void:
-	draw_line(position, position + Vector2(width, 0), Color("233b64"), 5.0)
-	var normalized := (value - 0.3) / 1.4
-	draw_line(position, position + Vector2(width * normalized, 0), color, 5.0)
-	draw_circle(position + Vector2(width * normalized, 0), 9.0, color)
+	_draw_settings_section(panel, 68.0, "AIM // OPTICS")
+	_draw_view_slider(_view_track_rect(panel), HUD_SIGNAL)
+	_draw_setting_slider(_camera_track_rect(panel), camera_sensitivity, HUD_SIGNAL, "CAMERA", "%.2f" % camera_sensitivity)
+	_draw_setting_slider(_ads_track_rect(panel), ads_sensitivity, HUD_SIGNAL, "ADS", "%.2f" % ads_sensitivity)
+
+	_draw_settings_section(panel, SETTINGS_TOGGLES_TOP - SETTINGS_LABEL_GAP, "CONTROLS")
+	_draw_setting_chip(_aim_rect(panel), "AIM", "TAP" if _aim_toggle else "HOLD", _aim_toggle)
+	_draw_setting_chip(_gyro_rect(panel), "GYRO", "ON" if gyro_enabled else "OFF", gyro_enabled)
+	_draw_setting_chip(_effects_rect(panel), "EFFECTS", "ON" if effects_enabled else "OFF", effects_enabled)
+	_draw_setting_chip(_stick_mode_rect(panel), "STICK", "FLOAT" if _stick_mode == MobileTouchRouter.StickMode.FLOATING else "FIXED", _stick_mode == MobileTouchRouter.StickMode.FLOATING)
+	_draw_setting_chip(_ads_look_rect(panel), "ADS LOOK", "ON" if ads_button_look else "OFF", ads_button_look)
+
+	_draw_settings_section(panel, _settings_actions_top() - SETTINGS_LABEL_GAP, "ACTIONS")
+	_draw_setting_action(_hud_layout_rect(panel), "HUD LAYOUT", HUD_SIGNAL)
+	_draw_setting_action(_rift_link_rect(panel), "RIFT LINK", HUD_EDGE_BRIGHT)
+	_draw_setting_action(_reset_training_rect(panel), "RESET TRAINING", HUD_ALERT)
+	_draw_setting_action(_main_menu_rect(panel), "MAIN MENU", HUD_ALERT)
+	draw_tracked(self, panel.position + Vector2(24, panel.size.y - 20), "TAP OUTSIDE TO RETURN", FS_MICRO, HUD_TEXT_FAINT)
+
+func _draw_settings_section(panel: Rect2, top: float, label: String) -> void:
+	draw_tracked(self, panel.position + Vector2(24, top), label, FS_MICRO, HUD_TEXT_FAINT)
+	var offset := tracked_width(hud_font(), label, FS_MICRO) + 12.0
+	draw_line(panel.position + Vector2(24 + offset, top - 4.0), panel.position + Vector2(panel.size.x - 24.0, top - 4.0), Color(HUD_EDGE, 0.9), 1.0)
+
+## Slider rows are a labelled well with a machined fill and a chamfered thumb,
+## with the live numeric value right-aligned - the old rows were a bare 5px
+## line and a circle, with the value invisible.
+func _draw_setting_slider(track: Rect2, value: float, color: Color, label: String, readout: String) -> void:
+	var mid := track.position.y + track.size.y * 0.5
+	draw_tracked(self, Vector2(track.position.x - 130.0, mid + 5.0), label, FS_LABEL, HUD_TEXT_DIM)
+	var normalized := clampf((value - 0.3) / 1.4, 0.0, 1.0)
+	var well := Rect2(Vector2(track.position.x, mid - 3.0), Vector2(track.size.x, 6.0))
+	draw_rect(well, Color(HUD_VOID, 0.85), true)
+	draw_rect(Rect2(well.position, Vector2(well.size.x * normalized, well.size.y)), Color(color, 0.85), true)
+	draw_rect(well, Color(HUD_EDGE, 0.9), false, 1.0)
+	_draw_slider_thumb(Vector2(track.position.x + track.size.x * normalized, mid), color)
+	draw_tracked(self, Vector2(track.end.x + 10.0, mid + 5.0), readout, FS_MICRO, Color(color, 0.95), HUD_TRACK_TIGHT)
+
+func _draw_slider_thumb(center: Vector2, color: Color) -> void:
+	var thumb := Rect2(center - Vector2(6.0, 11.0), Vector2(12.0, 22.0))
+	draw_plate(self, thumb, Color(HUD_INK_RAISE, 0.98), Color(color, 0.98), 4.0, CHAMFER_DIAG, 1.6)
+	draw_line(center + Vector2(0.0, -5.0), center + Vector2(0.0, 5.0), Color(color, 0.9), 1.4)
 
 func _view_track_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(154, 65), Vector2(panel.size.x - 190, 24))
+	return Rect2(panel.position + Vector2(154, 76), Vector2(panel.size.x - 220, 24))
 
 func _view_from_point(point_x: float, track_x: float) -> float:
 	return clampf(Duelist.MIN_HORIZONTAL_FOV + ((point_x - track_x) / maxf(1.0, _view_track_rect(_settings_panel()).size.x)) * (Duelist.MAX_HORIZONTAL_FOV - Duelist.MIN_HORIZONTAL_FOV), Duelist.MIN_HORIZONTAL_FOV, Duelist.MAX_HORIZONTAL_FOV)
 
 func _draw_view_slider(rect: Rect2, color: Color) -> void:
-	var normalized := inverse_lerp(Duelist.MIN_HORIZONTAL_FOV, Duelist.MAX_HORIZONTAL_FOV, horizontal_fov)
-	draw_line(rect.position + Vector2(0, rect.size.y * 0.5), rect.end - Vector2(0, rect.size.y * 0.5), Color("233b64"), 5.0)
-	draw_line(rect.position + Vector2(0, rect.size.y * 0.5), rect.position + Vector2(rect.size.x * normalized, rect.size.y * 0.5), color, 5.0)
-	draw_circle(rect.position + Vector2(rect.size.x * normalized, rect.size.y * 0.5), 9.0, color)
-	var font := ThemeDB.fallback_font
-	for mark in [{"x": 0.0, "label": "TIGHT"}, {"x": 0.5, "label": "STANDARD"}, {"x": 1.0, "label": "WIDE"}]:
-		var x := rect.position.x + rect.size.x * float(mark.x)
-		var label := str(mark.label)
-		var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		draw_string(font, Vector2(x - width * 0.5, rect.position.y + 22), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("92a7c7"))
+	var mid := rect.position.y + rect.size.y * 0.5
+	var normalized := clampf(inverse_lerp(Duelist.MIN_HORIZONTAL_FOV, Duelist.MAX_HORIZONTAL_FOV, horizontal_fov), 0.0, 1.0)
+	draw_tracked(self, Vector2(rect.position.x - 130.0, mid + 5.0), "VIEW", FS_LABEL, HUD_TEXT_DIM)
+	var well := Rect2(Vector2(rect.position.x, mid - 3.0), Vector2(rect.size.x, 6.0))
+	draw_rect(well, Color(HUD_VOID, 0.85), true)
+	draw_rect(Rect2(well.position, Vector2(well.size.x * normalized, well.size.y)), Color(color, 0.85), true)
+	draw_rect(well, Color(HUD_EDGE, 0.9), false, 1.0)
+	for mark in [0.0, 0.5, 1.0]:
+		var tick_x: float = rect.position.x + rect.size.x * mark
+		draw_line(Vector2(tick_x, mid + 6.0), Vector2(tick_x, mid + 11.0), Color(HUD_EDGE_BRIGHT, 0.8), 1.0)
+	_draw_slider_thumb(Vector2(rect.position.x + rect.size.x * normalized, mid), color)
+	draw_tracked(self, Vector2(rect.end.x + 10.0, mid + 5.0), "%d°" % int(round(horizontal_fov)), FS_MICRO, Color(color, 0.95), HUD_TRACK_TIGHT)
+	for mark in [{"x": 0.0, "label": "TIGHT"}, {"x": 0.5, "label": "STD"}, {"x": 1.0, "label": "WIDE"}]:
+		draw_tracked_centered(self, Vector2(rect.position.x + rect.size.x * float(mark.x), mid + 22.0), str(mark.label), 9, HUD_TEXT_FAINT, HUD_TRACK_TIGHT)
 
-func _draw_setting_chip(rect: Rect2, text: String, color: Color, active: bool) -> void:
-	draw_rect(rect, Color(color, 0.18 if active else 0.07), true)
-	draw_rect(rect, Color(color, 0.86), false, 1.4)
-	var font := ThemeDB.fallback_font
-	var text_width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-	draw_string(font, rect.get_center() + Vector2(-text_width * 0.5, 5.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, color)
+## A toggle chip: label on the left, current value on the right, and a status
+## bar down the leading edge that is lit when the option is on. The value is
+## therefore readable without parsing "EFFECTS ON" as one run of text, and an
+## off state is genuinely dimmer rather than the same brightness.
+func _draw_setting_chip(rect: Rect2, label: String, value: String, active: bool) -> void:
+	var accent := HUD_SIGNAL if active else HUD_TEXT_FAINT
+	draw_plate(self, rect, Color(HUD_INK_RAISE if active else HUD_VOID, 0.85), Color(accent, 0.75 if active else 0.4), HUD_CUT_SM, CHAMFER_DIAG, 1.2)
+	draw_accent_edge(self, rect, Color(accent, 0.95 if active else 0.35), true, 3.0)
+	draw_tracked(self, rect.position + Vector2(16.0, rect.size.y * 0.5 + 5.0), label, FS_LABEL, HUD_TEXT if active else HUD_TEXT_DIM)
+	var value_width := tracked_width(hud_font(), value, FS_LABEL)
+	draw_tracked(self, Vector2(rect.end.x - 14.0 - value_width, rect.position.y + rect.size.y * 0.5 + 5.0), value, FS_LABEL, Color(accent, 0.98))
+
+## An action chip. Distinct from a toggle: no value column, a leading chevron,
+## and destructive actions carry the alert colour on the edge only.
+func _draw_setting_action(rect: Rect2, label: String, accent: Color) -> void:
+	draw_plate(self, rect, Color(HUD_VOID, 0.7), Color(accent, 0.62), HUD_CUT_SM, CHAMFER_DIAG, 1.2)
+	var mid := rect.position.y + rect.size.y * 0.5
+	draw_polyline(PackedVector2Array([
+		Vector2(rect.position.x + 14.0, mid - 5.0),
+		Vector2(rect.position.x + 20.0, mid),
+		Vector2(rect.position.x + 14.0, mid + 5.0),
+	]), Color(accent, 0.95), 1.8)
+	draw_tracked(self, Vector2(rect.position.x + 30.0, mid + 5.0), label, FS_LABEL, HUD_TEXT)
 
 func _draw_layout_editor() -> void:
 	var friendly := _friendly_color()
-	var enemy := _enemy_color()
-	draw_rect(Rect2(Vector2.ZERO, size), Color("020612", 0.62))
+	draw_rect(Rect2(Vector2.ZERO, size), Color(HUD_VOID, 0.72))
 	var safe := _safe_rect()
+	# Calibration grid: minor rules every 32px, a brighter rule every fourth,
+	# so the snap pitch is legible instead of a uniform haze of lines.
+	var minor := 0
 	for x in range(int(safe.position.x), int(safe.end.x) + 1, 32):
-		draw_line(Vector2(x, safe.position.y), Vector2(x, safe.end.y), Color("8ea8cf", 0.11), 1.0)
+		draw_line(Vector2(x, safe.position.y), Vector2(x, safe.end.y), Color(HUD_EDGE_BRIGHT, 0.22 if minor % 4 == 0 else 0.09), 1.0)
+		minor += 1
+	minor = 0
 	for y in range(int(safe.position.y), int(safe.end.y) + 1, 32):
-		draw_line(Vector2(safe.position.x, y), Vector2(safe.end.x, y), Color("8ea8cf", 0.11), 1.0)
-	draw_rect(safe, Color(enemy, 0.44), false, 2.0)
-	var font := ThemeDB.fallback_font
-	draw_string(font, safe.position + Vector2(12, 26), "HUD LAYOUT", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("f1f6ff"))
-	draw_string(font, safe.position + Vector2(12, 48), "Select a control, then drag to place", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("b6c9e8"))
+		draw_line(Vector2(safe.position.x, y), Vector2(safe.end.x, y), Color(HUD_EDGE_BRIGHT, 0.22 if minor % 4 == 0 else 0.09), 1.0)
+		minor += 1
+	draw_brackets(self, safe, Color(HUD_SIGNAL, 0.7), 26.0, 2.0)
+	draw_tracked(self, safe.position + Vector2(14, 28), "HUD LAYOUT", FS_TITLE, HUD_TEXT, 2.6)
+	draw_tracked(self, safe.position + Vector2(15, 46), "SELECT A CONTROL, THEN DRAG TO PLACE", FS_MICRO, HUD_TEXT_DIM)
 	for key in MOVABLE_KEYS:
-		_draw_editor_control(key, friendly if key in ["move", "left_fire", "right_fire", "crouch", "prone"] else enemy)
+		_draw_editor_control(key, friendly if key in ["move", "left_fire", "right_fire", "crouch", "prone"] else HUD_TEXT_DIM)
 	var panel := _editor_panel()
-	draw_rect(panel, Color("0b1730", 0.98))
-	draw_line(panel.position, panel.position + Vector2(panel.size.x, 0), friendly, 2.0)
-	var selected_label := "SELECT A CONTROL" if _selected_layout_key.is_empty() else str(_control_specs()[_selected_layout_key].label)
-	draw_string(font, panel.position + Vector2(20, 25), selected_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, enemy)
-	draw_string(font, panel.position + Vector2(170, 25), "GRID LOCK", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("92a7c7"))
-	_draw_setting_chip(_editor_button_rect("size_down"), "SIZE -", friendly, false)
-	_draw_setting_chip(_editor_button_rect("size_up"), "SIZE +", friendly, false)
-	_draw_setting_chip(_editor_button_rect("opacity_down"), "FADE -", Color("c292ff"), false)
-	_draw_setting_chip(_editor_button_rect("opacity_up"), "FADE +", Color("c292ff"), false)
-	_draw_setting_chip(_editor_button_rect("two_thumb"), "TWO THUMB", enemy, false)
-	_draw_setting_chip(_editor_button_rect("four_finger"), "FOUR FINGER", enemy, false)
-	_draw_setting_chip(_editor_button_rect("reset"), "RESET", Color("e57c70"), false)
-	_draw_setting_chip(_editor_button_rect("done"), "DONE", friendly, true)
+	draw_plate(self, panel, Color(HUD_INK, 0.98), Color(HUD_EDGE, 0.95), HUD_CUT, CHAMFER_DIAG, 1.2)
+	draw_accent_edge(self, Rect2(panel.position + Vector2(HUD_CUT, 0.0), Vector2(panel.size.x - HUD_CUT, 3.0)), Color(HUD_SIGNAL, 0.9), false, 3.0)
+	var selected_label := "NO CONTROL SELECTED" if _selected_layout_key.is_empty() else str(_control_specs()[_selected_layout_key].label)
+	draw_tracked(self, panel.position + Vector2(20, 28), selected_label, FS_SUB, HUD_SIGNAL if not _selected_layout_key.is_empty() else HUD_TEXT_FAINT, 2.2)
+	draw_tracked(self, panel.position + Vector2(panel.size.x - 96.0, 27), "GRID LOCK 8", FS_MICRO, HUD_TEXT_FAINT)
+	_draw_editor_chip(_editor_button_rect("size_down"), "SIZE -", HUD_TEXT_DIM, false)
+	_draw_editor_chip(_editor_button_rect("size_up"), "SIZE +", HUD_TEXT_DIM, false)
+	_draw_editor_chip(_editor_button_rect("opacity_down"), "FADE -", HUD_TEXT_DIM, false)
+	_draw_editor_chip(_editor_button_rect("opacity_up"), "FADE +", HUD_TEXT_DIM, false)
+	_draw_editor_chip(_editor_button_rect("two_thumb"), "TWO THUMB", HUD_TEXT_DIM, false)
+	_draw_editor_chip(_editor_button_rect("four_finger"), "FOUR FINGER", HUD_TEXT_DIM, false)
+	_draw_editor_chip(_editor_button_rect("reset"), "RESET", HUD_ALERT, false)
+	_draw_editor_chip(_editor_button_rect("done"), "DONE", HUD_SIGNAL, true)
+
+func _draw_editor_chip(rect: Rect2, label: String, accent: Color, primary: bool) -> void:
+	draw_plate(self, rect, Color(HUD_INK_RAISE if primary else HUD_VOID, 0.85), Color(accent, 0.9 if primary else 0.45), HUD_CUT_SM, CHAMFER_DIAG, 1.4 if primary else 1.0)
+	if primary:
+		draw_accent_edge(self, rect, Color(accent, 0.95), true, 3.0)
+	draw_tracked_centered(self, rect.get_center() + Vector2(2.0 if primary else 0.0, 5.0), label, FS_LABEL, HUD_TEXT if primary else HUD_TEXT_DIM)
 
 func _draw_editor_control(key: String, color: Color) -> void:
 	var center := _control_center(key)
 	var radius := _control_radius(key)
 	var opacity := _control_opacity(key)
 	var spec: Dictionary = _control_specs()[key]
+	var selected := key == _selected_layout_key
 	if key == "move":
-		draw_circle(center, radius, Color("08142a", 0.5 * opacity))
-		draw_arc(center, radius, 0.0, TAU, 32, Color(color, 0.82 * opacity), 2.0)
+		draw_circle(center, radius, Color(HUD_VOID, 0.55 * opacity))
+		draw_arc(center, radius, 0.0, TAU, 40, Color(color, 0.85 * opacity), 1.6)
 	else:
-		draw_circle(center, radius, Color("071126", 0.62 * opacity))
-		draw_arc(center, radius, 0.0, TAU, 32, Color(color, 0.9 * opacity), 2.2)
-	var font := ThemeDB.fallback_font
-	var label := "MOVE" if key == "move" else str(spec.label)
-	var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-	draw_string(font, center + Vector2(-width * 0.5, 5), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(color, opacity))
-	if key == _selected_layout_key:
-		draw_arc(center, radius + 8.0, 0.0, TAU, 40, Color("f1f6ff", 0.95), 3.0)
-		draw_circle(center, 4.0, Color("f1f6ff"))
+		draw_control_ring(self, center, radius, Color(HUD_VOID, 0.62 * opacity), Color(color, 0.9 * opacity), 1.6)
+	draw_tracked_centered(self, center + Vector2(0.0, 5.0), str(spec.label), FS_LABEL, Color(color, opacity))
+	if selected:
+		draw_control_ring(self, center, radius + 7.0, Color(0, 0, 0, 0), Color(HUD_SIGNAL, 0.95), 2.4)
+		draw_brackets(self, Rect2(center - Vector2(radius + 13.0, radius + 13.0), Vector2(radius + 13.0, radius + 13.0) * 2.0), Color(HUD_SIGNAL, 0.85), 12.0, 2.0)
+		draw_line(center - Vector2(6.0, 0.0), center + Vector2(6.0, 0.0), Color(HUD_SIGNAL, 0.95), 1.6)
+		draw_line(center - Vector2(0.0, 6.0), center + Vector2(0.0, 6.0), Color(HUD_SIGNAL, 0.95), 1.6)
 
 func _handle_editor_touch(index: int, point: Vector2, pressed: bool) -> void:
 	if not pressed:
@@ -1669,7 +2065,7 @@ func _editor_button_rect(button: String) -> Rect2:
 func _settings_panel() -> Rect2:
 	var safe := _safe_rect()
 	var width := clampf(safe.size.x * 0.72, 520.0, 760.0)
-	var height := clampf(safe.size.y * 0.82, 540.0, 620.0)
+	var height := clampf(safe.size.y * 0.82, 500.0, 560.0)
 	return Rect2(safe.get_center() - Vector2(width, height) * 0.5, Vector2(width, height))
 
 ## A consistent 2-column grid shared by every toggle and action chip, so
@@ -1677,11 +2073,14 @@ func _settings_panel() -> Rect2:
 ## under the same margins and every chip in a column shares the same width.
 const SETTINGS_GRID_MARGIN := 24.0
 const SETTINGS_GRID_GAP := 10.0
-const SETTINGS_CHIP_HEIGHT := 42.0
-const SETTINGS_ROW_PITCH := 50.0
-const SETTINGS_TOGGLES_TOP := 212.0
-const SETTINGS_SECTION_GAP := 20.0
-const SETTINGS_LABEL_GAP := 18.0
+const SETTINGS_CHIP_HEIGHT := 44.0
+const SETTINGS_ROW_PITCH := 52.0
+# 190 is not arbitrary: the toggle grid's first row must still contain the
+# aim-chip point the settings touch-capture regression test presses, which is
+# 22px below y+188 relative to the panel. Row 0 therefore spans 190..234.
+const SETTINGS_TOGGLES_TOP := 190.0
+const SETTINGS_SECTION_GAP := 22.0
+const SETTINGS_LABEL_GAP := 12.0
 
 func _settings_grid_rect(panel: Rect2, top: float, col: int, row: int) -> Rect2:
 	var content_width := panel.size.x - SETTINGS_GRID_MARGIN * 2.0
