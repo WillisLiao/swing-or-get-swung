@@ -5,6 +5,8 @@ Read this fully before doing anything else, then read `handoffs/HANDOFF.md` for 
 
 **Run this session after `handoffs/NEXT-SESSION-weapons-and-loadouts.md` is done and merged, not before or in parallel with it - see "Sequencing" below.**
 
+**Update (2026-08-07):** the five weapon models, their sights (reflex/iron sights per weapon, a real sniper scope with two visually distinct zoom stages), and first-person shield visibility have already been redesigned via `/sonnet-opus` - see `devlogs/2026-08-07.md`, "Fifth session." Weapon *geometry and sight design* are done; this session no longer needs to touch that. What's still open and still this session's job: character materials (`duelist.gd`'s body/silhouette meshes are still on `pulp_lit`, not `nuclear_pbr`) and the full HUD/UI visual pass (colors, typography, iconography, panel treatment - the weapons session only added reticles/scope overlay in the HUD's existing hand-drawn style, it did not restyle it).
+
 ## Suggested prompt to paste after `/sonnet-opus`
 
 > Implement the full art, material, and UI redesign recorded in `handoffs/NEXT-SESSION-art-ui-redesign.md`.

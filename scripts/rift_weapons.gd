@@ -9,6 +9,20 @@ extends RefCounted
 ## drift between machines and a preloaded `Resource` is a shared mutable
 ## object; a `const` table in a script is version-locked with the code itself.
 ##
+## `optic_tip_local` and `ads_anchor` are the only two cosmetic/calibration
+## fields here, and they are bound by one invariant:
+##
+##   ads_anchor.x == 0  and  optic_tip_local.x == 0
+##   ads_anchor.y + optic_tip_local.y * Duelist.FIRST_PERSON_WEAPON_SCALE == 0
+##
+## `ads_anchor` is where the weapon root sits in camera space while aiming and
+## `optic_tip_local` is the sight's optical center within the model, so that
+## sum is the sight's offset from the eye. Driving it to exactly zero is what
+## puts the sight picture on the crosshair; every weapon except the carbine
+## used to miss it by enough to sit the sights visibly low on the reticle.
+## `Duelist.optic_tip_head_offset()` reads the same sum for the ADS shot
+## origin, so the bullet always leaves the point the player is looking through.
+##
 ## Accuracy fields are half-angle cone radians, additive, and composed as:
 ##   hip = hip_base + hip_move*speed_t + hip_air*(airborne) - hip_crouch*(crouched) + hip_bloom_step*bloom
 ##   ads = ads_base + ads_move*speed_t + ads_air*(airborne) - ads_crouch*(crouched) + ads_bloom_step*bloom
@@ -32,7 +46,7 @@ const TABLE := {
 		"pellets": 1, "pattern": "disc",
 		"fire_interval": 0.086, "magazine_size": 30, "reserve_ammo": 90, "reload_seconds": 2.0,
 		"ads_seconds": 0.22, "zoom_steps": [1.5],
-		"optic_tip_local": Vector3(0.0, 0.295, -1.06), "ads_anchor": Vector3(0.0, -0.1121, -0.96),
+		"optic_tip_local": Vector3(0.0, 0.305, -0.22), "ads_anchor": Vector3(0.0, -0.11590, -0.82),
 		"hip_forward": 1.0, "hip_strafe": 0.76, "ads_move_scale": 0.82,
 		"hip_base": 0.021, "hip_move": 0.020, "hip_air": 0.045, "hip_crouch": 0.006, "hip_bloom_step": 0.0055,
 		"ads_base": 0.0026, "ads_move": 0.013, "ads_air": 0.055, "ads_crouch": 0.0012, "ads_bloom_step": 0.0022,
@@ -46,7 +60,7 @@ const TABLE := {
 		"pellets": 1, "pattern": "disc",
 		"fire_interval": 0.063, "magazine_size": 32, "reserve_ammo": 128, "reload_seconds": 1.7,
 		"ads_seconds": 0.16, "zoom_steps": [1.25],
-		"optic_tip_local": Vector3(0.0, 0.26, -0.82), "ads_anchor": Vector3(0.0, -0.108, -0.78),
+		"optic_tip_local": Vector3(0.0, 0.291, -0.18), "ads_anchor": Vector3(0.0, -0.11058, -0.76),
 		"hip_forward": 1.08, "hip_strafe": 0.88, "ads_move_scale": 0.88,
 		"hip_base": 0.016, "hip_move": 0.008, "hip_air": 0.040, "hip_crouch": 0.004, "hip_bloom_step": 0.0075,
 		"ads_base": 0.0055, "ads_move": 0.010, "ads_air": 0.048, "ads_crouch": 0.0020, "ads_bloom_step": 0.0055,
@@ -60,7 +74,7 @@ const TABLE := {
 		"pellets": 9, "pattern": "rosette",
 		"fire_interval": 0.85, "magazine_size": 6, "reserve_ammo": 24, "reload_seconds": 2.6,
 		"ads_seconds": 0.24, "zoom_steps": [1.15],
-		"optic_tip_local": Vector3(0.0, 0.24, -0.88), "ads_anchor": Vector3(0.0, -0.115, -0.88),
+		"optic_tip_local": Vector3(0.0, 0.176, -0.50), "ads_anchor": Vector3(0.0, -0.06688, -0.82),
 		"hip_forward": 0.94, "hip_strafe": 0.72, "ads_move_scale": 0.78,
 		"hip_base": 0.055, "hip_move": 0.012, "hip_air": 0.030, "hip_crouch": 0.006, "hip_bloom_step": 0.0060,
 		"ads_base": 0.032, "ads_move": 0.010, "ads_air": 0.030, "ads_crouch": 0.0060, "ads_bloom_step": 0.0050,
@@ -74,7 +88,7 @@ const TABLE := {
 		"pellets": 1, "pattern": "disc",
 		"fire_interval": 0.14, "magazine_size": 12, "reserve_ammo": 60, "reload_seconds": 1.45,
 		"ads_seconds": 0.14, "zoom_steps": [1.1],
-		"optic_tip_local": Vector3(0.0, 0.20, -0.58), "ads_anchor": Vector3(0.0, -0.09, -0.62),
+		"optic_tip_local": Vector3(0.0, 0.170, -0.08), "ads_anchor": Vector3(0.0, -0.06460, -0.62),
 		"hip_forward": 1.12, "hip_strafe": 0.92, "ads_move_scale": 0.90,
 		"hip_base": 0.012, "hip_move": 0.016, "hip_air": 0.038, "hip_crouch": 0.004, "hip_bloom_step": 0.0100,
 		"ads_base": 0.0022, "ads_move": 0.010, "ads_air": 0.044, "ads_crouch": 0.0010, "ads_bloom_step": 0.0070,
@@ -92,7 +106,7 @@ const TABLE := {
 		# felt ADS time rather than an instant snap. These are tuned to that
 		# feel, not a literal citation of Halo's own numbers.
 		"ads_seconds": 0.38, "zoom_steps": [3.0, 6.0],
-		"optic_tip_local": Vector3(0.0, 0.30, -1.3), "ads_anchor": Vector3(0.0, -0.12, -1.05),
+		"optic_tip_local": Vector3(0.0, 0.344, -0.40), "ads_anchor": Vector3(0.0, -0.13072, -0.80),
 		"hip_forward": 0.88, "hip_strafe": 0.66, "ads_move_scale": 0.55,
 		"hip_base": 0.085, "hip_move": 0.030, "hip_air": 0.050, "hip_crouch": 0.010, "hip_bloom_step": 0.0200,
 		# Explicit design requirement: no ADS drift/sway. Every ads_* term is

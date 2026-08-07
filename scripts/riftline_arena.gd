@@ -239,6 +239,7 @@ func _physics_process(delta: float) -> void:
 	_tick_authority_ballistics(delta)
 	hud.set_stance(_local_duelist.stance)
 	hud.set_weapon(_local_duelist.weapon)
+	hud.set_ads_state(_local_duelist.ads_progress, _local_duelist.zoom_index)
 	hud.set_loadout_slots(_local_duelist.loadout_slots)
 	hud.show_ammo(_local_duelist.magazine_rounds, _local_duelist.reserve_ammo, _local_duelist.reload_remaining)
 	# Continuous sync, not just on the `damaged` signal - a signal only fires

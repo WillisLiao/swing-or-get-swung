@@ -113,6 +113,10 @@ var _score_pulse := 0.0
 var _score_pulse_team := -1
 var _stance := Duelist.Stance.STAND
 var _weapon := Duelist.Weapon.RIFLE
+## Presentation mirrors of Duelist.ads_progress / Duelist.zoom_index, pushed in
+## by the arena each frame. See set_ads_state().
+var _ads_progress := 0.0
+var _zoom_index := 0
 var _settings_open := false
 var _layout_editor := false
 var _aim_toggle := false
@@ -320,6 +324,19 @@ func set_stance(stance: Duelist.Stance) -> void:
 
 func set_weapon(weapon: Duelist.Weapon) -> void:
 	_weapon = weapon
+	queue_redraw()
+
+## Mirrors the two presentation values `Duelist` already tracks every frame, so
+## the reticle can cross-fade with the weapon actually coming up and the sniper
+## scope knows which of its two magnification stages to draw. Read-only here -
+## the authoritative sim owns both.
+func set_ads_state(progress: float, zoom: int) -> void:
+	var next_progress := clampf(progress, 0.0, 1.0) if is_finite(progress) else 0.0
+	var next_zoom := maxi(0, zoom)
+	if absf(next_progress - _ads_progress) < 0.001 and next_zoom == _zoom_index:
+		return
+	_ads_progress = next_progress
+	_zoom_index = next_zoom
 	queue_redraw()
 
 func set_view_fov(value: float, persist: bool = true) -> void:
@@ -609,15 +626,7 @@ func _draw_gameplay_hud() -> void:
 	var center := size * 0.5
 	_draw_coach_cue(friendly, enemy)
 
-	# The reticle stays clean for touch aiming, with a short directional bloom that recovers quickly.
-	if not aim_held:
-		var bloom_gap := 10.0 + primary_fire_bloom * 4.0
-		var bloom_span := 25.0 + primary_fire_bloom * 6.0
-		var reticle_color := Color("ffffff", 0.96)
-		draw_line(center + Vector2(-bloom_span, 0), center + Vector2(-bloom_gap, 0), reticle_color, 2.0)
-		draw_line(center + Vector2(bloom_gap, 0), center + Vector2(bloom_span, 0), reticle_color, 2.0)
-		draw_line(center + Vector2(0, -bloom_span), center + Vector2(0, -bloom_gap), reticle_color, 2.0)
-		draw_line(center + Vector2(0, bloom_gap), center + Vector2(0, bloom_span), reticle_color, 2.0)
+	_draw_reticle(center)
 	if hit_confirm > 0.0:
 		var confirm_color := Color("fff0b0", 0.95 * hit_confirm)
 		var confirm_radius := 23.0 + (1.0 - hit_confirm) * 7.0
@@ -937,6 +946,191 @@ func _draw_weapon_indicator(color: Color) -> void:
 	_draw_magazine_read(center + active_offset + Vector2(0.0, 30.0), color)
 	if reload_remaining > 0.0:
 		_draw_reload_sweep(center + active_offset, 24.0, Color("fff0b0"), reload_progress_for(reload_remaining, float(RiftWeapons.row(int(_weapon)).reload_seconds)))
+
+# --- Sight pictures -------------------------------------------------------
+#
+# One hand-drawn language, five sight pictures, no imported art. Every stroke
+# goes down twice - a dark, slightly wider pass, then the bright pass on top -
+# because the single-pass reticle this replaces disappeared completely against
+# bare sky and against the arena's pale concrete, which is most of the map.
+
+const RETICLE_INK := Color(0.02, 0.05, 0.10)
+
+func _reticle_line(from: Vector2, to: Vector2, tint: Color, width: float) -> void:
+	draw_line(from, to, Color(RETICLE_INK, tint.a * 0.55), width + 2.0)
+	draw_line(from, to, tint, width)
+
+func _reticle_dot(at: Vector2, radius: float, tint: Color) -> void:
+	draw_circle(at, radius + 1.2, Color(RETICLE_INK, tint.a * 0.55))
+	draw_circle(at, radius, tint)
+
+func _reticle_arc(at: Vector2, radius: float, from_angle: float, to_angle: float, tint: Color, width: float) -> void:
+	# The halo is deliberately narrower here than on straight strokes: a 2px
+	# skirt around a 1px ring reads as a dark ring, not as a legible one.
+	draw_arc(at, radius, from_angle, to_angle, 28, Color(RETICLE_INK, tint.a * 0.5), width + 1.4)
+	draw_arc(at, radius, from_angle, to_angle, 28, tint, width)
+
+func _draw_reticle(center: Vector2) -> void:
+	var ads := _ads_progress
+	if _weapon == Duelist.Weapon.SNIPER and ads > 0.004:
+		_draw_scope_overlay(center, ads)
+		return
+	var hip_opacity := 1.0 - smoothstep(0.0, 0.55, ads)
+	if hip_opacity > 0.004:
+		_draw_hip_reticle(center, hip_opacity)
+	var ads_opacity := smoothstep(0.45, 1.0, ads)
+	if ads_opacity > 0.004:
+		_draw_ads_reticle(center, ads_opacity)
+
+## Hip fire. All five keep the existing directional-bloom behaviour - the gap
+## and span still open with `primary_fire_bloom` and recover with it - but the
+## shape now says which weapon is in hand.
+func _draw_hip_reticle(center: Vector2, opacity: float) -> void:
+	var tint := Color(1.0, 1.0, 1.0, 0.96 * opacity)
+	var bloom := primary_fire_bloom
+	match _weapon:
+		Duelist.Weapon.SHOTGUN:
+			# A pellet weapon's useful information is the spread, not a point,
+			# so it gets a broken ring instead of a cross.
+			var radius := 27.0 + bloom * 6.0
+			for quadrant in 4:
+				var bearing := float(quadrant) * PI * 0.5 + PI * 0.25
+				_reticle_arc(center, radius, bearing - 0.46, bearing + 0.46, tint, 2.6)
+			_reticle_dot(center, 1.8, tint)
+		Duelist.Weapon.SNIPER:
+			# Deliberately unhelpful: four diagonals and no centre mark. The HUD
+			# should not be encouraging anyone to hip-fire the Longview.
+			var gap := 13.0 + bloom * 7.0
+			var span := 31.0 + bloom * 11.0
+			for quadrant in 4:
+				var axis := Vector2.from_angle(float(quadrant) * PI * 0.5 + PI * 0.25)
+				_reticle_line(center + axis * gap, center + axis * span, tint, 2.0)
+		Duelist.Weapon.PISTOL:
+			var gap := 7.0 + bloom * 4.0
+			var span := 18.0 + bloom * 5.0
+			for quadrant in 4:
+				var axis := Vector2.from_angle(float(quadrant) * PI * 0.5)
+				_reticle_line(center + axis * gap, center + axis * span, tint, 1.8)
+			_reticle_dot(center, 1.5, tint)
+		Duelist.Weapon.SMG:
+			var gap := 13.0 + bloom * 5.0
+			var span := 27.0 + bloom * 8.0
+			for quadrant in 4:
+				var axis := Vector2.from_angle(float(quadrant) * PI * 0.5)
+				_reticle_line(center + axis * gap, center + axis * span, tint, 2.4)
+		_:
+			var gap := 10.0 + bloom * 4.0
+			var span := 25.0 + bloom * 6.0
+			for quadrant in 4:
+				var axis := Vector2.from_angle(float(quadrant) * PI * 0.5)
+				_reticle_line(center + axis * gap, center + axis * span, tint, 2.0)
+			_reticle_dot(center, 1.6, tint)
+
+## Aimed. Until now nothing at all was drawn while `aim_held`, on any weapon.
+## Each of these is the 2D half of the optic modelled on the weapon: the dot
+## the reflex housing frames, or the bead the iron sights sit either side of.
+func _draw_ads_reticle(center: Vector2, opacity: float) -> void:
+	var dot := Color("ff5f4a", 0.98 * opacity)
+	var fine := Color("e8f1fa", 0.85 * opacity)
+	match _weapon:
+		Duelist.Weapon.SHOTGUN:
+			# Bead plus the weapon's real aimed cone, converted through the
+			# current magnification - the ring is the actual spread, not decor.
+			_reticle_arc(center, _ads_cone_radius_px(), 0.0, TAU, Color(fine, 0.42 * opacity), 1.4)
+			# Cream, not amber: the modelled bead directly under it is brass, and
+			# an amber dot on a brass bead is an invisible dot.
+			_reticle_dot(center, 2.8, Color("fff4d2", 0.98 * opacity))
+		Duelist.Weapon.PISTOL:
+			# Three-dot irons: the front bead between the two rear dots.
+			_reticle_dot(center, 2.1, Color("fff4d2", 0.96 * opacity))
+			_reticle_dot(center + Vector2(-11.0, 0.0), 1.6, Color(fine, 0.6 * opacity))
+			_reticle_dot(center + Vector2(11.0, 0.0), 1.6, Color(fine, 0.6 * opacity))
+		Duelist.Weapon.SMG:
+			_reticle_dot(center, 2.5, dot)
+			_reticle_line(center + Vector2(-15.0, 0.0), center + Vector2(-9.0, 0.0), fine, 1.6)
+			_reticle_line(center + Vector2(9.0, 0.0), center + Vector2(15.0, 0.0), fine, 1.6)
+		_:
+			# Red dot: a soft bloom under the dot itself, which is what stops
+			# a 3px circle from reading as a dead pixel over a bright wall.
+			draw_circle(center, 7.5, Color("ff5f4a", 0.16 * opacity))
+			_reticle_dot(center, 2.8, dot)
+			_reticle_arc(center, 13.0, 0.0, TAU, Color(fine, 0.38 * opacity), 1.1)
+
+## The equipped weapon's stationary aimed cone in screen pixels at the current
+## magnification. Used only to size the shotgun's spread ring - it reads the
+## same frozen accuracy table the simulation does, so the ring cannot drift
+## away from where the pellets actually go.
+func _ads_cone_radius_px() -> float:
+	var span := deg_to_rad(maxf(1.0, RiftWeapons.ads_horizontal_fov(horizontal_fov, int(_weapon), _zoom_index)))
+	var cone := RiftWeapons.cone_for(int(_weapon), 0.0, false, false, 1.0, primary_fire_bloom)
+	return clampf(cone / maxf(0.01, tan(span * 0.5)) * size.x * 0.5, 8.0, size.y * 0.45)
+
+## The Longview's scope picture.
+##
+## The tube is drawn in 2D rather than modelled in front of the camera: masking
+## everything outside the ocular circle is what actually makes a scope feel
+## like a scope, and a mask stays exact at every aspect ratio and every FOV,
+## which a glass disc parked near the near plane does not. The 3D scope body on
+## the weapon keeps doing its job - it is what the mask closes down over.
+func _draw_scope_overlay(center: Vector2, ads: float) -> void:
+	# Closed by `Duelist.SNIPER_SCOPE_HANDOVER`, which is the same value the
+	# rifle's view model stops drawing on. Beyond that point this overlay *is*
+	# the scope, so it has to be fully opaque before the rifle disappears.
+	var seated := smoothstep(0.06, Duelist.SNIPER_SCOPE_HANDOVER, ads)
+	var short_edge := minf(size.x, size.y)
+	# Second stage closes the tube down as well as magnifying, so the step up
+	# is legible the instant it happens.
+	var target := short_edge * (0.430 if _zoom_index < 1 else 0.335)
+	var radius := lerpf(short_edge * 0.95, target, seated)
+	# One stroked annulus from the circle out past the farthest corner masks
+	# the whole surround in a single call, with no overlapping alpha to seam.
+	var reach := center.length() + 8.0
+	if reach > radius:
+		draw_arc(center, (radius + reach) * 0.5, 0.0, TAU, 96, Color(0.010, 0.018, 0.030, seated), reach - radius)
+	# Tube wall, the soft shadow a real ocular throws inside the edge, and a
+	# single cold highlight so the rim is not a flat black band.
+	draw_arc(center, radius - 1.0, 0.0, TAU, 96, Color(0.03, 0.05, 0.08, seated), 6.0)
+	draw_arc(center, radius - 9.0, 0.0, TAU, 96, Color(0.03, 0.05, 0.08, 0.32 * seated), 14.0)
+	draw_arc(center, radius - 4.5, 0.0, TAU, 96, Color("7d8ea3", 0.5 * seated), 1.5)
+	if seated < 0.35:
+		return
+	_draw_scope_reticle(center, radius, (seated - 0.35) / 0.65)
+
+func _draw_scope_reticle(center: Vector2, radius: float, opacity: float) -> void:
+	var stage_two := _zoom_index >= 1
+	var fine := Color("dfe9f4", 0.92 * opacity)
+	var mid := Color("dfe9f4", 0.58 * opacity)
+	var arm := radius * 0.93
+	var gap := 5.0 if stage_two else 8.0
+	var stroke := 1.1 if stage_two else 1.7
+	for quadrant in 4:
+		var axis := Vector2.from_angle(float(quadrant) * PI * 0.5)
+		_reticle_line(center + axis * gap, center + axis * arm, fine, stroke)
+	_reticle_dot(center, 1.1 if stage_two else 1.5, fine)
+	# Ranging dots on the two horizontals and the lower vertical; the upper arm
+	# stays clean, the way a real ranging reticle is.
+	var marks := 7 if stage_two else 4
+	var spacing := arm / float(marks + 1)
+	var dot_radius := 1.5 if stage_two else 2.0
+	for index in range(1, marks + 1):
+		var offset := spacing * float(index)
+		_reticle_dot(center + Vector2(-offset, 0.0), dot_radius, mid)
+		_reticle_dot(center + Vector2(offset, 0.0), dot_radius, mid)
+		_reticle_dot(center + Vector2(0.0, offset), dot_radius, mid)
+	if stage_two:
+		# The second stage earns a drop ladder and a tighter inner ring, so the
+		# two magnifications are told apart by the reticle itself and not only
+		# by how much of the world fits inside the tube.
+		for index in range(1, 4):
+			var rung := spacing * float(index) * 2.0
+			var half := radius * (0.20 - 0.035 * float(index))
+			_reticle_line(center + Vector2(-half, rung), center + Vector2(half, rung), fine, 1.2)
+		_reticle_arc(center, radius * 0.30, 0.0, TAU, Color(mid, 0.45 * opacity), 1.0)
+	var steps: Array = RiftWeapons.row(int(_weapon)).zoom_steps
+	if steps.is_empty():
+		return
+	var label := "%.0f×" % float(steps[clampi(_zoom_index, 0, steps.size() - 1)])
+	draw_string(ThemeDB.fallback_font, center + Vector2(radius * 0.46, radius * 0.70), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("dfe9f4", 0.88 * opacity))
 
 ## Distinct per-archetype glyphs (barrel+optic for rifle-class weapons, a
 ## broad fanned wedge for the shotgun, a small block for the pistol, a long

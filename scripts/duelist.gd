@@ -27,6 +27,26 @@ const DEFAULT_HORIZONTAL_FOV := 80.0
 const MIN_HORIZONTAL_FOV := 70.0
 const MAX_HORIZONTAL_FOV := 90.0
 const FIRST_PERSON_WEAPON_SCALE := 0.38
+# Where the view model rests when not aiming. The old value sat the weapon so
+# low that only a black sliver of it was ever on screen; this puts roughly the
+# top third of the receiver in frame, bottom-right, the way a first-person
+# shooter actually reads. `physical_muzzle_position()` deliberately keeps its
+# own gameplay-side offset - it is an obstruction probe, not a render position.
+const FIRST_PERSON_HIP_ANCHOR := Vector3(0.33, -0.20, -0.95)
+# Resting cant/yaw of the weapon at the hip, carried by `_weapon_rig` rather
+# than `_weapon_root` so the recoil/obstruction/melee rotations that already
+# drive the root are not fighting it. It resolves to zero at full ADS, which is
+# what keeps the optic exactly on the camera's aim ray.
+const FIRST_PERSON_HIP_RIG_ROTATION := Vector3(-0.030, 0.075, 0.055)
+# The view model lives alone on render layer 2, so it can carry its own key and
+# fill lights without touching a single watt of the arena's lighting. Without
+# them the weapon is lit only by a world-space sun and goes to pure black
+# whenever the player faces away from it.
+const VIEW_MODEL_LAYER_MASK := 2
+# `ads_progress` at which the sniper hands the view over from the 3D rifle to
+# the HUD's scope picture. `DuelHud` closes its vignette to full opacity on the
+# same value - the two must stay in step or the swap becomes visible.
+const SNIPER_SCOPE_HANDOVER := 0.42
 # One universal swap lockout keeps slot-swapping from becoming a free
 # fire-rate exploit (e.g. swapping away from a sniper mid-cycle to reset it).
 const WEAPON_SWAP_LOCKOUT := 0.35
@@ -92,6 +112,11 @@ var _band: MeshInstance3D
 var _body_visual_root: Node3D
 var _body_visual_target_scale_y := 1.0
 var _weapon_root: Node3D
+## Static resting pose of the weapon inside `_weapon_root`. The root itself is
+## already animated every frame (ADS anchor, recoil, obstruction, melee, swap),
+## so the hip cant needs its own node or the two overwrite each other.
+var _weapon_rig: Node3D
+var _fp_shield_root: Node3D
 var _weapon_mesh: MeshInstance3D
 var _weapon_core: MeshInstance3D
 var _muzzle_flare: MeshInstance3D
@@ -298,8 +323,20 @@ func _process(delta: float) -> void:
 	if _survey_frame != null:
 		_survey_frame.rotation.z = -gait_lag * 0.025
 	if _weapon_root != null:
-		var hip := Vector3(0.42, -0.42, -1.22)
+		var hip := FIRST_PERSON_HIP_ANCHOR
 		var target := _ads_weapon_anchor() if _aiming and _local_camera else hip
+		if _weapon_rig != null and _local_camera:
+			# The resting cant has to unwind exactly as the weapon comes up, or
+			# the optic no longer sits on the camera's aim ray at full ADS.
+			_weapon_rig.rotation = FIRST_PERSON_HIP_RIG_ROTATION * (1.0 - clampf(ads_progress, 0.0, 1.0))
+			# A telescopic sight cannot be looked *through* in a raster render:
+			# the eye sits well behind the ocular, so the tube's far end always
+			# projects as a small aperture ring parked over the crosshair. Every
+			# shooter solves this the same way - once the scope picture has
+			# taken over, the view model stops being drawn, and the HUD's tube
+			# is the scope. The handover is timed to the moment the vignette
+			# reaches full closure so there is nothing left to see it happen.
+			_weapon_rig.visible = weapon != Weapon.SNIPER or ads_progress < SNIPER_SCOPE_HANDOVER
 		if _local_camera:
 			var breathing := sin(Time.get_ticks_msec() * 0.0017) * (0.004 if _aiming else 0.009)
 			var walking := sin(_pose_distance * 1.35) if moving else 0.0
@@ -986,6 +1023,81 @@ func _build_ballistic_shield(dark: Material, brass: Material, glow: Material) ->
 	_add_body_part(_box(Vector3(0.66, 0.9, 0.02)), Vector3(0.0, 1.02, -0.50), brass)
 	_add_body_part(_cylinder(0.07, 0.07, 0.4), Vector3(0.0, 1.02, -0.42), glow, Vector3(PI * 0.5, 0.0, 0.0))
 
+## The Shield class's own first-person view of its shield.
+##
+## `_build_character_silhouette()` - and with it `_build_ballistic_shield()` -
+## is only ever built for the remote presentation, so up to now a Shield player
+## was the one person in the match who could not see the piece of equipment
+## that defines their class. This builds a separate, purpose-composed view
+## model: the plate is seen from *behind*, held out to the left so it never
+## covers the aim point, with the arm brace and grip facing the camera, which
+## is what actually sells "I am carrying this" rather than "a wall is stuck to
+## my screen". Rendering only - `has_ballistic_shield` and every block and
+## damage-reduction rule it feeds are untouched.
+func _rebuild_first_person_shield() -> void:
+	if not (_local_camera and _render_visuals) or camera == null:
+		return
+	if _fp_shield_root != null:
+		_fp_shield_root.queue_free()
+		_fp_shield_root = null
+	if not has_ballistic_shield:
+		return
+	_fp_shield_root = Node3D.new()
+	_fp_shield_root.name = "FirstPersonShield"
+	# Carried low and out to the left, turned far enough to show its face rather
+	# than an edge. Distance and height are chosen so *both* vertical edges and
+	# the top lip land inside the frame: a plate that runs off every side of the
+	# screen stops reading as carried equipment and starts reading as a wall.
+	#
+	# Only the plate's top third is above the horizon of the view, so every
+	# piece of detail lives there. A grip modelled down at the player's actual
+	# chest height would be geometrically correct and permanently invisible.
+	_fp_shield_root.position = Vector3(-0.40, -0.30, -0.78)
+	_fp_shield_root.rotation = Vector3(0.05, 0.62, -0.09)
+	camera.add_child(_fp_shield_root)
+	var armour := NuclearMaterials.painted_metal(Color("323b46"), 0.60)
+	var rib := NuclearMaterials.metal(Color("6e7883"), 0.48)
+	var strap := NuclearMaterials.polymer(Color("24292f"), 0.60)
+	var trim := NuclearMaterials.metal(Color("b98b46"), 0.40)
+	var glow := NuclearMaterials.emissive(_team_glow(), 1.1)
+	# Plate: stacked panels rather than one slab, each stepping slightly nearer
+	# the player, so the face has real relief instead of one flat grey field.
+	_add_shield_part(_box(Vector3(0.42, 0.26, 0.038)), Vector3(0.0, 0.180, 0.0), armour)
+	_add_shield_part(_box(Vector3(0.42, 0.28, 0.044)), Vector3(0.0, -0.090, 0.007), armour)
+	_add_shield_part(_box(Vector3(0.40, 0.22, 0.038)), Vector3(0.0, -0.330, 0.015), armour)
+	# Reinforcing ribs and the top lip - the value contrast that keeps the plate
+	# from flattening out against a pale floor.
+	_add_shield_part(_box(Vector3(0.44, 0.016, 0.056)), Vector3(0.0, 0.052, 0.007), rib)
+	_add_shield_part(_box(Vector3(0.44, 0.016, 0.056)), Vector3(0.0, 0.245, 0.004), rib)
+	_add_shield_part(_box(Vector3(0.45, 0.030, 0.062)), Vector3(0.0, 0.318, 0.002), rib)
+	for bolt_x in [-0.15, -0.05, 0.05, 0.15]:
+		_add_shield_part(_sphere(0.010), Vector3(bolt_x, 0.318, 0.032), trim)
+	# Leading edge: brass trim plus a team strip. These two are what separate
+	# the shield from whatever is behind it at any background brightness.
+	_add_shield_part(_box(Vector3(0.024, 0.70, 0.056)), Vector3(0.213, -0.040, 0.007), trim)
+	_add_shield_part(_box(Vector3(0.013, 0.66, 0.018)), Vector3(0.213, -0.040, 0.035), glow)
+	_add_shield_part(_box(Vector3(0.024, 0.70, 0.056)), Vector3(-0.213, -0.040, 0.007), rib)
+	# Vision port, framed and sitting in the visible band.
+	_add_shield_part(_box(Vector3(0.22, 0.020, 0.050)), Vector3(0.04, 0.212, 0.010), rib)
+	_add_shield_part(_box(Vector3(0.22, 0.020, 0.050)), Vector3(0.04, 0.126, 0.010), rib)
+	for mullion_x in [-0.05, 0.13]:
+		_add_shield_part(_box(Vector3(0.016, 0.086, 0.046)), Vector3(mullion_x, 0.169, 0.010), rib)
+	# Arm brace and forearm cuff, raised to just under the vision port so they
+	# are actually in frame. This is the detail that reads as held equipment.
+	_add_shield_part(_box(Vector3(0.26, 0.048, 0.040)), Vector3(0.030, 0.062, 0.066), rib)
+	_add_shield_part(_torus(0.058, 0.017), Vector3(0.075, 0.062, 0.098), strap, Vector3(0.0, 0.0, PI * 0.5))
+	_add_shield_part(_cylinder(0.023, 0.023, 0.15), Vector3(0.145, -0.055, 0.090), strap, Vector3(0.0, 0.0, PI * 0.5))
+	_add_shield_part(_box(Vector3(0.044, 0.044, 0.096)), Vector3(0.050, -0.055, 0.066), rib)
+
+func _add_shield_part(mesh: Mesh, position: Vector3, material: Material, rotation: Vector3 = Vector3.ZERO) -> void:
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	instance.position = position
+	instance.rotation = rotation
+	instance.material_override = material
+	instance.layers = VIEW_MODEL_LAYER_MASK
+	_fp_shield_root.add_child(instance)
+
 ## Runner class equipment: a chest-worn vest that marks who is immune to the
 ## carry damage-over-time.
 func _build_nuclear_vest_marker(glow: Material) -> void:
@@ -1012,9 +1124,46 @@ func _build_storm_surveyor(cloth: Material, dark: Material, brass: Material, glo
 func _build_first_person_weapon() -> void:
 	_weapon_root = Node3D.new()
 	_weapon_root.name = "FirstPersonWeapon"
-	_weapon_root.position = Vector3(0.42, -0.42, -1.22)
+	_weapon_root.position = FIRST_PERSON_HIP_ANCHOR
 	_weapon_root.scale = Vector3.ONE * FIRST_PERSON_WEAPON_SCALE
 	camera.add_child(_weapon_root)
+	_weapon_rig = Node3D.new()
+	_weapon_rig.name = "Rig"
+	_weapon_rig.rotation = FIRST_PERSON_HIP_RIG_ROTATION
+	_weapon_root.add_child(_weapon_rig)
+	_build_view_model_lights()
+
+## Key and fill for the view model only (`light_cull_mask` is layer 2, which
+## nothing in the arena occupies). They are parented to the camera, so the
+## weapon keeps a stable, readable shading direction no matter which way the
+## player is facing - the arena's single world sun otherwise left the gun a
+## featureless black cut-out for half of every rotation.
+func _build_view_model_lights() -> void:
+	# Key from over the player's right shoulder: the direction that puts a
+	# highlight on the top and near faces, which is all the shape a primitive
+	# weapon has to work with.
+	# Specular is kept low: at anything higher the flat top of the receiver
+	# clipped to pure white right under the sight window, which is the last
+	# place on the screen that should be the brightest thing in the frame.
+	_add_view_model_light("ViewModelKey", Vector3(-26.0, 26.0, 0.0), 1.38, Color("fff2e0"), 0.45)
+	# Cool fill from the opposite side, so the shadow side is a readable dark
+	# blue rather than the absolute black it used to be.
+	_add_view_model_light("ViewModelFill", Vector3(12.0, -124.0, 0.0), 0.62, Color("9dc2e6"), 0.14)
+	# Near-camera-aligned lift. Aiming down the sights turns the magazine, grip
+	# and receiver face straight at the viewer, where neither key nor fill can
+	# reach them; without this they read as one dead black column.
+	_add_view_model_light("ViewModelLift", Vector3(8.0, -7.0, 0.0), 0.58, Color("cbd6de"), 0.04)
+
+func _add_view_model_light(light_name: String, angles: Vector3, energy: float, tint: Color, specular: float) -> void:
+	var light := DirectionalLight3D.new()
+	light.name = light_name
+	light.light_cull_mask = VIEW_MODEL_LAYER_MASK
+	light.light_energy = energy
+	light.light_color = tint
+	light.light_specular = specular
+	light.shadow_enabled = false
+	light.rotation_degrees = angles
+	camera.add_child(light)
 
 func _build_world_weapon() -> void:
 	_weapon_root = Node3D.new()
@@ -1023,6 +1172,9 @@ func _build_world_weapon() -> void:
 	_weapon_root.rotation_degrees = Vector3(-8.0, 0.0, 0.0)
 	_weapon_root.scale = Vector3.ONE * 0.72
 	head.add_child(_weapon_root)
+	_weapon_rig = Node3D.new()
+	_weapon_rig.name = "Rig"
+	_weapon_root.add_child(_weapon_rig)
 
 ## Rebuilds the equipped weapon's view model. Every weapon uses the
 ## realistic metal/polymer PBR materials from NuclearMaterials (the same
@@ -1030,121 +1182,332 @@ func _build_world_weapon() -> void:
 ## boxes the old single carbine used, and each archetype gets a distinct,
 ## tapered silhouette instead of a stack of identical cubes.
 func _rebuild_weapon_models() -> void:
-	if _weapon_root == null:
+	_rebuild_first_person_shield()
+	if _weapon_root == null or _weapon_rig == null:
 		return
-	_weapon_root.position = Vector3(0.42, -0.42, -1.22) if _local_camera else _weapon_root.position
-	_weapon_root.rotation = Vector3.ZERO
 	if _local_camera:
+		_weapon_root.position = FIRST_PERSON_HIP_ANCHOR
 		_weapon_root.scale = Vector3.ONE * FIRST_PERSON_WEAPON_SCALE
-	for child in _weapon_root.get_children():
+		_weapon_rig.rotation = FIRST_PERSON_HIP_RIG_ROTATION
+	_weapon_root.rotation = Vector3.ZERO
+	for child in _weapon_rig.get_children():
 		child.queue_free()
 	_weapon_mesh = null
 	_weapon_core = null
 	_muzzle_flare = null
 	_magazine_mesh = null
 	_rail_slots.clear()
-	var gunmetal := NuclearMaterials.metal(Color("2b3138"), 0.28)
-	var slide_metal := NuclearMaterials.metal(Color("454d57"), 0.24)
-	var polymer := NuclearMaterials.polymer(Color("1c2126"), 0.6)
-	var accent := NuclearMaterials.emissive(_team_glow().lerp(Color("e6a25b"), 0.4), 2.2)
-	var hot := NuclearMaterials.emissive(Color("fff0b0"), 3.6)
-	# A distinct cool-green glass color for the optic lens/reticle - visually
-	# separate from the warm muzzle flash, so ADS reads as looking through
-	# glass rather than at more gunmetal.
-	var lens := NuclearMaterials.emissive(Color("7dffb0"), 4.4)
+	# Four surface roles, shared by all five weapons so they read as one
+	# armoury rather than five unrelated props. The previous palette leaned on
+	# metallic 0.92 at a very dark albedo, which - with only a sky probe and no
+	# view-model light - resolved to flat black on every weapon.
+	var kit := {
+		"steel": NuclearMaterials.metal(Color("7f8892"), 0.44),
+		"dark": NuclearMaterials.metal(Color("545c66"), 0.52),
+		"frame": NuclearMaterials.polymer(Color("3a4149"), 0.70),
+		"grip": NuclearMaterials.polymer(Color("24292f"), 0.56),
+		"brass": NuclearMaterials.metal(Color("b98b46"), 0.40),
+		"wood": NuclearMaterials.polymer(Color("6a4527"), 0.58),
+		"accent": NuclearMaterials.emissive(_team_glow().lerp(Color("e6a25b"), 0.4), 1.2),
+		# The charge strip on the receiver flank - see _add_charge_strip().
+		# Kept distinct from `accent` so its brightness can be tuned against a
+		# moving, animated element rather than a static one.
+		"rail": NuclearMaterials.emissive(_team_glow().lerp(Color("e6a25b"), 0.4), 1.0),
+		"hot": NuclearMaterials.emissive(Color("fff0b0"), 3.6),
+	}
 	match weapon:
 		Weapon.RIFLE:
-			_build_rifle_model(gunmetal, polymer, accent, hot)
+			_build_rifle_model(kit)
 		Weapon.SMG:
-			_build_smg_model(gunmetal, polymer, accent, hot)
+			_build_smg_model(kit)
 		Weapon.SHOTGUN:
-			_build_shotgun_model(slide_metal, polymer, accent, hot)
+			_build_shotgun_model(kit)
 		Weapon.PISTOL:
-			_build_pistol_model(slide_metal, polymer, accent, hot)
+			_build_pistol_model(kit)
 		Weapon.SNIPER:
-			_build_sniper_model(gunmetal, polymer, accent, hot)
-	_add_optic_lens(lens)
+			_build_sniper_model(kit)
 	if _muzzle_flare != null:
 		_muzzle_flare.scale = Vector3.ONE * 0.001
 
-## Places a small glowing lens/reticle disc at the weapon's calibrated optic
-## point (`optic_tip_local`, the same offset `Duelist.optic_tip_head_offset()`
-## uses for the ADS shot origin). Since the weapon root's own position
-## becomes `ads_anchor` while aiming and this part is parented under it, the
-## lens lands exactly where the camera centers during ADS - so a scoped shot
-## is visibly looking through glass, not just a gun held up to the screen.
-func _add_optic_lens(lens_material: Material) -> void:
-	var tip := Vector3(RiftWeapons.row(int(weapon)).get("optic_tip_local", Vector3.ZERO))
-	_add_weapon_part(_cylinder(0.05, 0.05, 0.012), tip, lens_material, Vector3(PI * 0.5, 0.0, 0.0))
-	_add_weapon_part(_cylinder(0.062, 0.062, 0.006), tip + Vector3(0.0, 0.0, 0.02), lens_material, Vector3(PI * 0.5, 0.0, 0.0))
+## Weapon-local position of the optical center. Everything a sight is built
+## from is placed relative to this point, so the housing can be redesigned
+## freely without ever drifting off the ray `optic_tip_head_offset()` derives.
+func _optic_tip() -> Vector3:
+	return Vector3(RiftWeapons.row(int(weapon)).get("optic_tip_local", Vector3.ZERO))
 
-func _build_rifle_model(metal: Material, poly: Material, accent: Material, hot: Material) -> void:
-	# Full-length carbine: two-stage tapered receiver, angled magazine well,
-	# vented handguard, and a compact reflex optic riding the top rail.
-	_weapon_mesh = _add_weapon_part(_box(Vector3(0.27, 0.19, 0.5)), Vector3(0.0, 0.02, 0.0), metal)
-	_add_weapon_part(_tapered_cylinder(0.14, 0.10, 0.46), Vector3(0.0, 0.03, 0.5), poly, Vector3(PI * 0.5, 0.0, 0.0))
-	_add_weapon_part(_tapered_cylinder(0.10, 0.075, 0.72), Vector3(0.0, 0.03, -0.62), metal, Vector3(PI * 0.5, 0.0, 0.0))
-	_add_weapon_part(_cylinder(0.048, 0.048, 0.22), Vector3(0.0, 0.03, -1.06), metal, Vector3(PI * 0.5, 0.0, 0.0))
-	for index in 5:
-		_rail_slots.append(_add_weapon_part(_box(Vector3(0.24, 0.03, 0.05)), Vector3(0.0, 0.155, -0.34 - index * 0.11), poly))
-	_magazine_mesh = _add_weapon_part(_box(Vector3(0.13, 0.34, 0.16)), Vector3(0.0, -0.24, -0.02), poly, Vector3(-0.16, 0.0, 0.0))
-	_add_weapon_part(_box(Vector3(0.16, 0.05, 0.19)), Vector3(0.0, -0.42, -0.02), metal, Vector3(-0.16, 0.0, 0.0))
-	_add_weapon_part(_box(Vector3(0.12, 0.24, 0.13)), Vector3(0.0, -0.2, 0.22), poly, Vector3(-0.14, 0.0, 0.0))
-	_add_weapon_part(_box(Vector3(0.09, 0.11, 0.32)), Vector3(0.0, 0.19, 0.06), poly)
-	_weapon_core = _add_weapon_part(_box(Vector3(0.03, 0.06, 0.10)), Vector3(0.0, 0.24, 0.06), accent)
-	_add_weapon_part(_cylinder(0.05, 0.05, 0.36), Vector3(0.0, 0.02, 0.66), poly, Vector3(PI * 0.5, 0.15, 0.0))
-	_muzzle_flare = _add_weapon_part(_box(Vector3(0.07, 0.07, 0.1)), Vector3(0.0, 0.03, -1.19), hot)
+## Cuts a row of slots into a flat face - the single cheapest way to stop a
+## primitive box from reading as a primitive box.
+func _add_vent_slots(kit: Dictionary, count: int, span: Vector3, origin: Vector3, step: float) -> void:
+	for index in count:
+		_add_weapon_part(_box(span), origin + Vector3(0.0, 0.0, step * float(index)), kit.dark)
 
-func _build_smg_model(metal: Material, poly: Material, accent: Material, hot: Material) -> void:
-	# MP7-reference: compact bullpup-length body, short shrouded barrel,
-	# folding stock frame, top rail with a small reflex sight.
-	_weapon_mesh = _add_weapon_part(_box(Vector3(0.22, 0.17, 0.4)), Vector3(0.0, 0.02, 0.0), metal)
-	_add_weapon_part(_tapered_cylinder(0.075, 0.06, 0.38), Vector3(0.0, 0.02, -0.5), metal, Vector3(PI * 0.5, 0.0, 0.0))
-	_add_weapon_part(_cylinder(0.09, 0.09, 0.12), Vector3(0.0, 0.02, -0.28), poly, Vector3(PI * 0.5, 0.0, 0.0))
-	_magazine_mesh = _add_weapon_part(_box(Vector3(0.1, 0.28, 0.12)), Vector3(0.0, -0.19, -0.1), poly, Vector3(-0.22, 0.0, 0.0))
-	_add_weapon_part(_box(Vector3(0.04, 0.16, 0.42)), Vector3(0.0, 0.06, 0.34), metal)
-	_add_weapon_part(_box(Vector3(0.09, 0.04, 0.3)), Vector3(0.0, 0.14, 0.32), poly)
-	_weapon_core = _add_weapon_part(_box(Vector3(0.03, 0.05, 0.08)), Vector3(0.0, 0.17, 0.28), accent)
-	_add_weapon_part(_box(Vector3(0.08, 0.2, 0.09)), Vector3(0.0, -0.14, 0.1), poly, Vector3(-0.12, 0.0, 0.0))
-	_muzzle_flare = _add_weapon_part(_box(Vector3(0.06, 0.06, 0.08)), Vector3(0.0, 0.02, -0.71), hot)
+## A short length of Picatinny rail. Plain metal - see `_add_charge_strip()`
+## for why nothing up here is allowed to glow.
+func _add_rail(kit: Dictionary, y: float, z_start: float, teeth: int, width: float, step: float) -> void:
+	_add_weapon_part(_box(Vector3(width, 0.026, absf(step) * float(teeth) + 0.06)), Vector3(0.0, y, z_start + step * (float(teeth) - 1.0) * 0.5), kit.frame)
+	for index in teeth:
+		_add_weapon_part(_box(Vector3(width * 0.82, 0.020, 0.030)), Vector3(0.0, y + 0.021, z_start + step * float(index)), kit.dark)
 
-func _build_shotgun_model(metal: Material, poly: Material, accent: Material, hot: Material) -> void:
-	# S1897/trench-gun reference: exposed tube magazine under a long barrel,
-	# a sliding pump foregrip, and an external hammer bump on the receiver.
-	_weapon_mesh = _add_weapon_part(_box(Vector3(0.25, 0.2, 0.42)), Vector3(0.0, 0.02, 0.1), poly)
-	_add_weapon_part(_cylinder(0.045, 0.05, 0.9), Vector3(0.0, 0.08, -0.52), metal, Vector3(PI * 0.5, 0.0, 0.0))
-	_add_weapon_part(_cylinder(0.035, 0.035, 0.72), Vector3(0.0, -0.05, -0.44), metal, Vector3(PI * 0.5, 0.0, 0.0))
-	_add_weapon_part(_box(Vector3(0.12, 0.1, 0.2)), Vector3(0.0, -0.05, -0.58), poly)
-	_add_weapon_part(_box(Vector3(0.07, 0.06, 0.1)), Vector3(0.0, 0.14, 0.24), metal, Vector3(-0.3, 0.0, 0.0))
-	_magazine_mesh = _add_weapon_part(_box(Vector3(0.1, 0.2, 0.14)), Vector3(0.0, -0.22, 0.18), poly, Vector3(-0.2, 0.0, 0.0))
-	_weapon_core = _add_weapon_part(_box(Vector3(0.03, 0.05, 0.08)), Vector3(0.0, 0.18, 0.16), accent)
-	_muzzle_flare = _add_weapon_part(_box(Vector3(0.09, 0.09, 0.11)), Vector3(0.0, 0.08, -0.98), hot)
+## The fire-sequence tell `_process` animates through `_rail_slots`: a short
+## ladder of team-lit segments down the *side* of the receiver.
+##
+## It deliberately does not live on the top rail. Anything emissive up there
+## sits directly beneath the sight window and, seen end-on while aiming, throws
+## a bright cream runway straight through the middle of the sight picture -
+## which is precisely what it did until this was moved.
+func _add_charge_strip(kit: Dictionary, at: Vector3, count: int, step: float) -> void:
+	_add_weapon_part(_box(Vector3(0.010, 0.036, absf(step) * float(count) + 0.030)), at, kit.dark)
+	for index in count:
+		var slide := step * (float(index) - float(count - 1) * 0.5)
+		_rail_slots.append(_add_weapon_part(_box(Vector3(0.009, 0.020, 0.026)), at + Vector3(-0.006, 0.0, slide), _own_material(kit.rail)))
 
-func _build_pistol_model(metal: Material, poly: Material, accent: Material, hot: Material) -> void:
-	# Compact 9mm/.45-class sidearm: slide over frame, short barrel, small
-	# rear reflex sight, grip raked back rather than a revolver's cylinder.
-	_weapon_mesh = _add_weapon_part(_box(Vector3(0.14, 0.1, 0.34)), Vector3(0.0, 0.06, -0.02), metal)
-	_add_weapon_part(_box(Vector3(0.12, 0.08, 0.24)), Vector3(0.0, 0.005, -0.06), poly)
-	_add_weapon_part(_cylinder(0.028, 0.028, 0.14), Vector3(0.0, 0.06, -0.24), metal, Vector3(PI * 0.5, 0.0, 0.0))
-	_add_weapon_part(_box(Vector3(0.1, 0.24, 0.13)), Vector3(0.0, -0.14, 0.1), poly, Vector3(-0.26, 0.0, 0.0))
-	_add_weapon_part(_torus(0.05, 0.014), Vector3(0.0, -0.03, 0.1), metal, Vector3(0.0, PI * 0.5, 0.0))
-	_weapon_core = _add_weapon_part(_box(Vector3(0.025, 0.035, 0.06)), Vector3(0.0, 0.09, -0.05), accent)
-	_muzzle_flare = _add_weapon_part(_box(Vector3(0.05, 0.05, 0.06)), Vector3(0.0, 0.06, -0.32), hot)
+## `NuclearMaterials` hands back one cached, shared `ShaderMaterial` per
+## parameter set, so any part whose emission `_set_material_glow()` animates
+## has to hold a private copy - otherwise one duelist's muzzle flash writes
+## into every other duelist's material, and the rail teeth can never show the
+## per-tooth fire sequence because they are all literally the same material.
+func _own_material(source: Material) -> Material:
+	return source.duplicate() if source != null else null
 
-func _build_sniper_model(metal: Material, poly: Material, accent: Material, hot: Material) -> void:
-	# Halo-Infinite-referenced long rifle: long free-floated barrel, a large
-	# top-mounted scope tube with turret bumps, straight stock, folded bipod.
-	_weapon_mesh = _add_weapon_part(_box(Vector3(0.16, 0.15, 0.72)), Vector3(0.0, 0.0, 0.14), metal)
-	_add_weapon_part(_tapered_cylinder(0.05, 0.032, 1.15), Vector3(0.0, 0.03, -0.85), metal, Vector3(PI * 0.5, 0.0, 0.0))
-	_add_weapon_part(_box(Vector3(0.1, 0.11, 0.5)), Vector3(0.0, -0.02, 0.55), poly)
-	_add_weapon_part(_box(Vector3(0.06, 0.07, 0.16)), Vector3(0.0, 0.06, 0.62), poly, Vector3(-0.06, 0.0, 0.0))
-	_add_weapon_part(_cylinder(0.05, 0.05, 0.48), Vector3(0.0, 0.16, -0.1), metal, Vector3(PI * 0.5, 0.0, 0.0))
-	_add_weapon_part(_cylinder(0.062, 0.062, 0.06), Vector3(0.0, 0.16, -0.32), metal, Vector3(PI * 0.5, 0.0, 0.0))
-	_add_weapon_part(_cylinder(0.062, 0.062, 0.06), Vector3(0.0, 0.16, 0.06), metal, Vector3(PI * 0.5, 0.0, 0.0))
-	_weapon_core = _add_weapon_part(_box(Vector3(0.025, 0.04, 0.06)), Vector3(0.05, 0.16, -0.1), accent)
-	_add_weapon_part(_box(Vector3(0.02, 0.16, 0.02)), Vector3(0.05, -0.06, -1.28), poly, Vector3(0.0, 0.0, 0.4))
-	_add_weapon_part(_box(Vector3(0.02, 0.16, 0.02)), Vector3(-0.05, -0.06, -1.28), poly, Vector3(0.0, 0.0, -0.4))
-	_muzzle_flare = _add_weapon_part(_box(Vector3(0.06, 0.06, 0.09)), Vector3(0.0, 0.03, -1.42), hot)
+## Enclosed trigger group - guard hoop plus the trigger blade inside it.
+func _add_trigger_group(kit: Dictionary, at: Vector3, radius: float) -> void:
+	_add_weapon_part(_torus(radius, 0.011), at, kit.dark, Vector3(0.0, PI * 0.5, 0.0))
+	_add_weapon_part(_box(Vector3(0.016, radius * 1.05, 0.022)), at + Vector3(0.0, radius * 0.30, 0.0), kit.brass, Vector3(0.16, 0.0, 0.0))
+
+## Hooded reflex sight, built as an open frame: base, two uprights and a hood,
+## with nothing at all across the middle. The aiming dot is drawn by the HUD at
+## exact screen center, so the player looks *through* a real housing instead of
+## at an opaque emissive disc parked over the target - which is what the old
+## single-lens version did.
+func _add_reflex_sight(kit: Dictionary, half_width: float, hood: float, drop: float) -> void:
+	var tip := _optic_tip()
+	var depth := half_width * 0.66
+	# Mount: a clamp block that visibly grips the rail below.
+	_add_weapon_part(_box(Vector3(half_width * 2.0 + 0.03, 0.030, depth * 1.9)), tip + Vector3(0.0, -drop - 0.015, 0.0), kit.dark)
+	_add_weapon_part(_box(Vector3(half_width * 2.0 + 0.06, 0.022, 0.034)), tip + Vector3(0.0, -drop - 0.034, depth * 0.7), kit.steel)
+	_add_weapon_part(_box(Vector3(0.026, 0.030, 0.030)), tip + Vector3(half_width + 0.026, -drop - 0.032, depth * 0.7), kit.brass)
+	# Uprights and hood frame the window without crossing it.
+	for side in [-1.0, 1.0]:
+		_add_weapon_part(_box(Vector3(0.020, drop + hood, depth * 1.9)), tip + Vector3(side * half_width, (hood - drop) * 0.5, 0.0), kit.dark)
+	_add_weapon_part(_box(Vector3(half_width * 2.0 + 0.02, 0.024, depth * 1.9)), tip + Vector3(0.0, hood + 0.012, 0.0), kit.dark)
+	# Front and rear lips: a shallow shroud, so the housing has depth from the
+	# side and still leaves the sight line completely clear.
+	for face in [-1.0, 1.0]:
+		_add_weapon_part(_box(Vector3(half_width * 2.0 + 0.02, 0.020, 0.016)), tip + Vector3(0.0, hood - 0.004, face * depth * 0.95), kit.steel)
+	# Emitter housing on the front lower lip, and its team-lit indicator.
+	_add_weapon_part(_box(Vector3(0.034, 0.030, 0.036)), tip + Vector3(0.0, -drop + 0.026, -depth * 0.86), kit.dark)
+	_weapon_core = _add_weapon_part(_box(Vector3(0.020, 0.016, 0.014)), tip + Vector3(0.0, -drop + 0.026, -depth * 1.02), _own_material(kit.accent))
+
+## Trench-gun sight picture: a rear ghost ring you look *through*, and a small
+## brass bead a metre further down the barrel. The two are deliberately sized
+## against their distance from the eye - the ring subtends about four times the
+## bead - so aimed they read as two objects at two depths instead of one slab.
+func _add_ghost_ring_sights(kit: Dictionary, rear_z: float, front_z: float) -> void:
+	var tip := _optic_tip()
+	var aperture := 0.058
+	# Rear: open ring on a stem. `TorusMesh` is built lying flat with its hole on
+	# the Y axis, so it has to be stood upright to face the eye - unrotated it
+	# renders edge-on as a bar straight across the sight line. Nothing crosses
+	# the hole, so the target stays visible inside it.
+	_add_weapon_part(_torus(aperture, 0.011), Vector3(0.0, tip.y, rear_z), kit.dark, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_box(Vector3(0.026, 0.050, 0.030)), Vector3(0.0, tip.y - 0.094, rear_z), kit.dark)
+	_add_weapon_part(_box(Vector3(0.058, 0.016, 0.048)), Vector3(0.0, tip.y - 0.054, rear_z), kit.steel)
+	# Protective ears, parked outboard of the ring so they never enter the hole.
+	for side in [-1.0, 1.0]:
+		_add_weapon_part(_box(Vector3(0.013, 0.070, 0.026)), Vector3(side * 0.076, tip.y - 0.010, rear_z), kit.dark)
+	# Front: a low ramp, a slim post, and the bead sitting proud on top of it.
+	_add_weapon_part(_box(Vector3(0.036, 0.020, 0.070)), Vector3(0.0, tip.y - 0.048, front_z), kit.dark)
+	_add_weapon_part(_box(Vector3(0.013, 0.036, 0.018)), Vector3(0.0, tip.y - 0.026, front_z), kit.dark)
+	_add_weapon_part(_sphere(0.016), Vector3(0.0, tip.y, front_z), kit.brass)
+	for side in [-1.0, 1.0]:
+		_add_weapon_part(_box(Vector3(0.011, 0.042, 0.020)), Vector3(side * 0.028, tip.y - 0.020, front_z), kit.dark)
+
+## Pistol three-dot irons. The rear notch gap is widened against its shorter
+## distance to the eye so it still frames the front post with daylight either
+## side; the post is the narrower, nearer-reading element you focus on.
+func _add_notch_sights(kit: Dictionary, rear_z: float, front_z: float) -> void:
+	var tip := _optic_tip()
+	# Rear: two square blades with a 0.026 notch of daylight between them.
+	_add_weapon_part(_box(Vector3(0.062, 0.014, 0.022)), Vector3(0.0, tip.y - 0.041, rear_z), kit.dark)
+	for side in [-1.0, 1.0]:
+		_add_weapon_part(_box(Vector3(0.014, 0.034, 0.018)), Vector3(side * 0.022, tip.y - 0.017, rear_z), kit.dark)
+		_add_weapon_part(_sphere(0.0045), Vector3(side * 0.022, tip.y - 0.016, rear_z + 0.010), kit.brass)
+	# Front: a taller, narrower post on its own ramp, dotted to match.
+	_add_weapon_part(_box(Vector3(0.030, 0.016, 0.028)), Vector3(0.0, tip.y - 0.048, front_z), kit.dark)
+	_add_weapon_part(_box(Vector3(0.014, 0.044, 0.020)), Vector3(0.0, tip.y - 0.022, front_z), kit.dark)
+	_add_weapon_part(_sphere(0.008), Vector3(0.0, tip.y - 0.013, front_z + 0.011), kit.brass)
+
+## Full telescopic sight: tube, both bells, three turrets and two ring mounts.
+## The ocular end is left open - the HUD's vignette is what turns this into a
+## scope picture, and a solid lens here would only occlude the target.
+func _add_scope(kit: Dictionary, tube_radius: float, ocular_z: float, objective_z: float) -> void:
+	var tip := _optic_tip()
+	var axis := Vector3(0.0, tip.y, 0.0)
+	var length := ocular_z - objective_z
+	var mid := (ocular_z + objective_z) * 0.5
+	_add_weapon_part(_tube(tube_radius, tube_radius, length), axis + Vector3(0.0, 0.0, mid), kit.dark, Vector3(PI * 0.5, 0.0, 0.0))
+	# Ocular bell, with a brass eyepiece ring so the near end catches light.
+	_add_weapon_part(_tube(tube_radius * 1.34, tube_radius * 1.08, 0.16), axis + Vector3(0.0, 0.0, ocular_z + 0.06), kit.dark, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_torus(tube_radius * 1.30, 0.014), axis + Vector3(0.0, 0.0, ocular_z + 0.135), kit.brass)
+	# Objective bell and its sunshade lip.
+	_add_weapon_part(_tube(tube_radius * 1.10, tube_radius * 1.50, 0.22), axis + Vector3(0.0, 0.0, objective_z - 0.08), kit.dark, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_torus(tube_radius * 1.48, 0.012), axis + Vector3(0.0, 0.0, objective_z - 0.19), kit.steel)
+	# Elevation, windage and parallax turrets - the detail that separates a
+	# scope from a length of pipe.
+	var turret_z := mid - 0.02
+	_add_weapon_part(_cylinder(tube_radius * 0.70, tube_radius * 0.78, 0.080), axis + Vector3(0.0, tube_radius + 0.040, turret_z), kit.dark)
+	_add_weapon_part(_cylinder(tube_radius * 0.60, tube_radius * 0.60, 0.020), axis + Vector3(0.0, tube_radius + 0.090, turret_z), kit.brass)
+	for side in [-1.0, 1.0]:
+		_add_weapon_part(_cylinder(tube_radius * 0.58, tube_radius * 0.66, 0.070), axis + Vector3(side * (tube_radius + 0.035), 0.0, turret_z), kit.dark, Vector3(0.0, 0.0, PI * 0.5))
+	# Ring mounts, clamped down onto the receiver rail.
+	for ring_z in [objective_z + 0.16, ocular_z - 0.16]:
+		_add_weapon_part(_torus(tube_radius + 0.006, 0.026), axis + Vector3(0.0, 0.0, ring_z), kit.dark)
+		_add_weapon_part(_box(Vector3(0.10, tip.y * 0.52, 0.058)), Vector3(0.0, tip.y - tube_radius - tip.y * 0.26, ring_z), kit.dark)
+	_weapon_core = _add_weapon_part(_box(Vector3(0.016, 0.026, 0.052)), axis + Vector3(tube_radius * 0.92, tube_radius * 0.58, ocular_z - 0.30), _own_material(kit.accent))
+
+func _build_rifle_model(kit: Dictionary) -> void:
+	# Rift Carbine - AR-pattern carbine. Reads on its two-part receiver, the
+	# angled magazine, a long slotted handguard and a reflex sight up on the
+	# rail; the buffer tube and stock give it the length an SMG must not have.
+	_weapon_mesh = _add_weapon_part(_box(Vector3(0.115, 0.135, 0.62)), Vector3(0.0, 0.075, -0.10), kit.steel)
+	_add_weapon_part(_box(Vector3(0.105, 0.120, 0.46)), Vector3(0.0, -0.030, -0.02), kit.frame)
+	_add_weapon_part(_box(Vector3(0.012, 0.062, 0.150)), Vector3(0.063, 0.078, -0.04), kit.brass)
+	# Handguard: slotted tube, gas block, barrel, brake.
+	_add_weapon_part(_box(Vector3(0.112, 0.112, 0.70)), Vector3(0.0, 0.055, -0.62), kit.frame)
+	_add_vent_slots(kit, 4, Vector3(0.126, 0.020, 0.052), Vector3(0.0, 0.100, -0.86), 0.140)
+	_add_vent_slots(kit, 4, Vector3(0.126, 0.020, 0.052), Vector3(0.0, 0.010, -0.86), 0.140)
+	_add_weapon_part(_box(Vector3(0.070, 0.078, 0.090)), Vector3(0.0, 0.108, -0.99), kit.dark)
+	_add_weapon_part(_tapered_cylinder(0.027, 0.031, 0.34), Vector3(0.0, 0.055, -1.14), kit.steel, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_cylinder(0.043, 0.043, 0.10), Vector3(0.0, 0.055, -1.33), kit.dark, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_torus(0.036, 0.010), Vector3(0.0, 0.055, -1.30), kit.steel)
+	# Magazine, grip, trigger group.
+	_magazine_mesh = _add_weapon_part(_box(Vector3(0.075, 0.34, 0.135)), Vector3(0.0, -0.255, -0.05), kit.frame, Vector3(-0.13, 0.0, 0.0))
+	_add_weapon_part(_box(Vector3(0.090, 0.032, 0.150)), Vector3(0.0, -0.428, -0.028), kit.dark, Vector3(-0.13, 0.0, 0.0))
+	_add_weapon_part(_box(Vector3(0.075, 0.220, 0.105)), Vector3(0.0, -0.165, 0.140), kit.grip, Vector3(-0.36, 0.0, 0.0))
+	_add_trigger_group(kit, Vector3(0.0, -0.078, 0.035), 0.052)
+	# Buffer tube and collapsible stock.
+	_add_weapon_part(_cylinder(0.044, 0.044, 0.34), Vector3(0.0, 0.058, 0.335), kit.steel, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_box(Vector3(0.088, 0.155, 0.30)), Vector3(0.0, 0.020, 0.420), kit.frame)
+	_add_weapon_part(_box(Vector3(0.098, 0.205, 0.042)), Vector3(0.0, 0.000, 0.578), kit.grip)
+	# Charging handle and top rail.
+	_add_weapon_part(_box(Vector3(0.092, 0.028, 0.060)), Vector3(0.0, 0.132, 0.215), kit.brass)
+	_add_rail(kit, 0.150, -0.60, 6, 0.098, 0.140)
+	_add_charge_strip(kit, Vector3(-0.062, 0.030, -0.10), 5, 0.078)
+	_add_reflex_sight(kit, 0.098, 0.088, 0.104)
+	_muzzle_flare = _add_weapon_part(_box(Vector3(0.070, 0.070, 0.100)), Vector3(0.0, 0.055, -1.41), _own_material(kit.hot))
+
+func _build_smg_model(kit: Dictionary) -> void:
+	# Riftline SMG - MP7 pattern. Deliberately stubby: magazine housed in the
+	# grip rather than ahead of it, a vertical foregrip, a skeleton stock and a
+	# short rail. Half the carbine's length at a glance.
+	_weapon_mesh = _add_weapon_part(_box(Vector3(0.100, 0.145, 0.46)), Vector3(0.0, 0.030, -0.10), kit.frame)
+	_add_weapon_part(_box(Vector3(0.106, 0.050, 0.44)), Vector3(0.0, 0.116, -0.10), kit.steel)
+	_add_weapon_part(_box(Vector3(0.012, 0.048, 0.110)), Vector3(0.058, 0.032, -0.06), kit.brass)
+	# Grip-housed magazine.
+	_magazine_mesh = _add_weapon_part(_box(Vector3(0.078, 0.260, 0.115)), Vector3(0.0, -0.155, 0.062), kit.grip, Vector3(-0.19, 0.0, 0.0))
+	_add_weapon_part(_box(Vector3(0.090, 0.028, 0.132)), Vector3(0.0, -0.288, 0.087), kit.dark, Vector3(-0.19, 0.0, 0.0))
+	_add_trigger_group(kit, Vector3(0.0, -0.052, -0.020), 0.048)
+	# Shrouded barrel and vertical foregrip.
+	_add_weapon_part(_box(Vector3(0.086, 0.086, 0.34)), Vector3(0.0, 0.030, -0.50), kit.frame)
+	_add_vent_slots(kit, 3, Vector3(0.098, 0.018, 0.046), Vector3(0.0, 0.066, -0.62), 0.110)
+	_add_weapon_part(_tapered_cylinder(0.021, 0.024, 0.18), Vector3(0.0, 0.030, -0.76), kit.steel, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_cylinder(0.032, 0.032, 0.070), Vector3(0.0, 0.030, -0.86), kit.dark, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_box(Vector3(0.052, 0.190, 0.068)), Vector3(0.0, -0.118, -0.455), kit.grip, Vector3(0.11, 0.0, 0.0))
+	# Skeleton stock: two struts and a butt plate, folded alongside the body.
+	for side in [-1.0, 1.0]:
+		_add_weapon_part(_box(Vector3(0.017, 0.017, 0.34)), Vector3(side * 0.054, 0.098, 0.335), kit.steel)
+	_add_weapon_part(_box(Vector3(0.128, 0.098, 0.030)), Vector3(0.0, 0.098, 0.510), kit.frame)
+	_add_rail(kit, 0.150, -0.30, 4, 0.092, 0.120)
+	_add_charge_strip(kit, Vector3(-0.055, 0.020, -0.10), 4, 0.072)
+	_add_reflex_sight(kit, 0.084, 0.076, 0.090)
+	_muzzle_flare = _add_weapon_part(_box(Vector3(0.058, 0.058, 0.080)), Vector3(0.0, 0.030, -0.93), _own_material(kit.hot))
+
+func _build_shotgun_model(kit: Dictionary) -> void:
+	# S1897 Pump - trench gun. Two parallel tubes, a wood pump and stock, the
+	# exposed hammer the 1897 is known for, and a ventilated heat shield. No
+	# optic: it aims over a brass bead, which is the whole point of the look.
+	_weapon_mesh = _add_weapon_part(_box(Vector3(0.105, 0.155, 0.40)), Vector3(0.0, 0.020, 0.020), kit.steel)
+	_add_weapon_part(_box(Vector3(0.108, 0.055, 0.26)), Vector3(0.0, 0.098, 0.020), kit.dark)
+	# Barrel over magazine tube - the signature double-tube silhouette.
+	_add_weapon_part(_cylinder(0.042, 0.044, 1.00), Vector3(0.0, 0.095, -0.62), kit.steel, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_cylinder(0.031, 0.031, 0.86), Vector3(0.0, -0.012, -0.55), kit.steel, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_torus(0.044, 0.011), Vector3(0.0, 0.095, -0.98), kit.dark)
+	# Ventilated heat shield over the barrel.
+	_add_weapon_part(_box(Vector3(0.100, 0.042, 0.52)), Vector3(0.0, 0.150, -0.62), kit.dark)
+	for side in [-1.0, 1.0]:
+		_add_weapon_part(_box(Vector3(0.012, 0.072, 0.52)), Vector3(side * 0.048, 0.118, -0.62), kit.dark)
+	_add_vent_slots(kit, 4, Vector3(0.108, 0.024, 0.048), Vector3(0.0, 0.128, -0.80), 0.120)
+	# Wood pump and straight-wrist stock.
+	_add_weapon_part(_box(Vector3(0.096, 0.100, 0.26)), Vector3(0.0, -0.012, -0.44), kit.wood)
+	_add_vent_slots(kit, 3, Vector3(0.104, 0.014, 0.028), Vector3(0.0, -0.012, -0.52), 0.070)
+	_add_weapon_part(_box(Vector3(0.100, 0.155, 0.46)), Vector3(0.0, -0.030, 0.440), kit.wood, Vector3(0.055, 0.0, 0.0))
+	_add_weapon_part(_box(Vector3(0.110, 0.200, 0.036)), Vector3(0.0, -0.056, 0.680), kit.dark, Vector3(0.055, 0.0, 0.0))
+	_add_trigger_group(kit, Vector3(0.0, -0.068, -0.055), 0.050)
+	# Exposed hammer, and a brass shell riding the loading port during reload.
+	_add_weapon_part(_box(Vector3(0.028, 0.075, 0.045)), Vector3(0.0, 0.118, 0.196), kit.dark, Vector3(-0.30, 0.0, 0.0))
+	_magazine_mesh = _add_weapon_part(_cylinder(0.026, 0.026, 0.100), Vector3(0.0, -0.048, -0.100), kit.brass, Vector3(PI * 0.5, 0.0, 0.0))
+	_weapon_core = _add_weapon_part(_box(Vector3(0.014, 0.038, 0.090)), Vector3(0.056, 0.020, 0.130), _own_material(kit.accent))
+	_add_charge_strip(kit, Vector3(-0.058, 0.014, 0.020), 4, 0.070)
+	_add_ghost_ring_sights(kit, 0.060, -1.08)
+	_muzzle_flare = _add_weapon_part(_box(Vector3(0.086, 0.086, 0.100)), Vector3(0.0, 0.095, -1.16), _own_material(kit.hot))
+
+func _build_pistol_model(kit: Dictionary) -> void:
+	# Sidearm 9 - compact striker-fired 9mm. Small, high-gripped, slide
+	# serrations and three-dot irons. It must never read as a short carbine.
+	_weapon_mesh = _add_weapon_part(_box(Vector3(0.086, 0.104, 0.44)), Vector3(0.0, 0.075, -0.10), kit.steel)
+	for index in 4:
+		_add_weapon_part(_box(Vector3(0.090, 0.076, 0.013)), Vector3(0.0, 0.075, 0.030 + 0.032 * float(index)), kit.dark)
+	_add_weapon_part(_box(Vector3(0.080, 0.076, 0.34)), Vector3(0.0, -0.004, -0.060), kit.frame)
+	_add_weapon_part(_box(Vector3(0.050, 0.022, 0.140)), Vector3(0.0, -0.040, -0.240), kit.dark)
+	_add_weapon_part(_cylinder(0.025, 0.025, 0.060), Vector3(0.0, 0.075, -0.350), kit.dark, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_box(Vector3(0.076, 0.235, 0.100)), Vector3(0.0, -0.152, 0.100), kit.grip, Vector3(-0.27, 0.0, 0.0))
+	_magazine_mesh = _add_weapon_part(_box(Vector3(0.086, 0.026, 0.116)), Vector3(0.0, -0.272, 0.135), kit.dark, Vector3(-0.27, 0.0, 0.0))
+	_add_trigger_group(kit, Vector3(0.0, -0.054, -0.012), 0.046)
+	_add_weapon_part(_box(Vector3(0.012, 0.030, 0.060)), Vector3(0.046, 0.024, 0.055), kit.brass)
+	# Breech face. Aimed, the slide is seen square-on from behind, where it was
+	# otherwise one blank grey rectangle across the bottom half of the frame.
+	_add_weapon_part(_box(Vector3(0.062, 0.078, 0.014)), Vector3(0.0, 0.075, 0.118), kit.dark)
+	for serration_x in [-0.030, 0.030]:
+		_add_weapon_part(_box(Vector3(0.011, 0.086, 0.020)), Vector3(serration_x, 0.075, 0.116), kit.grip)
+	_add_weapon_part(_box(Vector3(0.030, 0.020, 0.016)), Vector3(0.0, 0.040, 0.117), kit.grip)
+	_weapon_core = _add_weapon_part(_box(Vector3(0.012, 0.026, 0.060)), Vector3(-0.045, -0.012, -0.030), _own_material(kit.accent))
+	_add_charge_strip(kit, Vector3(-0.046, 0.018, -0.050), 3, 0.058)
+	_add_notch_sights(kit, 0.140, -0.300)
+	_muzzle_flare = _add_weapon_part(_box(Vector3(0.048, 0.048, 0.060)), Vector3(0.0, 0.075, -0.400), _own_material(kit.hot))
+
+func _build_sniper_model(kit: Dictionary) -> void:
+	# Longview Mk1 - Halo Infinite S7 as the named reference. Very long, heavy
+	# chassis, big turreted scope riding high on ring mounts, ported brake and
+	# a deployed bipod. Nothing else in the armoury is anywhere near this size.
+	_weapon_mesh = _add_weapon_part(_box(Vector3(0.115, 0.160, 0.80)), Vector3(0.0, 0.000, 0.020), kit.steel)
+	_add_weapon_part(_box(Vector3(0.092, 0.046, 0.92)), Vector3(0.0, -0.092, 0.000), kit.dark)
+	# Free-floated barrel under a slotted shroud, ported muzzle brake.
+	_add_weapon_part(_box(Vector3(0.100, 0.100, 0.52)), Vector3(0.0, 0.045, -0.62), kit.frame)
+	_add_vent_slots(kit, 3, Vector3(0.114, 0.020, 0.052), Vector3(0.0, 0.086, -0.76), 0.130)
+	_add_weapon_part(_tapered_cylinder(0.031, 0.043, 1.10), Vector3(0.0, 0.045, -0.95), kit.steel, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_cylinder(0.054, 0.054, 0.140), Vector3(0.0, 0.045, -1.56), kit.dark, Vector3(PI * 0.5, 0.0, 0.0))
+	for port_z in [-1.525, -1.585]:
+		_add_weapon_part(_box(Vector3(0.126, 0.026, 0.030)), Vector3(0.0, 0.045, port_z), kit.dark)
+	# Chassis stock: cheek riser, butt pad, pistol grip.
+	_add_weapon_part(_box(Vector3(0.095, 0.170, 0.52)), Vector3(0.0, -0.030, 0.620), kit.frame)
+	_add_weapon_part(_box(Vector3(0.086, 0.060, 0.30)), Vector3(0.0, 0.076, 0.560), kit.grip)
+	_add_weapon_part(_box(Vector3(0.110, 0.210, 0.046)), Vector3(0.0, -0.050, 0.895), kit.grip)
+	_add_weapon_part(_box(Vector3(0.076, 0.220, 0.100)), Vector3(0.0, -0.180, 0.300), kit.grip, Vector3(-0.32, 0.0, 0.0))
+	_add_trigger_group(kit, Vector3(0.0, -0.092, 0.180), 0.050)
+	# Detachable box magazine.
+	_magazine_mesh = _add_weapon_part(_box(Vector3(0.076, 0.250, 0.160)), Vector3(0.0, -0.215, -0.080), kit.frame)
+	_add_weapon_part(_box(Vector3(0.090, 0.028, 0.176)), Vector3(0.0, -0.352, -0.080), kit.dark)
+	# Bolt handle - the one asymmetric feature on the whole armoury.
+	_add_weapon_part(_cylinder(0.015, 0.015, 0.120), Vector3(0.118, 0.050, 0.200), kit.steel, Vector3(0.0, 0.0, PI * 0.5))
+	_add_weapon_part(_sphere(0.028), Vector3(0.178, 0.050, 0.200), kit.brass)
+	# Deployed bipod.
+	for side in [-1.0, 1.0]:
+		_add_weapon_part(_box(Vector3(0.018, 0.300, 0.018)), Vector3(side * 0.075, -0.230, -1.020), kit.dark, Vector3(0.0, 0.0, side * 0.30))
+		_add_weapon_part(_box(Vector3(0.046, 0.016, 0.030)), Vector3(side * 0.120, -0.375, -1.020), kit.dark)
+	_add_rail(kit, 0.088, -0.24, 5, 0.096, 0.130)
+	_add_charge_strip(kit, Vector3(-0.062, -0.020, 0.020), 5, 0.086)
+	_add_scope(kit, 0.056, 0.300, -0.520)
+	_muzzle_flare = _add_weapon_part(_box(Vector3(0.062, 0.062, 0.090)), Vector3(0.0, 0.045, -1.66), _own_material(kit.hot))
 
 func _add_weapon_part(mesh: Mesh, position: Vector3, material: Material, rotation: Vector3 = Vector3.ZERO) -> MeshInstance3D:
 	var instance := MeshInstance3D.new()
@@ -1152,8 +1515,11 @@ func _add_weapon_part(mesh: Mesh, position: Vector3, material: Material, rotatio
 	instance.position = position
 	instance.rotation = rotation
 	instance.material_override = material
-	instance.layers = 2 if _local_camera else 1
-	_weapon_root.add_child(instance)
+	instance.layers = VIEW_MODEL_LAYER_MASK if _local_camera else 1
+	# Parts hang off the rig, not the root: the root is animated every frame by
+	# ADS/recoil/obstruction, the rig carries the static hip pose.
+	var parent: Node3D = _weapon_rig if _weapon_rig != null else _weapon_root
+	parent.add_child(instance)
 	return instance
 
 func _add_body_part(mesh: Mesh, position: Vector3, material: Material, rotation: Vector3 = Vector3.ZERO) -> MeshInstance3D:
@@ -1179,6 +1545,24 @@ func _add_head_part(mesh: Mesh, position: Vector3, material: Material) -> void:
 func _box(dimensions: Vector3) -> BoxMesh:
 	var mesh := BoxMesh.new()
 	mesh.size = dimensions
+	return mesh
+
+## An open-ended cylinder. Anything the aim ray passes through has to be a tube
+## and not a cylinder: a capped `CylinderMesh` sitting on the sight line puts a
+## solid disc squarely over the target, which is exactly what the scope's
+## ocular did before this.
+func _tube(top_radius: float, bottom_radius: float, height: float) -> CylinderMesh:
+	var mesh := _cylinder(top_radius, bottom_radius, height)
+	mesh.cap_top = false
+	mesh.cap_bottom = false
+	return mesh
+
+func _sphere(radius: float) -> SphereMesh:
+	var mesh := SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	mesh.radial_segments = 12
+	mesh.rings = 6
 	return mesh
 
 func _cylinder(top_radius: float, bottom_radius: float, height: float) -> CylinderMesh:
