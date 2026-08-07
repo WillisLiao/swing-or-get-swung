@@ -17,7 +17,12 @@ signal lobby_live_received(state: Dictionary)
 signal lobby_abandoned_received(state: Dictionary)
 
 const PROJECT_ID := "riftline-lan"
-const PROTOCOL_VERSION := 10
+## Bumped for the weapons/loadout rebuild: a new "melee" input field, renamed
+## melee wire event (was "knife_strike"), and new authoritative-state fields
+## (loadout_slots, active_slot, zoom_index, bloom, shot_counter, ads_progress,
+## player_class, has_nuclear_vest, has_ballistic_shield). Mismatched builds
+## must refuse to pair rather than silently desync.
+const PROTOCOL_VERSION := 11
 const MODE_LABEL := "nuclear-rush"
 const MAP_LABEL := "concourse"
 const APP_HOST_REMOTE_SLOTS := 7
@@ -621,7 +626,7 @@ func _validate_input(peer_id: int, frame: Dictionary) -> Dictionary:
 	var pitch := clampf(float(frame.pitch), -1.05, 0.9)
 	if _last_input_view.has(peer_id) and absf(angle_difference(float(_last_input_view[peer_id]), yaw)) > MAX_VIEW_TURN_PER_FRAME:
 		return {}
-	for key in ["aim", "fire", "jump", "crouch", "prone", "weapon_switch", "reload", "pass_seed", "interact"]:
+	for key in ["aim", "fire", "jump", "crouch", "prone", "weapon_switch", "reload", "pass_seed", "interact", "melee"]:
 		if not frame.has(key) or typeof(frame[key]) != TYPE_BOOL:
 			return {}
 	return {
@@ -640,6 +645,7 @@ func _validate_input(peer_id: int, frame: Dictionary) -> Dictionary:
 		"reload": bool(frame.reload),
 		"pass_seed": bool(frame.pass_seed),
 		"interact": bool(frame.interact),
+		"melee": bool(frame.melee),
 	}
 
 func _is_finite_number(value: Variant) -> bool:

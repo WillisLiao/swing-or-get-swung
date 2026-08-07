@@ -22,7 +22,7 @@ See `WORKFLOW.md` in that repo for the two-developer plus AI-assistant flow.
 
 Robert's circular arena is in as the **only** map, ported forward from PR #1 rather than merged.
 Nuclear Rush is the **only** mode, built to the final rules below.
-The session layer is 4v4 on protocol 10 with no map or mode negotiation left in the wire format.
+The session layer is 4v4 on protocol 11 with no map or mode negotiation left in the wire format.
 Art moved to real PBR via `shaders/nuclear_pbr.gdshader` + `NuclearMaterials`, still with zero imported art.
 The settings-panel touch-capture bug (a sliding finger activating other controls) is fixed with a regression test.
 Headless import is clean and all 16 exercises pass.
@@ -36,12 +36,21 @@ Full detail: `devlogs/2026-08-07.md`.
 - **Settings panel redesigned + Main Menu added.** There was previously no way back to the connection/staging screen from inside a match short of restarting the app. `duel_hud.gd` settings now has a MAIN MENU action (reuses the existing `_on_rift_link_cancelled()` leave/severed path) and the whole panel moved from hand-placed pixel offsets to a real 2-column grid with section headers; the dead inert "QUICK SWAP" chip was removed.
 - All 16 exercises still pass, including a new reconnect-grace block in `tools/riftline_lobby_exercise.gd`.
 
+**Same day, third session - weapons, accuracy model, and class loadouts (`handoffs/NEXT-SESSION-weapons-and-loadouts.md`, now done):**
+- Iron sights and the knife are gone. Every weapon ADS's through an optic; melee (`Duelist.melee_attack()`) swings whatever weapon is currently equipped, with per-weapon range/damage/cooldown.
+- Five real weapons replace the single generic M4/PULSE: assault rifle, MP7-reference SMG, S1897-reference pump shotgun (9-pellet rosette), 9mm-class pistol, Halo-Infinite-referenced sniper (two zoom steps, zero ADS drift). New `scripts/rift_weapons.gd` data table backs all of it; `rift_ballistics.gd` is now fully data-driven.
+- New accuracy model: `RiftWeapons.cone_for()` composes hipfire/ADS x stationary/moving/jumping/crouching from one formula per weapon, driven by new networked `Duelist` state (`bloom`, `shot_counter`, `ads_progress`) that is symmetric across `authoritative_state()`/`apply_presentation_state()`.
+- Four classes (frontline/sniper/runner/shield) resolve into 1-2 loadout slots via `Duelist.configure_loadout()`; `RiftlineRoster` carries `player_class`/`primary_weapon` (defaults to Frontline/Rifle - no selection screen yet, see below). Runner wears the nuclear vest (removes the new carry damage-over-time); shield blocks frontal damage.
+- All five weapons rebuilt on `NuclearMaterials` instead of the old flat `pulp_lit` boxes (mid-session user feedback: the old carbine read "Roblox/TF2-like," not the Halo/Destiny register the rest of the game already commits to) - still "lightly on the model side" per the handoff, not final art.
+- `PROTOCOL_VERSION` bumped 10 -> 11 (new `melee` input field, renamed `melee_strike` wire event, new snapshot fields).
+- All 16 exercises still pass, several extended for the new weapon/accuracy/loadout surface. Full detail: the "Third session" entry in `devlogs/2026-08-07.md`.
+- **Not done:** no in-game class/loadout selection UI (backend only), shotgun reload is one bulk animation not shell-by-shell, no headshot hitboxes (none exist anywhere in the codebase yet, so the sniper's one-shot fantasy is only half-delivered), numbers are a first tuning pass.
+
 **Deferred by explicit user decision to their own sessions - do not start these inline, use the bootstrap files:**
-- `handoffs/NEXT-SESSION-weapons-and-loadouts.md` - remove iron sights and the knife, real per-stance/movement/ADS accuracy model, five real weapons (AR/SMG/shotgun/pistol/sniper) replacing the one generic M4, four-class 2-slot loadout rebuild (frontline/sniper/runner/shield), nuclear vest mechanic.
-- `handoffs/NEXT-SESSION-art-ui-redesign.md` - full Halo/Destiny-register art, character/weapon materials off `pulp_lit`, and a full UI pass (not just the settings-panel layout fix already done). **Run after** the weapons/loadouts session - they touch the same files.
+- `handoffs/NEXT-SESSION-art-ui-redesign.md` - full Halo/Destiny-register art, character/weapon materials off `pulp_lit`, and a full UI pass (not just the settings-panel layout fix already done). **Run after** the weapons/loadouts session (now done) - they touch the same files. A loadout/class selection screen belongs here too, now that the backend contract exists.
 - `handoffs/NEXT-SESSION-respawn-logic.md` - respawn timing considered as part of the whole game-mode-rule chain, not an isolated number. Framing only so far, no design.
 
-These three touch `scripts/duelist.gd`, `scripts/riftline_arena.gd`, and `scripts/duel_hud.gd` in overlapping ways.
+These touch `scripts/duelist.gd`, `scripts/riftline_arena.gd`, and `scripts/duel_hud.gd` in overlapping ways.
 **Run them sequentially, one at a time, not as concurrently-running sessions against the same checkout** - see the "Sequencing" note in `NEXT-SESSION-art-ui-redesign.md` for what happens if you don't and how to do it safely with worktrees if you really want two running at once.
 
 **Older backlog, still real but lower priority than the above:**

@@ -108,13 +108,10 @@ func _physics_process(delta: float) -> void:
 
 	if not has_los or not _target_locked or _reaction_remaining > 0.0 or _tracking_remaining > 0.0 or _shot_cadence_remaining > 0.0:
 		return
-	if distance <= KNIFE_RANGE:
-		if weapon != Weapon.KNIFE:
-			set_weapon_presentation(Weapon.KNIFE)
-		fire_forward()
+	var melee_range := float(RiftWeapons.row(int(weapon)).melee_range)
+	if distance <= melee_range:
+		melee_attack()
 		return
-	if weapon == Weapon.KNIFE:
-		set_weapon_presentation(Weapon.PULSE)
 	if _burst_remaining <= 0.0:
 		# Keep one bounded torso miss for a short burst, rather than rerolling aim on every frame.
 		_aim_offset = Vector3(_random.randf_range(-0.46, 0.46), _random.randf_range(-0.2, 0.2), 0.0)

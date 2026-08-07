@@ -25,8 +25,8 @@ var movement := Vector2.ZERO
 var fire_held := false
 var aim_held := false
 var health := 100.0
-var magazine_rounds := Duelist.M4_MAGAZINE_SIZE
-var reserve_ammo := Duelist.M4_RESERVE_AMMO
+var magazine_rounds := int(RiftWeapons.row(int(Duelist.Weapon.RIFLE)).magazine_size)
+var reserve_ammo := int(RiftWeapons.row(int(Duelist.Weapon.RIFLE)).reserve_ammo)
 var reload_remaining := 0.0
 var damage_flash := 0.0
 var hit_confirm := 0.0
@@ -70,6 +70,8 @@ var _crouch_requested := false
 var _prone_requested := false
 var _weapon_switch_requested := false
 var _reload_requested := false
+var _melee_requested := false
+var _melee_touch := -1
 var _interact_requested := false
 var _left_fire_touch := -1
 var _right_fire_touch := -1
@@ -110,7 +112,7 @@ var _objective_message_remaining := 0.0
 var _score_pulse := 0.0
 var _score_pulse_team := -1
 var _stance := Duelist.Stance.STAND
-var _weapon := Duelist.Weapon.PULSE
+var _weapon := Duelist.Weapon.RIFLE
 var _settings_open := false
 var _layout_editor := false
 var _aim_toggle := false
@@ -203,6 +205,11 @@ func take_reload() -> bool:
 	_reload_requested = false
 	return requested
 
+func take_melee() -> bool:
+	var requested := _melee_requested
+	_melee_requested = false
+	return requested
+
 func take_reset_training() -> bool:
 	var requested := _reset_training_requested
 	_reset_training_requested = false
@@ -245,7 +252,7 @@ func set_touch_preview(preview: String) -> void:
 	if preview == "ammo-low":
 		show_ammo(4, 24, 0.0)
 	elif preview == "reloading":
-		show_ammo(4, 24, Duelist.M4_RELOAD_SECONDS * 0.5)
+		show_ammo(4, 24, float(RiftWeapons.row(int(Duelist.Weapon.RIFLE)).reload_seconds) * 0.5)
 	if preview == "coach-move":
 		set_coach_cue({"key": "move", "text": "DRAG LEFT SIDE TO MOVE", "region": "left"})
 	elif preview == "coach-look":
@@ -313,9 +320,6 @@ func set_stance(stance: Duelist.Stance) -> void:
 
 func set_weapon(weapon: Duelist.Weapon) -> void:
 	_weapon = weapon
-	if _weapon == Duelist.Weapon.KNIFE:
-		aim_held = false
-		_aim_touch = -1
 	queue_redraw()
 
 func set_view_fov(value: float, persist: bool = true) -> void:
@@ -331,8 +335,9 @@ func set_view_fov(value: float, persist: bool = true) -> void:
 func show_ammo(magazine: int, reserve: int, reload_time: float) -> void:
 	if _ammo_preview_override:
 		return
-	magazine_rounds = clampi(magazine, 0, Duelist.M4_MAGAZINE_SIZE)
-	reserve_ammo = clampi(reserve, 0, Duelist.M4_RESERVE_AMMO)
+	var row := RiftWeapons.row(int(_weapon))
+	magazine_rounds = clampi(magazine, 0, int(row.magazine_size))
+	reserve_ammo = clampi(reserve, 0, int(row.reserve_ammo))
 	reload_remaining = maxf(0.0, reload_time)
 	queue_redraw()
 
@@ -451,6 +456,9 @@ func _gui_input(event: InputEvent) -> void:
 			elif event.pressed and _pressed_circle(event.position, _reload_center(), _reload_radius() + 12.0):
 				_reload_requested = true
 				fire_held = false
+			elif event.pressed and _pressed_circle(event.position, _melee_center(), _melee_radius() + 12.0):
+				_melee_requested = true
+				fire_held = false
 			elif event.pressed and _interact_available and _pressed_circle(event.position, _control_center("interact"), _control_radius("interact") + 12.0):
 				_interact_requested = true
 				fire_held = false
@@ -476,6 +484,10 @@ func _handle_touch(index: int, point: Vector2, pressed: bool) -> void:
 		return
 	if _pressed_circle(point, _reload_center(), _reload_radius() + 12.0):
 		_reload_requested = true
+		return
+	if _pressed_circle(point, _melee_center(), _melee_radius() + 12.0):
+		_melee_touch = index
+		_melee_requested = true
 		return
 	var key := _action_key_at(point)
 	if key == "left_fire":
@@ -548,6 +560,8 @@ func _release_touch(index: int) -> void:
 		_prone_touch = -1
 	if index == _switch_touch:
 		_switch_touch = -1
+	if index == _melee_touch:
+		_melee_touch = -1
 	if index == _interact_touch:
 		_interact_touch = -1
 	if index == _settings_owner_touch:
@@ -563,6 +577,7 @@ func _release_all_touch_ownership() -> void:
 	_crouch_touch = -1
 	_prone_touch = -1
 	_switch_touch = -1
+	_melee_touch = -1
 	_interact_touch = -1
 	_settings_owner_touch = -1
 	_settings_captures.clear()
@@ -576,6 +591,7 @@ func _release_all_touch_ownership() -> void:
 	_prone_requested = false
 	_weapon_switch_requested = false
 	_reload_requested = false
+	_melee_requested = false
 	_interact_requested = false
 	_stick_visual_target = 0.0
 
@@ -594,9 +610,7 @@ func _draw_gameplay_hud() -> void:
 	_draw_coach_cue(friendly, enemy)
 
 	# The reticle stays clean for touch aiming, with a short directional bloom that recovers quickly.
-	if _weapon == Duelist.Weapon.KNIFE:
-		draw_circle(center, 3.0, Color("ffffff", 0.96))
-	elif not aim_held:
+	if not aim_held:
 		var bloom_gap := 10.0 + primary_fire_bloom * 4.0
 		var bloom_span := 25.0 + primary_fire_bloom * 6.0
 		var reticle_color := Color("ffffff", 0.96)
@@ -636,16 +650,17 @@ func _draw_gameplay_hud() -> void:
 
 	_draw_button("left_fire", friendly, _left_fire_touch >= 0)
 	_draw_button("right_fire", friendly, _right_fire_touch >= 0)
-	if _weapon == Duelist.Weapon.PULSE:
-		_draw_button("ads", enemy, aim_held)
+	# Every weapon ADS's through an optic now, so the ADS button is no longer
+	# weapon-gated the way it was when only the carbine could aim.
+	_draw_button("ads", enemy, aim_held)
 	_draw_button("jump", enemy, _jump_touch >= 0)
 	_draw_button("crouch", friendly, _stance == Duelist.Stance.CROUCH)
 	_draw_button("prone", friendly, _stance == Duelist.Stance.PRONE)
 	_draw_button("swap", Color("c292ff"), _switch_touch >= 0)
 	if _interact_available:
 		_draw_button("interact", friendly, _interact_touch >= 0)
-	if _weapon == Duelist.Weapon.PULSE:
-		_draw_button_fixed(_reload_center(), _reload_radius(), Color("e6a25b"), reload_remaining > 0.0, "reload")
+	_draw_button_fixed(_reload_center(), _reload_radius(), Color("e6a25b"), reload_remaining > 0.0, "reload")
+	_draw_button_fixed(_melee_center(), _melee_radius(), Color("8fd6a8"), _melee_touch >= 0, "melee")
 	_draw_weapon_indicator(friendly)
 	_draw_button_fixed(_settings_center(), 24.0, enemy, _settings_open, "settings")
 	if _touch_preview in ["two-thumb", "four-finger"]:
@@ -826,7 +841,7 @@ func _draw_button_fixed(center: Vector2, radius: float, color: Color, active: bo
 	var outline_alpha := 0.95 if active else 0.34
 	draw_circle(center, radius, Color("071126", fill_alpha * opacity))
 	draw_arc(center, radius, 0.0, TAU, 32, Color(color, outline_alpha * opacity), 2.5 if active else 1.35)
-	if _control_specs().has(label) or label == "reload" or label == "settings":
+	if _control_specs().has(label) or label == "reload" or label == "settings" or label == "melee":
 		_draw_control_glyph(center, radius, color, label, active, opacity)
 		return
 	var font := ThemeDB.fallback_font
@@ -868,9 +883,14 @@ func _draw_control_glyph(center: Vector2, radius: float, color: Color, key: Stri
 			draw_line(center + Vector2(radius * 0.05, 0), center + Vector2(radius * 0.42, 0), glyph_color, weight)
 			draw_line(center + Vector2(radius * 0.27, -radius * 0.16), center + Vector2(radius * 0.42, 0), glyph_color, weight)
 			draw_line(center + Vector2(radius * 0.27, radius * 0.16), center + Vector2(radius * 0.42, 0), glyph_color, weight)
+		"melee":
+			# Swings whatever is currently equipped - a simple crossed-blade
+			# glyph rather than a per-weapon icon, since it's not a weapon slot.
+			draw_line(center + Vector2(-radius * 0.3, -radius * 0.3), center + Vector2(radius * 0.3, radius * 0.3), glyph_color, weight)
+			draw_line(center + Vector2(-radius * 0.3, radius * 0.3), center + Vector2(radius * 0.3, -radius * 0.3), glyph_color, weight)
 		"reload":
 			if active and reload_indicator_animates():
-				_draw_reload_sweep(center, radius * 0.58, glyph_color, reload_progress_for(reload_remaining))
+				_draw_reload_sweep(center, radius * 0.58, glyph_color, reload_progress_for(reload_remaining, float(RiftWeapons.row(int(_weapon)).reload_seconds)))
 			else:
 				_draw_reload_icon(center, radius * 0.58, glyph_color)
 		"settings":
@@ -891,45 +911,78 @@ func _draw_reload_icon(center: Vector2, radius: float, color: Color) -> void:
 	draw_line(tip, tip + Vector2(-radius * 0.02, radius * 0.28), color, 2.4)
 	draw_line(tip, tip + Vector2(-radius * 0.27, radius * 0.04), color, 2.4)
 
+## Loadout slots default to a Frontline rifle+pistol pair for presentation
+## before the first authoritative sync arrives; set_loadout_slots() below
+## keeps this in step with the local duelist's actual class/loadout.
+var _loadout_slots: Array = [Duelist.Weapon.RIFLE, Duelist.Weapon.PISTOL]
+
+func set_loadout_slots(slots: Array) -> void:
+	if slots.is_empty():
+		return
+	_loadout_slots = slots.duplicate()
+	queue_redraw()
+
 func _draw_weapon_indicator(color: Color) -> void:
 	var safe := _safe_rect()
 	var center := Vector2(safe.end.x - 170.0, safe.end.y - 74.0)
-	_draw_loadout_plate(center - Vector2(48.0, 0.0), Duelist.Weapon.PULSE, color)
-	_draw_loadout_plate(center + Vector2(48.0, 0.0), Duelist.Weapon.KNIFE, color)
-	if _weapon == Duelist.Weapon.PULSE:
-		_draw_magazine_read(center - Vector2(48.0, 0.0) + Vector2(0.0, 30.0), color)
+	if _loadout_slots.size() == 1:
+		_draw_loadout_plate(center, RiftWeapons.clamp_weapon(int(_loadout_slots[0])) as Duelist.Weapon, color)
+		_draw_magazine_read(center + Vector2(0.0, 30.0), color)
 		if reload_remaining > 0.0:
-			_draw_reload_sweep(center - Vector2(48.0, 0.0), 24.0, Color("fff0b0"), reload_progress_for(reload_remaining))
+			_draw_reload_sweep(center, 24.0, Color("fff0b0"), reload_progress_for(reload_remaining, float(RiftWeapons.row(int(_weapon)).reload_seconds)))
+		return
+	_draw_loadout_plate(center - Vector2(48.0, 0.0), RiftWeapons.clamp_weapon(int(_loadout_slots[0])) as Duelist.Weapon, color)
+	_draw_loadout_plate(center + Vector2(48.0, 0.0), RiftWeapons.clamp_weapon(int(_loadout_slots[1])) as Duelist.Weapon, color)
+	var active_offset := Vector2(-48.0, 0.0) if int(_weapon) == RiftWeapons.clamp_weapon(int(_loadout_slots[0])) else Vector2(48.0, 0.0)
+	_draw_magazine_read(center + active_offset + Vector2(0.0, 30.0), color)
+	if reload_remaining > 0.0:
+		_draw_reload_sweep(center + active_offset, 24.0, Color("fff0b0"), reload_progress_for(reload_remaining, float(RiftWeapons.row(int(_weapon)).reload_seconds)))
 
+## Distinct per-archetype glyphs (barrel+optic for rifle-class weapons, a
+## broad fanned wedge for the shotgun, a small block for the pistol, a long
+## scoped line for the sniper) so the two loadout plates read at a glance
+## instead of a generic rectangle.
 func _draw_loadout_plate(center: Vector2, slot: Duelist.Weapon, color: Color) -> void:
-	var held := _weapon == slot
+	var held := int(_weapon) == int(slot)
 	var plate_color := color if held else Color("9bb2d1")
 	draw_rect(Rect2(center - Vector2(32.0, 22.0), Vector2(64.0, 44.0)), Color("071126", 0.72), true)
 	draw_rect(Rect2(center - Vector2(32.0, 22.0), Vector2(64.0, 44.0)), Color(plate_color, 0.95 if held else 0.34), false, 2.0 if held else 1.0)
-	if slot == Duelist.Weapon.PULSE:
-		draw_rect(Rect2(center - Vector2(17.0, 4.0), Vector2(30.0, 8.0)), plate_color)
-		draw_line(center + Vector2(13.0, -4.0), center + Vector2(24.0, -11.0), plate_color, 2.5)
-		draw_line(center + Vector2(13.0, 4.0), center + Vector2(24.0, 11.0), plate_color, 2.5)
-	else:
-		draw_line(center + Vector2(-2.0, -14.0), center + Vector2(11.0, 14.0), plate_color, 3.0)
-		draw_line(center + Vector2(-11.0, 10.0), center + Vector2(0.0, 14.0), plate_color, 3.0)
+	match slot:
+		Duelist.Weapon.RIFLE, Duelist.Weapon.SMG:
+			draw_rect(Rect2(center - Vector2(17.0, 4.0), Vector2(30.0, 8.0)), plate_color)
+			draw_line(center + Vector2(13.0, -4.0), center + Vector2(24.0, -11.0), plate_color, 2.5)
+			draw_line(center + Vector2(13.0, 4.0), center + Vector2(24.0, 11.0), plate_color, 2.5)
+		Duelist.Weapon.SHOTGUN:
+			draw_rect(Rect2(center - Vector2(18.0, 3.0), Vector2(34.0, 6.0)), plate_color)
+			for pellet_angle in [-0.5, -0.22, 0.0, 0.22, 0.5]:
+				var pellet_end := center + Vector2(24.0, 0.0) + Vector2.from_angle(pellet_angle) * 10.0
+				draw_line(center + Vector2(16.0, 0.0), pellet_end, plate_color, 1.6)
+		Duelist.Weapon.PISTOL:
+			draw_rect(Rect2(center - Vector2(12.0, 5.0), Vector2(22.0, 8.0)), plate_color)
+			draw_rect(Rect2(center + Vector2(-5.0, 3.0), Vector2(7.0, 12.0)), plate_color)
+		Duelist.Weapon.SNIPER:
+			draw_line(center + Vector2(-22.0, 0.0), center + Vector2(22.0, 0.0), plate_color, 2.5)
+			draw_circle(center + Vector2(4.0, -7.0), 6.0, Color("071126", 0.9))
+			draw_arc(center + Vector2(4.0, -7.0), 6.0, 0.0, TAU, 16, plate_color, 1.8)
 
 func _draw_magazine_read(center: Vector2, color: Color) -> void:
-	var magazine_ratio := clampf(float(magazine_rounds) / float(Duelist.M4_MAGAZINE_SIZE), 0.0, 1.0)
+	var capacity := int(RiftWeapons.row(int(_weapon)).magazine_size)
+	var reserve_capacity := int(RiftWeapons.row(int(_weapon)).reserve_ammo)
+	var magazine_ratio := clampf(float(magazine_rounds) / float(maxi(1, capacity)), 0.0, 1.0)
 	var filled_segments := ceili(magazine_ratio * 5.0) if magazine_rounds > 0 else 0
 	for index in 5:
 		var segment := Rect2(center + Vector2(-28.0 + index * 12.0, -4.0), Vector2(9.0, 8.0))
 		draw_rect(segment, Color(color, 0.88 if index < filled_segments else 0.14), index < filled_segments)
 		draw_rect(segment, Color(color, 0.56), false, 1.0)
-	var reserve_ratio := clampf(float(reserve_ammo) / float(Duelist.M4_RESERVE_AMMO), 0.0, 1.0)
+	var reserve_ratio := clampf(float(reserve_ammo) / float(maxi(1, reserve_capacity)), 0.0, 1.0)
 	var reserve_blocks := ceili(reserve_ratio * 3.0) if reserve_ammo > 0 else 0
 	for index in 3:
 		var block := Rect2(center + Vector2(-17.0 + index * 12.0, 10.0), Vector2(8.0, 4.0))
 		draw_rect(block, Color("fff0b0", 0.7 if index < reserve_blocks else 0.12), index < reserve_blocks)
 		draw_rect(block, Color("fff0b0", 0.42), false, 1.0)
 
-static func reload_progress_for(remaining: float) -> float:
-	return clampf(1.0 - remaining / Duelist.M4_RELOAD_SECONDS, 0.0, 1.0)
+static func reload_progress_for(remaining: float, reload_seconds: float = 2.0) -> float:
+	return clampf(1.0 - remaining / maxf(0.05, reload_seconds), 0.0, 1.0)
 
 func _draw_reload_sweep(center: Vector2, radius: float, color: Color, progress: float) -> void:
 	var phase := clampf(progress, 0.0, 1.0)
@@ -1450,6 +1503,13 @@ func _reload_center() -> Vector2:
 
 func _reload_radius() -> float:
 	return 34.0
+
+func _melee_center() -> Vector2:
+	var safe := _safe_rect()
+	return Vector2(safe.end.x - 470.0, safe.end.y - 84.0)
+
+func _melee_radius() -> float:
+	return 30.0
 
 func _control_specs() -> Dictionary:
 	return {

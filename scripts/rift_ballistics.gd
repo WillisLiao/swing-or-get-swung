@@ -1,30 +1,19 @@
 class_name RiftBallistics
 extends Node3D
 
-## Authority-only projectile simulation for the Rift Carbine.
+## Authority-only projectile simulation, data-driven across all five weapons.
 ##
 ## The public interface is intentionally small: callers submit an accepted fire
 ## request, advance the authority once per physics step, and clear on a phase
-## boundary.  Projectile records never become scene nodes.
+## boundary.  Projectile records never become scene nodes.  Per-weapon
+## ballistics (speed, damage falloff, range, pellet count) are read from
+## RiftWeapons and copied into each projectile record at spawn - a projectile
+## must not look up the shooter's *current* weapon at impact time, since the
+## shooter may have swapped weapons or slots since firing.
 
 signal projectile_fired(fact: Dictionary)
 signal projectile_impacted(fact: Dictionary)
 
-const M4_PROJECTILE_SPEED := 800.0
-const M4_FIRE_INTERVAL := 0.086
-const M4_DAMAGE := 23.0
-const M4_DAMAGE_FAR := 14.0
-const M4_FALLOFF_START := 22.0
-const M4_FALLOFF_END := 70.0
-const M4_MAX_RANGE := 95.0
-# 0.086 seconds is approximately 700 RPM, and 23 damage means five body hits to
-# eliminate a 100 HP duelist inside FALLOFF_START (close competitive lanes).
-# Damage falls off linearly from there to FALLOFF_END, floors at 14 (about
-# eight hits) out to MAX_RANGE, and never drops further - a shot that lands
-# always registers, it just does less work at range. MAX_RANGE (95m) comfortably
-# covers the Concourse's longest open sightlines (60m radius / 120m diameter)
-# so a projectile crossing the core room does not vanish before reaching a
-# target still inside the arena.
 const PROJECTILE_GRAVITY := 9.81
 const COLLISION_MASK := 1 | 2
 const WORLD_COLLISION_MASK := 1
@@ -41,17 +30,17 @@ func fire(shooter: Duelist, weapon: Duelist.Weapon, _legacy_origin: Vector3 = Ve
 		return false
 	if not is_instance_valid(shooter) or not shooter.match_active or shooter.eliminated:
 		return false
-	if weapon != Duelist.Weapon.PULSE:
-		return false
 	# The authority consumes the accepted plan from Duelist.  The retained
 	# optional arguments keep old offline exercises source-compatible, but are
 	# deliberately ignored so a caller cannot author an origin or trajectory.
 	var plan := shooter.consume_authoritative_shot_plan()
 	var origin: Vector3 = plan.get("eye_origin", shooter.authoritative_eye_origin())
-	var direction: Vector3 = plan.get("direction", shooter.authoritative_aim_direction())
-	if direction.length_squared() < 0.000001:
+	var directions: Array = plan.get("directions", [plan.get("direction", shooter.authoritative_aim_direction())])
+	if directions.is_empty():
 		return false
-	if _muzzle_is_embedded(shooter, plan.get("physical_muzzle", shooter.physical_muzzle_position())):
+	var row := RiftWeapons.row(RiftWeapons.clamp_weapon(int(weapon)))
+	var muzzle_position: Vector3 = plan.get("physical_muzzle", shooter.physical_muzzle_position())
+	if _muzzle_is_embedded(shooter, muzzle_position):
 		var obstruction_id := _next_projectile_id
 		_next_projectile_id += 1
 		projectile_impacted.emit({
@@ -60,47 +49,65 @@ func fire(shooter: Duelist, weapon: Duelist.Weapon, _legacy_origin: Vector3 = Ve
 			"id": obstruction_id,
 			"team": int(shooter.team),
 			"weapon": int(weapon),
+			"shot_id": int(plan.get("shot_id", obstruction_id)),
+			"pellet_index": 0,
+			"pellet_count": directions.size(),
 			"shooter_id": shooter.actor_id,
 			"target_id": "",
 			"source_position": origin,
 			"damage": 0.0,
-			"position": plan.get("physical_muzzle", origin),
-			"normal": -direction,
+			"position": muzzle_position,
+			"normal": -(directions[0] as Vector3),
 			"hit_duelist": false,
 			"obstructed": true,
 		})
 		return true
-	var velocity := direction.normalized() * M4_PROJECTILE_SPEED
-	var projectile_id := _next_projectile_id
-	_next_projectile_id += 1
-	var projectile := {
-		"id": projectile_id,
-		"shooter": shooter,
-		"shooter_id": shooter.actor_id,
-		"team": int(shooter.team),
-		"weapon": int(weapon),
-		"position": origin,
-		"source_position": origin,
-		"presentation_origin": plan.get("presentation_origin", origin),
-		"velocity": velocity,
-		"remaining_range": M4_MAX_RANGE,
-		"hip_burst_index": int(plan.get("hip_burst_index", 0)),
-		"hip_burst_followup": bool(plan.get("hip_burst_followup", false)),
-	}
-	_projectiles.append(projectile)
-	projectile_fired.emit({
-		"type": "projectile_fired",
-		"session_id": _session_id,
-		"id": projectile_id,
-		"shooter_id": shooter.actor_id,
-		"team": int(shooter.team),
-		"weapon": int(weapon),
-		"origin": origin,
-		"presentation_origin": projectile.get("presentation_origin", origin),
-		"velocity": velocity,
-		"hip_burst_index": projectile.get("hip_burst_index", 0),
-		"hip_burst_followup": projectile.get("hip_burst_followup", false),
-	})
+	var shot_id := int(plan.get("shot_id", 0))
+	var presentation_origin: Vector3 = plan.get("presentation_origin", origin)
+	var pellet_count := directions.size()
+	for pellet_index in pellet_count:
+		var direction := (directions[pellet_index] as Vector3)
+		if direction.length_squared() < 0.000001:
+			continue
+		var velocity := direction.normalized() * float(row.projectile_speed)
+		var projectile_id := _next_projectile_id
+		_next_projectile_id += 1
+		var projectile := {
+			"id": projectile_id,
+			"shooter": shooter,
+			"shooter_id": shooter.actor_id,
+			"team": int(shooter.team),
+			"weapon": int(weapon),
+			"shot_id": shot_id,
+			"pellet_index": pellet_index,
+			"pellet_count": pellet_count,
+			"position": origin,
+			"source_position": origin,
+			"presentation_origin": presentation_origin,
+			"velocity": velocity,
+			"remaining_range": float(row.max_range),
+			"damage_near": float(row.damage_near),
+			"damage_far": float(row.damage_far),
+			"falloff_start": float(row.falloff_start),
+			"falloff_end": float(row.falloff_end),
+			"hip_burst_followup": bool(plan.get("hip_burst_followup", false)),
+		}
+		_projectiles.append(projectile)
+		projectile_fired.emit({
+			"type": "projectile_fired",
+			"session_id": _session_id,
+			"id": projectile_id,
+			"shooter_id": shooter.actor_id,
+			"team": int(shooter.team),
+			"weapon": int(weapon),
+			"shot_id": shot_id,
+			"pellet_index": pellet_index,
+			"pellet_count": pellet_count,
+			"origin": origin,
+			"presentation_origin": presentation_origin,
+			"velocity": velocity,
+			"hip_burst_followup": bool(plan.get("hip_burst_followup", false)),
+		})
 	return true
 
 func tick_authority(delta: float) -> void:
@@ -178,7 +185,7 @@ func _handle_impact(projectile: Dictionary, hit: Dictionary) -> void:
 	var target_id := ""
 	var source_position: Vector3 = projectile.get("source_position", projectile.get("position", Vector3.ZERO))
 	var impact_position: Vector3 = hit.get("position", projectile.position)
-	var damage := _damage_for_distance(source_position.distance_to(impact_position))
+	var damage := _damage_for_distance(projectile, source_position.distance_to(impact_position))
 	if collider is Duelist and collider != shooter and not collider.eliminated and collider.match_active and collider.team != shooter.team:
 		hit_duelist = true
 		target_id = collider.actor_id
@@ -188,6 +195,10 @@ func _handle_impact(projectile: Dictionary, hit: Dictionary) -> void:
 		"session_id": _session_id,
 		"id": int(projectile.id),
 		"team": int(projectile.team),
+		"weapon": int(projectile.get("weapon", 0)),
+		"shot_id": int(projectile.get("shot_id", 0)),
+		"pellet_index": int(projectile.get("pellet_index", 0)),
+		"pellet_count": int(projectile.get("pellet_count", 1)),
 		"shooter_id": str(projectile.get("shooter_id", "")),
 		"target_id": target_id,
 		"source_position": source_position,
@@ -199,11 +210,16 @@ func _handle_impact(projectile: Dictionary, hit: Dictionary) -> void:
 	})
 
 ## Linear falloff from the close-range plate to the floor damage, so a shot
-## that connects always does meaningful work - it never silently no-ops.
-func _damage_for_distance(distance: float) -> float:
-	if distance <= M4_FALLOFF_START:
-		return M4_DAMAGE
-	if distance >= M4_FALLOFF_END:
-		return M4_DAMAGE_FAR
-	var t := (distance - M4_FALLOFF_START) / (M4_FALLOFF_END - M4_FALLOFF_START)
-	return lerpf(M4_DAMAGE, M4_DAMAGE_FAR, t)
+## that connects always does meaningful work - it never silently no-ops. Each
+## projectile carries its own weapon's falloff scalars, copied at spawn.
+func _damage_for_distance(projectile: Dictionary, distance: float) -> float:
+	var near_damage := float(projectile.get("damage_near", 23.0))
+	var far_damage := float(projectile.get("damage_far", 14.0))
+	var falloff_start := float(projectile.get("falloff_start", 22.0))
+	var falloff_end := float(projectile.get("falloff_end", 70.0))
+	if distance <= falloff_start:
+		return near_damage
+	if distance >= falloff_end:
+		return far_damage
+	var t := (distance - falloff_start) / maxf(0.0001, falloff_end - falloff_start)
+	return lerpf(near_damage, far_damage, t)

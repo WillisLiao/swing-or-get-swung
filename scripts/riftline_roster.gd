@@ -50,6 +50,22 @@ func add_bot(actor_id: String, team: Duelist.Team) -> Dictionary:
 		return {}
 	return _add_record(actor_id, -1, team, false)
 
+## Class/loadout selection. Defaults to Frontline/Rifle at admission (set in
+## _add_record) - there is deliberately no dedicated selection screen yet
+## (that belongs to the art/UI redesign session), but the data contract and
+## this setter exist now so a future UI, or a debug/dedicated-server config,
+## can drive it. `primary_choice` only matters for Frontline; every other
+## class has exactly one legal primary and Duelist.configure_loadout() itself
+## ignores an out-of-set request.
+func set_class(actor_id: String, player_class: Duelist.PlayerClass, primary_choice: Duelist.Weapon = Duelist.Weapon.RIFLE) -> bool:
+	if not _records_by_id.has(actor_id):
+		return false
+	var existing: Dictionary = _records_by_id[actor_id]
+	existing["player_class"] = int(player_class)
+	existing["primary_weapon"] = int(primary_choice)
+	_records_by_id[actor_id] = existing
+	return true
+
 func remove_peer(peer_id: int) -> Dictionary:
 	var actor_id := str(_actor_by_peer.get(peer_id, ""))
 	if actor_id.is_empty():
@@ -164,6 +180,8 @@ func _add_record(actor_id: String, peer_id: int, team: Duelist.Team, human: bool
 		"connected": true,
 		"disconnected_at": 0,
 		"rejoin_token": rejoin_token,
+		"player_class": int(Duelist.PlayerClass.FRONTLINE),
+		"primary_weapon": int(Duelist.Weapon.RIFLE),
 	}
 	_records_by_id[actor_id] = next
 	_used_actor_ids[actor_id] = true
@@ -217,4 +235,6 @@ func _public_record(private_record: Dictionary) -> Dictionary:
 		"team": int(private_record.get("team", -1)),
 		"human": bool(private_record.get("human", false)),
 		"connected": bool(private_record.get("connected", true)),
+		"player_class": int(private_record.get("player_class", int(Duelist.PlayerClass.FRONTLINE))),
+		"primary_weapon": int(private_record.get("primary_weapon", int(Duelist.Weapon.RIFLE))),
 	}
