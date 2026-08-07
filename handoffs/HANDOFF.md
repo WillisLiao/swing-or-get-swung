@@ -20,15 +20,15 @@ See `WORKFLOW.md` in that repo for the two-developer plus AI-assistant flow.
 
 ## Current state (2026-08-07)
 
-**Latest, fifth session - weapon models, sights, sniper scope, and shield visibility redesign (via `/sonnet-opus`):**
-All five weapon models rebuilt with distinct silhouettes; sights redesigned from a single occluding lens disc to real hollow sight housings (reflex sights, a ghost-ring shotgun sight, three-dot pistol notch-and-post) with matching HUD reticles that are now actually visible during ADS (previously none were, for any weapon). The sniper finally has a real scope: a vignette + mil-dot HUD overlay with two visibly distinct zoom stages, since a physically modeled scope tube can't be looked *through* in a raster render. Shield-class players can now see their own shield in first person - previously it only rendered for everyone else. Found and fixed a real bug along the way: 4 of 5 weapons' `optic_tip_local`/`ads_anchor` didn't actually satisfy the alignment invariant, so their sights sat visibly off the crosshair. Full detail, including a follow-up fix pass on the shotgun/pistol sights: "Fifth session" in `devlogs/2026-08-07.md`.
+**Latest, ninth session - objective-aware autonomous bots:**
+Offline teammates and enemies now understand Nuclear Rush instead of acting as combat-only targets. Each squad assigns deterministic Runner, Escort, Defender, and Raider roles; bots dynamically claim the core, escort a friendly carrier, intercept an enemy carrier, deliver and install at their own pad, defend a launch, or invade and cancel an enemy launch. They reuse the map's route planner, keep fighting opportunistically while moving toward the objective, recover from obstructions, and drive the same authoritative `interact` input used by players. A new end-to-end exercise covers decisions plus real pickup/install/cancel rules. Headless import is clean, all 17 exercises pass, and MCP runtime inspection confirmed the live 4v4 bots moving without game-log errors. Full detail: "Ninth session" in `devlogs/2026-08-07.md`.
 
 Robert's circular arena is in as the **only** map, ported forward from PR #1 rather than merged.
 Nuclear Rush is the **only** mode, built to the final rules below.
 The session layer is 4v4 on protocol 12 with no map or mode negotiation left in the wire format.
 Art moved to real PBR via `shaders/nuclear_pbr.gdshader` + `NuclearMaterials`. The shipping character and the standalone Cover V2 review are now explicit user-requested Blender-import exceptions; neither uses textures.
 The settings-panel touch-capture bug (a sliding finger activating other controls) is fixed with a regression test.
-Headless import is clean and all 16 exercises pass.
+Headless import is clean and all 17 exercises pass.
 Full detail: `devlogs/2026-08-07.md`.
 
 **Same day, second session - multiplayer hardening and three bug fixes:**
@@ -89,10 +89,9 @@ These touch `scripts/duelist.gd`, `scripts/riftline_arena.gd`, and `scripts/duel
 **Run them sequentially, one at a time, not as concurrently-running sessions against the same checkout** - see the "Sequencing" note in `NEXT-SESSION-art-ui-redesign.md` for what happens if you don't and how to do it safely with worktrees if you really want two running at once.
 
 **Older backlog, still real but lower priority than the above:**
-1. **Objective-aware bots.** `bot_duelist.gd` is combat-only. `set_objective_context()` exists and the arena feeds it, but nothing consumes it, so bots ignore the core entirely. This is the biggest gap for offline and bot-filled 4v4.
-2. **Surface relief bands on large flat areas.** Drive albedo from the isotropic value noise and leave the sine sum for the normal only.
-3. **Palette is over-saturated.** Team accents are on whole base walls; the pad emissive ring blows out. Large surfaces should be concrete/steel with team colour as accent only. (Likely absorbed into the art/UI redesign session rather than done separately - see that bootstrap file.)
-4. **On-device touch playtest** of install/cancel, which PR #1's review asked for.
+1. **Surface relief bands on large flat areas.** Drive albedo from the isotropic value noise and leave the sine sum for the normal only.
+2. **Palette is over-saturated.** Team accents are on whole base walls; the pad emissive ring blows out. Large surfaces should be concrete/steel with team colour as accent only. (Likely absorbed into the art/UI redesign session rather than done separately - see that bootstrap file.)
+3. **On-device touch playtest** of install/cancel, which PR #1's review asked for.
 
 The old character `pulp_lit` gap is resolved by the Blender character integration above. UI polish and any later higher-detail character pass remain in the art/UI redesign bootstrap.
 
