@@ -41,8 +41,10 @@ most of that.
 - Scenes/resources are already text format (`.tscn`/`.tres`), so diffs and
   merges work - keep it that way (don't switch to binary format).
 - If you add binary assets (textures, audio) later, consider Git LFS before
-  the repo grows large. Not needed yet - this project is currently all
-  procedural geometry + shaders, no imported art.
+  the repo grows large. As of 2026-08-07 the "zero imported art" rule is
+  lifted - Blender-authored assets (the character, Cover V2, and now the
+  art/UI redesign) are an explicit, ongoing part of the pipeline, not an
+  exception. Watch repo size as more binary assets land.
 - `export_presets.cfg` is committed (build config, no secrets in it).
   If you ever add signing keys/credentials for export, keep those in
   `export_credentials.cfg` (already gitignored) - never commit them.

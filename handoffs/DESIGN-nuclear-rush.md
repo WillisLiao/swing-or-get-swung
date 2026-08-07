@@ -106,8 +106,8 @@ The original branch predated the SUN/VOID to RED/BLUE rename and the lean remova
 
 Realistic, in the register of Halo Infinite: real metal-roughness surface response, sky-sourced ambient and reflection, ACES tonemapping, high-resolution soft shadows, and bloom.
 
-The project still ships **no imported art**.
-Realism comes from `shaders/nuclear_pbr.gdshader` and the `NuclearMaterials` factory rather than photographic textures: physically based diffuse and specular, procedural surface relief with an analytic normal gradient, grime that pools in recesses, dust on upward faces, and material-supplied ambient occlusion.
+**The "zero imported art" rule is retired as of 2026-08-07** (explicit user decision - see `handoffs/HANDOFF.md`). Blender-authored assets are now a normal part of the pipeline, not a one-off exception.
+Realism still leans on `shaders/nuclear_pbr.gdshader` and the `NuclearMaterials` factory - physically based diffuse and specular, procedural surface relief with an analytic normal gradient, grime that pools in recesses, dust on upward faces, and material-supplied ambient occlusion - but imported meshes/textures authored in Blender are equally valid where they serve the art direction better.
 
 The renderer stays **Mobile**, not Forward+.
 Forward+ would unlock SSAO, SSIL, SDFGI, SSR, and volumetric fog, and none of them are affordable at 120 Hz on a phone.
