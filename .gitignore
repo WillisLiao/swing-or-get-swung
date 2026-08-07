@@ -3,6 +3,10 @@
 build/
 *.translation
 
+# Godot MCP dev tooling (local editor plugin, not game content)
+addons/godot_ai/
+.godot-ai-local.json
+
 # macOS
 .DS_Store
 
