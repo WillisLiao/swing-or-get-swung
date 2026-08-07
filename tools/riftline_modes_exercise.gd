@@ -24,6 +24,7 @@ func _initialize() -> void:
 	await _test_clock_expiry_unequal_scores_finishes(root)
 	await _test_clock_expiry_tie_enters_sudden_death(root)
 	await _test_launch_during_sudden_death_finishes_match(root)
+	await _test_manual_respawn_gate(root)
 	print("Nuclear Rush rules exercise: PASS")
 	quit()
 
@@ -301,3 +302,45 @@ func _test_launch_during_sudden_death_finishes_match(root: Node3D) -> void:
 	assert(int(match_node.scores[BLUE]) == 2)
 	assert(match_node.phase == RiftlineMatch.Phase.FINISHED)
 	assert(int(winner_box[0]) == int(BLUE))
+
+func _test_manual_respawn_gate(root: Node3D) -> void:
+	var pads := _default_pads()
+	var match_node := _make_match(root, pads)
+	var red := _make_duelist(root, RED, "respawn_red", Vector3(-30, 0.1, 0))
+	var blue_d := _make_duelist(root, BLUE, "respawn_blue", Vector3(30, 0.1, 0))
+	match_node.register_duelist(red, "respawn_red")
+	match_node.register_duelist(blue_d, "respawn_blue")
+	await _go_live(match_node)
+
+	# Elimination no longer auto-respawns - it starts a minimum-death timer
+	# and the actor stays down until an explicit request clears it.
+	red.take_damage(Duelist.HEALTH, blue_d)
+	assert(red.eliminated)
+	assert(not match_node.can_respawn("respawn_red"))
+	# A request before the minimum elapses is a no-op, not a queued action.
+	assert(not match_node.request_respawn("respawn_red"))
+	assert(red.eliminated)
+
+	# Ticking short of the minimum still refuses.
+	match_node._physics_process(RiftlineMatch.RESPAWN_MIN_SECONDS - 0.5)
+	assert(not match_node.can_respawn("respawn_red"))
+	assert(red.eliminated)
+
+	# Crossing the minimum makes it eligible, but still does not respawn by
+	# itself - only an explicit request does.
+	match_node._physics_process(1.0)
+	assert(match_node.can_respawn("respawn_red"))
+	assert(red.eliminated)
+	assert(is_zero_approx(match_node.respawn_seconds_remaining("respawn_red")))
+
+	var respawned := [false]
+	match_node.respawn_started.connect(func(victim: Duelist) -> void:
+		if victim == red:
+			respawned[0] = true)
+	assert(match_node.request_respawn("respawn_red"))
+	assert(not red.eliminated)
+	assert(respawned[0])
+	assert(not match_node.can_respawn("respawn_red"))
+
+	# A second request right after respawning is a no-op (nothing to gate).
+	assert(not match_node.request_respawn("respawn_red"))

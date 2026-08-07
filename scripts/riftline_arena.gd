@@ -3,6 +3,8 @@ extends Node3D
 
 const SNAPSHOT_BUFFER := preload("res://scripts/riftline_snapshot_buffer.gd")
 const PRACTICE_PANEL := preload("res://scripts/riftline_practice_panel.gd")
+const MAIN_MENU := preload("res://scripts/riftline_main_menu.gd")
+const CLASS_PANEL := preload("res://scripts/riftline_class_panel.gd")
 const OPENING_HOLD_SECONDS := 2.5
 const DEFAULT_OFFLINE_SQUAD_SIZE := 4
 
@@ -14,6 +16,21 @@ var network: RiftlineNetwork
 var arena_map: RiftlineMap
 var rift_link: RiftLinkPanel
 var practice_panel: Control
+var main_menu: RiftlineMainMenu
+var class_panel: RiftlineClassPanel
+## Which top-level main-menu action the class panel is currently gating:
+## "create" / "join" / "drill" pre-game, or "death" for the in-match
+## post-elimination re-pick. Empty when the class panel isn't in use.
+var _class_panel_context := ""
+var _pending_player_class: Duelist.PlayerClass = Duelist.PlayerClass.FRONTLINE
+var _pending_primary_weapon: Duelist.Weapon = Duelist.Weapon.RIFLE
+## Local-only mirror of "seconds since the local player died," used purely to
+## drive the death-screen countdown UI. The authoritative gate is always
+## RiftlineMatch.can_respawn() (host) or the request simply being ignored
+## until the host's own timer also clears (client) - this is display only.
+var _local_death_elapsed := 0.0
+var _local_was_eliminated := false
+var _pending_respawn_request := false
 var _mouse_captured := false
 var _lan_active := false
 var _lan_host := false
@@ -128,12 +145,15 @@ func _ready() -> void:
 			hud.set_connection_flow_active(true)
 			rift_link.apply_preview(_rift_link_preview)
 		if show_practice:
-			_practice_panel_active = true
-			_build_practice_panel()
-			if _practice_preview.is_empty():
-				practice_panel.show_entry(_load_practice_drill())
-			else:
+			if not _practice_preview.is_empty():
+				# Capture/preview tooling drives the old practice panel
+				# directly, unchanged - it screenshots specific drill states.
+				_practice_panel_active = true
+				_build_practice_panel()
 				practice_panel.apply_preview(_practice_preview)
+			else:
+				_build_main_menu()
+				main_menu.show_menu()
 		else:
 			_build_arena()
 			_build_match()
@@ -168,6 +188,7 @@ func _physics_process(delta: float) -> void:
 	_sync_objective_presentation()
 	_sync_squad_hud()
 	_tick_feedback_preview(delta)
+	_tick_death_screen(delta)
 	if _lan_active:
 		_tick_lobby_arming(delta)
 		_tick_lan_duel(delta)
@@ -193,6 +214,7 @@ func _physics_process(delta: float) -> void:
 			_local_duelist.set_combat_pose(false, delta)
 		_local_duelist.drive(Vector2.ZERO, false, false, delta)
 		hud.show_ammo(_local_duelist.magazine_rounds, _local_duelist.reserve_ammo, _local_duelist.reload_remaining)
+		hud.show_damage(_local_duelist.health)
 		return
 	var keyboard := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var movement := hud.movement if hud.movement.length_squared() > 0.001 else keyboard
@@ -219,6 +241,11 @@ func _physics_process(delta: float) -> void:
 	hud.set_weapon(_local_duelist.weapon)
 	hud.set_loadout_slots(_local_duelist.loadout_slots)
 	hud.show_ammo(_local_duelist.magazine_rounds, _local_duelist.reserve_ammo, _local_duelist.reload_remaining)
+	# Continuous sync, not just on the `damaged` signal - a signal only fires
+	# on damage events, so without this a respawn (health silently reset to
+	# 100 by Duelist.respawn_at()) left the HUD showing the stale 0 from the
+	# killing blow until the player took damage again.
+	hud.show_damage(_local_duelist.health)
 	_sync_reload_feedback()
 	_sync_objective_presentation()
 	_sync_squad_hud()
@@ -378,12 +405,15 @@ func _ensure_actor(record: Dictionary, local_controlled: bool, authoritative_col
 	duelist.name = "Actor_%s" % actor_id
 	var should_render := _presentation_enabled and not _dedicated_server
 	duelist.build(team_value as Duelist.Team, local_controlled and should_render, should_render, authoritative_collision)
-	# No selection screen exists yet (deferred to the art/UI redesign session);
-	# a record's class/primary defaults to Frontline/Rifle, but honoring
-	# whatever the roster carries keeps the mechanic wired for a future picker
-	# or dedicated-server config to drive.
+	# The record carries whatever the pre-game class panel picked for a human
+	# actor's own duelist; every other actor (remote players not yet synced,
+	# bots) falls back to Frontline/Rifle until its own record/input frame
+	# says otherwise.
 	var record_class := clampi(int(record.get("player_class", int(Duelist.PlayerClass.FRONTLINE))), int(Duelist.PlayerClass.FRONTLINE), int(Duelist.PlayerClass.SHIELD)) as Duelist.PlayerClass
 	var record_primary := RiftWeapons.clamp_weapon(int(record.get("primary_weapon", int(Duelist.Weapon.RIFLE)))) as Duelist.Weapon
+	if local_controlled:
+		record_class = _pending_player_class
+		record_primary = _pending_primary_weapon
 	duelist.configure_loadout(record_class, record_primary)
 	duelist.set_friendly_presenter(not local_controlled and team_value == int(_local_team))
 	var spawn := _spawn_for_actor(team_value as Duelist.Team, registry)
@@ -585,6 +615,142 @@ func _build_practice_panel() -> void:
 	layer.add_child(practice_panel)
 	practice_panel.drill_requested.connect(_on_practice_drill_requested)
 	practice_panel.local_rift_requested.connect(_on_practice_local_rift_requested)
+
+func _build_main_menu() -> void:
+	if main_menu != null:
+		return
+	var layer := CanvasLayer.new()
+	layer.layer = 21
+	add_child(layer)
+	main_menu = MAIN_MENU.new()
+	layer.add_child(main_menu)
+	main_menu.create_game_requested.connect(_on_main_menu_create)
+	main_menu.join_game_requested.connect(_on_main_menu_join)
+	main_menu.drill_requested.connect(_on_main_menu_drill)
+
+func _build_class_panel() -> void:
+	if class_panel != null:
+		return
+	var layer := CanvasLayer.new()
+	layer.layer = 22
+	add_child(layer)
+	class_panel = CLASS_PANEL.new()
+	layer.add_child(class_panel)
+	class_panel.visible = false
+	class_panel.selection_changed.connect(_on_class_panel_selection_changed)
+	class_panel.confirmed.connect(_on_class_panel_confirmed)
+	class_panel.cancelled.connect(_on_class_panel_cancelled)
+
+func _on_main_menu_create() -> void:
+	_open_class_panel("create", "CHOOSE YOUR CLASS", "HOST GAME", true)
+
+func _on_main_menu_join() -> void:
+	_open_class_panel("join", "CHOOSE YOUR CLASS", "FIND GAME", true)
+
+func _on_main_menu_drill() -> void:
+	_open_class_panel("drill", "CHOOSE YOUR CLASS", "ENTER DRILL", true)
+
+func _open_class_panel(context: String, title: String, cta_label: String, show_cancel: bool) -> void:
+	_class_panel_context = context
+	_build_class_panel()
+	class_panel.configure(title, cta_label, show_cancel, _pending_player_class, _pending_primary_weapon)
+	class_panel.visible = true
+
+func _on_class_panel_selection_changed(player_class: int, primary_weapon: int) -> void:
+	_pending_player_class = player_class as Duelist.PlayerClass
+	_pending_primary_weapon = primary_weapon as Duelist.Weapon
+	# On the death screen the pick takes effect immediately - the duelist is
+	# eliminated and not rendering combat, so this is safe, and it means the
+	# loadout is already correct by the time the respawn actually happens.
+	if _class_panel_context == "death" and _local_duelist != null:
+		_apply_pending_class_to_local_duelist()
+
+func _apply_pending_class_to_local_duelist() -> void:
+	if _local_duelist == null:
+		return
+	if _local_duelist.player_class != _pending_player_class or (_pending_player_class == Duelist.PlayerClass.FRONTLINE and int(_local_duelist.loadout_slots[0]) != int(_pending_primary_weapon)):
+		_local_duelist.configure_loadout(_pending_player_class, _pending_primary_weapon)
+
+func _on_class_panel_cancelled() -> void:
+	class_panel.visible = false
+	_class_panel_context = ""
+	if main_menu != null:
+		main_menu.show_menu()
+
+func _on_class_panel_confirmed() -> void:
+	var context := _class_panel_context
+	match context:
+		"create", "join", "drill":
+			class_panel.visible = false
+			_class_panel_context = ""
+			_execute_pending_menu_action(context)
+		"death":
+			_request_local_respawn()
+
+func _execute_pending_menu_action(action: String) -> void:
+	match action:
+		"create":
+			_on_host_requested()
+		"join":
+			_on_join_requested()
+		"drill":
+			_start_practice_drill("full")
+
+## The death screen: shown whenever the local player's own duelist becomes
+## eliminated, hidden the moment they're alive again. Reuses the same
+## RiftlineClassPanel as the pre-game picker, with the CTA repurposed as the
+## respawn button and gated by RiftlineMatch.can_respawn() (or, for a
+## non-host LAN client, the locally-mirrored countdown - see
+## _local_death_elapsed).
+func _tick_death_screen(delta: float) -> void:
+	if _local_duelist == null:
+		return
+	var eliminated := _local_duelist.eliminated
+	if eliminated and not _local_was_eliminated:
+		_local_death_elapsed = 0.0
+		_pending_player_class = _local_duelist.player_class
+		_pending_primary_weapon = _local_duelist.loadout_slots[0] as Duelist.Weapon if not _local_duelist.loadout_slots.is_empty() else Duelist.Weapon.RIFLE
+		_open_class_panel("death", "YOU WERE ELIMINATED", "RESPAWN", false)
+	elif not eliminated and _local_was_eliminated:
+		if class_panel != null and _class_panel_context == "death":
+			class_panel.visible = false
+			_class_panel_context = ""
+		_pending_respawn_request = false
+	_local_was_eliminated = eliminated
+	if not eliminated or class_panel == null or _class_panel_context != "death":
+		return
+	_local_death_elapsed += delta
+	var remaining := 0.0
+	var eligible := false
+	if _lan_active and not _lan_host:
+		remaining = maxf(0.0, RiftlineMatch.RESPAWN_MIN_SECONDS - _local_death_elapsed)
+		eligible = remaining <= 0.0
+	elif director != null:
+		remaining = director.respawn_seconds_remaining(_local_actor_id)
+		eligible = director.can_respawn(_local_actor_id)
+	class_panel.set_cta_state(eligible, "" if eligible else "Available in %ds" % int(ceil(remaining)))
+
+func _request_local_respawn() -> void:
+	if _local_duelist == null or not _local_duelist.eliminated:
+		return
+	if _lan_active and not _lan_host:
+		_pending_respawn_request = true
+		return
+	if director != null:
+		director.request_respawn(_local_actor_id)
+
+## Host-side application of a remote peer's death-screen state, carried in
+## the same per-tick continuous input every other combat field rides in.
+## request_respawn() is itself idempotent/self-guarding (it's a no-op once
+## the actor is alive again), so re-processing the same "respawn": true
+## value on every subsequent tick is harmless.
+func _apply_remote_respawn_and_class(actor_id: String, target: Duelist, continuous: Dictionary) -> void:
+	var requested_class := clampi(int(continuous.get("class_id", int(Duelist.PlayerClass.FRONTLINE))), int(Duelist.PlayerClass.FRONTLINE), int(Duelist.PlayerClass.SHIELD)) as Duelist.PlayerClass
+	var requested_primary := RiftWeapons.clamp_weapon(int(continuous.get("primary_weapon", int(Duelist.Weapon.RIFLE)))) as Duelist.Weapon
+	if target.player_class != requested_class or (requested_class == Duelist.PlayerClass.FRONTLINE and (target.loadout_slots.is_empty() or int(target.loadout_slots[0]) != int(requested_primary))):
+		target.configure_loadout(requested_class, requested_primary)
+	if bool(continuous.get("respawn", false)) and director != null:
+		director.request_respawn(actor_id)
 
 func _should_show_practice_panel() -> bool:
 	if not _practice_preview.is_empty():
@@ -934,14 +1100,9 @@ func _on_join_retry_requested() -> void:
 
 func _on_rift_link_cancelled() -> void:
 	_join_discovery_started = false
-	if _lan_active:
-		if not _lan_host:
-			network.submit_client_lobby_leave()
-		_restore_offline_training("RIFT CLOSED")
-	else:
-		network.stop()
-		rift_link.hide_panel()
-		hud.set_connection_flow_active(false)
+	if _lan_active and not _lan_host:
+		network.submit_client_lobby_leave()
+	_restore_offline_training("RIFT CLOSED")
 
 func _on_network_status(status: String) -> void:
 	if rift_link != null and rift_link.visible:
@@ -1315,6 +1476,18 @@ func _tick_lan_duel(delta: float) -> void:
 		hud.take_melee()
 		_local_duelist.set_combat_pose(false, delta)
 		_local_duelist.apply_input_frame({}, delta, false)
+		# A non-host client's respawn/class picks still have to reach the
+		# host even while dead or between phases, when the branch below (the
+		# only other place a frame gets sent) is skipped - so send a
+		# combat-idle frame here too, carrying only those two fields for real.
+		if not _lan_host:
+			var idle_frame := _local_duelist.make_input_frame(_local_input_sequence, Vector2.ZERO, false, false, false, false, false, false, false, false, false, false)
+			idle_frame["protocol"] = RiftlineNetwork.PROTOCOL_VERSION
+			idle_frame["respawn"] = _pending_respawn_request
+			idle_frame["class_id"] = int(_pending_player_class)
+			idle_frame["primary_weapon"] = int(_pending_primary_weapon)
+			_local_input_sequence += 1
+			network.send_input(idle_frame)
 	else:
 		var keyboard := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 		var movement := hud.movement if hud.movement.length_squared() > 0.001 else keyboard
@@ -1332,6 +1505,9 @@ func _tick_lan_duel(delta: float) -> void:
 			interact_held,
 			hud.take_melee() or Input.is_action_just_pressed("melee"))
 		frame["protocol"] = RiftlineNetwork.PROTOCOL_VERSION
+		frame["respawn"] = _pending_respawn_request
+		frame["class_id"] = int(_pending_player_class)
+		frame["primary_weapon"] = int(_pending_primary_weapon)
 		_local_input_sequence += 1
 		_local_duelist.set_combat_pose(bool(frame.aim), delta)
 		if _lan_host:
@@ -1349,6 +1525,7 @@ func _tick_lan_duel(delta: float) -> void:
 				var continuous: Dictionary = _continuous_inputs.get(actor_id, {})
 				target.apply_continuous_input(continuous, delta, true)
 				director.set_interact(str(actor_id), bool(continuous.get("interact", false)))
+				_apply_remote_respawn_and_class(str(actor_id), target, continuous)
 		else:
 			_local_duelist.apply_input_frame(frame, delta, false)
 			if bool(frame.fire):
@@ -1534,6 +1711,12 @@ func _apply_client_spawn(actor_id: String, position: Variant = null, yaw: float 
 	if target == _local_duelist:
 		_pending_inputs.clear()
 
+## Tears down whatever match/connection state is live and returns to the main
+## menu - the destination for both the settings panel's MAIN MENU action and
+## an unrecoverable connection loss. This used to silently drop the player
+## into a fresh offline solo match instead, which is why MAIN MENU used to
+## "go nowhere" from a bot drill (there was nothing left to distinguish it
+## from just continuing).
 func _restore_offline_training(message: String) -> void:
 	_clear_ballistics()
 	_clear_presentation_effects()
@@ -1544,13 +1727,20 @@ func _restore_offline_training(message: String) -> void:
 	_lan_active = false
 	_lan_host = false
 	_lan_peer_ready = false
+	_pending_respawn_request = false
 	network.stop()
 	rift_link.hide_panel()
 	hud.set_connection_flow_active(false)
+	if class_panel != null:
+		class_panel.visible = false
+	_class_panel_context = ""
+	_practice_panel_active = false
+	if practice_panel != null:
+		practice_panel.visible = false
 	_clear_match_nodes()
-	_build_match()
-	director.begin()
 	hud.show_connection_message(message)
+	_build_main_menu()
+	main_menu.show_menu()
 
 func _sync_objective_presentation() -> void:
 	if director == null or not _objective_preview.is_empty():
@@ -1731,7 +1921,11 @@ func _continuous_input(frame: Dictionary) -> Dictionary:
 		"pitch": float(frame.get("pitch", 0.0)),
 		"aim": bool(frame.get("aim", false)),
 		"fire": bool(frame.get("fire", false)),
+		"melee": bool(frame.get("melee", false)),
 		"interact": bool(frame.get("interact", false)),
+		"respawn": bool(frame.get("respawn", false)),
+		"class_id": int(frame.get("class_id", int(Duelist.PlayerClass.FRONTLINE))),
+		"primary_weapon": int(frame.get("primary_weapon", int(Duelist.Weapon.RIFLE))),
 	}
 
 func _discrete_input(frame: Dictionary) -> Dictionary:

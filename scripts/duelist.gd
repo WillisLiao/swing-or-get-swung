@@ -1048,6 +1048,10 @@ func _rebuild_weapon_models() -> void:
 	var polymer := NuclearMaterials.polymer(Color("1c2126"), 0.6)
 	var accent := NuclearMaterials.emissive(_team_glow().lerp(Color("e6a25b"), 0.4), 2.2)
 	var hot := NuclearMaterials.emissive(Color("fff0b0"), 3.6)
+	# A distinct cool-green glass color for the optic lens/reticle - visually
+	# separate from the warm muzzle flash, so ADS reads as looking through
+	# glass rather than at more gunmetal.
+	var lens := NuclearMaterials.emissive(Color("7dffb0"), 4.4)
 	match weapon:
 		Weapon.RIFLE:
 			_build_rifle_model(gunmetal, polymer, accent, hot)
@@ -1059,8 +1063,20 @@ func _rebuild_weapon_models() -> void:
 			_build_pistol_model(slide_metal, polymer, accent, hot)
 		Weapon.SNIPER:
 			_build_sniper_model(gunmetal, polymer, accent, hot)
+	_add_optic_lens(lens)
 	if _muzzle_flare != null:
 		_muzzle_flare.scale = Vector3.ONE * 0.001
+
+## Places a small glowing lens/reticle disc at the weapon's calibrated optic
+## point (`optic_tip_local`, the same offset `Duelist.optic_tip_head_offset()`
+## uses for the ADS shot origin). Since the weapon root's own position
+## becomes `ads_anchor` while aiming and this part is parented under it, the
+## lens lands exactly where the camera centers during ADS - so a scoped shot
+## is visibly looking through glass, not just a gun held up to the screen.
+func _add_optic_lens(lens_material: Material) -> void:
+	var tip := Vector3(RiftWeapons.row(int(weapon)).get("optic_tip_local", Vector3.ZERO))
+	_add_weapon_part(_cylinder(0.05, 0.05, 0.012), tip, lens_material, Vector3(PI * 0.5, 0.0, 0.0))
+	_add_weapon_part(_cylinder(0.062, 0.062, 0.006), tip + Vector3(0.0, 0.0, 0.02), lens_material, Vector3(PI * 0.5, 0.0, 0.0))
 
 func _build_rifle_model(metal: Material, poly: Material, accent: Material, hot: Material) -> void:
 	# Full-length carbine: two-stage tapered receiver, angled magazine well,

@@ -69,6 +69,10 @@ interact={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"physical_keycode":70)]
 }
+melee={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":86)]
+}
 
 [input_devices]
 
