@@ -11,6 +11,12 @@ signal state_changed(state: Dictionary)
 
 enum Phase { STAGING, ARMING, LIVE, REMATCH, ABANDONED }
 
+## How long a dropped human actor's slot stays reserved during a live match
+## before the match is abandoned. Mobile networks blip (Wi-Fi/cell handoff,
+## the app briefly backgrounded); a single blip should not end the game for
+## the other seven players.
+const RECONNECT_GRACE_MS := 20000
+
 var roster: RiftlineRoster
 var team_size := 4
 var dedicated := false
@@ -77,6 +83,64 @@ func remove_peer(peer_id: int) -> Dictionary:
 	_revision += 1
 	_emit_state()
 	return removed
+
+## A human actor's connection dropped while a match is in progress. Their
+## slot, team, and rejoin token are kept reserved instead of freed - see
+## RiftlineRoster.disconnect_peer(). Returns {} if the peer had no actor.
+func disconnect_peer(peer_id: int) -> Dictionary:
+	if not _configured or (_phase != Phase.LIVE and _phase != Phase.ARMING):
+		return remove_peer(peer_id)
+	var existing := roster.actor_for_peer(peer_id)
+	if existing.is_empty():
+		return {}
+	var disconnected := roster.disconnect_peer(peer_id)
+	if disconnected.is_empty():
+		return {}
+	if not bool(disconnected.get("connected", true)):
+		# Reserved with a live grace timer - the match stays LIVE.
+		_revision += 1
+		_emit_state()
+		return disconnected
+	# disconnect_peer() fell back to a hard removal (e.g. no rejoin token).
+	_phase = Phase.ABANDONED
+	_revision += 1
+	_emit_state()
+	return disconnected
+
+## A client presented a rejoin token from a prior admission. On success the
+## reclaimed actor keeps its original team and identity under the new peer id.
+func reclaim_peer(token: String, peer_id: int) -> Dictionary:
+	if not _configured or token.is_empty():
+		return {}
+	var reclaimed := roster.reclaim(token, peer_id)
+	if reclaimed.is_empty():
+		return {}
+	_revision += 1
+	_emit_state()
+	return reclaimed
+
+## Called periodically by the network layer. Any actor disconnected longer
+## than RECONNECT_GRACE_MS is permanently removed and the match is abandoned,
+## exactly as an immediate disconnect used to behave.
+func sweep_grace(now_msec: int) -> bool:
+	if not _configured or roster == null:
+		return false
+	var expired: Array[String] = []
+	for existing in roster.disconnected_records():
+		var disconnected_at := int(existing.get("disconnected_at", 0))
+		if disconnected_at <= 0 or now_msec - disconnected_at >= RECONNECT_GRACE_MS:
+			expired.append(str(existing.get("actor_id", "")))
+	if expired.is_empty():
+		return false
+	for actor_id in expired:
+		roster.remove_actor(actor_id)
+		_ready_by_actor.erase(actor_id)
+		_rematch_ready_by_actor.erase(actor_id)
+	if _phase == Phase.LIVE or _phase == Phase.ARMING:
+		_phase = Phase.ABANDONED
+	_revision += 1
+	_emit_state()
+	return true
 
 func set_ready(peer_id: int, ready: bool) -> bool:
 	return _set_ready_for_actor(_actor_id_for_peer(peer_id), ready)

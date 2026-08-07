@@ -13,9 +13,18 @@ signal projectile_impacted(fact: Dictionary)
 const M4_PROJECTILE_SPEED := 800.0
 const M4_FIRE_INTERVAL := 0.086
 const M4_DAMAGE := 23.0
-const M4_MAX_RANGE := 48.0
-# 0.086 seconds is approximately 700 RPM, and 23 damage means five body hits to eliminate a 100 HP duelist.
-# The 48 meter cap keeps the fast projectile bounded to the arena's close competitive lanes.
+const M4_DAMAGE_FAR := 14.0
+const M4_FALLOFF_START := 22.0
+const M4_FALLOFF_END := 70.0
+const M4_MAX_RANGE := 95.0
+# 0.086 seconds is approximately 700 RPM, and 23 damage means five body hits to
+# eliminate a 100 HP duelist inside FALLOFF_START (close competitive lanes).
+# Damage falls off linearly from there to FALLOFF_END, floors at 14 (about
+# eight hits) out to MAX_RANGE, and never drops further - a shot that lands
+# always registers, it just does less work at range. MAX_RANGE (95m) comfortably
+# covers the Concourse's longest open sightlines (60m radius / 120m diameter)
+# so a projectile crossing the core room does not vanish before reaching a
+# target still inside the arena.
 const PROJECTILE_GRAVITY := 9.81
 const COLLISION_MASK := 1 | 2
 const WORLD_COLLISION_MASK := 1
@@ -167,10 +176,13 @@ func _handle_impact(projectile: Dictionary, hit: Dictionary) -> void:
 	var collider: Object = hit.get("collider", null)
 	var hit_duelist := false
 	var target_id := ""
+	var source_position: Vector3 = projectile.get("source_position", projectile.get("position", Vector3.ZERO))
+	var impact_position: Vector3 = hit.get("position", projectile.position)
+	var damage := _damage_for_distance(source_position.distance_to(impact_position))
 	if collider is Duelist and collider != shooter and not collider.eliminated and collider.match_active and collider.team != shooter.team:
 		hit_duelist = true
 		target_id = collider.actor_id
-		collider.take_damage(M4_DAMAGE, shooter)
+		collider.take_damage(damage, shooter)
 	projectile_impacted.emit({
 		"type": "projectile_impacted",
 		"session_id": _session_id,
@@ -178,10 +190,20 @@ func _handle_impact(projectile: Dictionary, hit: Dictionary) -> void:
 		"team": int(projectile.team),
 		"shooter_id": str(projectile.get("shooter_id", "")),
 		"target_id": target_id,
-		"source_position": projectile.get("source_position", projectile.get("position", Vector3.ZERO)),
-		"damage": M4_DAMAGE if hit_duelist else 0.0,
-		"position": hit.get("position", projectile.position),
+		"source_position": source_position,
+		"damage": damage if hit_duelist else 0.0,
+		"position": impact_position,
 		"normal": hit.get("normal", Vector3.UP),
 		"hit_duelist": hit_duelist,
 		"obstructed": false,
 	})
+
+## Linear falloff from the close-range plate to the floor damage, so a shot
+## that connects always does meaningful work - it never silently no-ops.
+func _damage_for_distance(distance: float) -> float:
+	if distance <= M4_FALLOFF_START:
+		return M4_DAMAGE
+	if distance >= M4_FALLOFF_END:
+		return M4_DAMAGE_FAR
+	var t := (distance - M4_FALLOFF_START) / (M4_FALLOFF_END - M4_FALLOFF_START)
+	return lerpf(M4_DAMAGE, M4_DAMAGE_FAR, t)

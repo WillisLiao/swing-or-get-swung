@@ -2,6 +2,7 @@ class_name DuelHud
 extends Control
 
 signal rift_link_requested
+signal main_menu_requested
 signal feedback_preferences_changed(effects_enabled: bool, haptics_enabled: bool)
 signal view_fov_changed(horizontal_degrees: float)
 
@@ -684,17 +685,28 @@ func _enemy_color() -> Color:
 	return _team_color(Duelist.Team.BLUE if _roster_local_team == int(Duelist.Team.RED) else Duelist.Team.RED)
 
 func _draw_vitality_strip(safe: Rect2, friendly: Color) -> void:
-	var plate_size := Vector2(20.0, 10.0)
-	var gap := 5.0
-	var total_width := plate_size.x * 5.0 + gap * 4.0
-	var origin := Vector2(safe.get_center().x - total_width * 0.5, safe.end.y - 44.0)
-	var filled := clampi(ceili(health / 20.0), 0, 5)
+	# A continuous 0-100 bar. Every point of damage moves the fill; this is
+	# not a chunked "hits remaining" meter, since damage varies per weapon
+	# (SMG/pistol chip damage vs. sniper one-shots) and a fixed hit count
+	# would lie about how much health is actually left.
+	var bar_size := Vector2(132.0, 14.0)
+	var origin := Vector2(safe.get_center().x - bar_size.x * 0.5, safe.end.y - 46.0)
+	var track := Rect2(origin, bar_size)
+	var fraction := clampf(health / Duelist.HEALTH, 0.0, 1.0)
 	var low_pulse := 0.7 + sin(Time.get_ticks_msec() * 0.012) * 0.3 if health <= 30.0 else 1.0
-	var plate_color := Color("ef8b78", low_pulse) if health <= 30.0 else Color("f5e6bd") if health <= 60.0 else friendly
-	for index in 5:
-		var rect := Rect2(origin + Vector2(index * (plate_size.x + gap), 0.0), plate_size)
-		draw_rect(rect, Color(plate_color, 0.9 if index < filled else 0.12), index < filled)
-		draw_rect(rect, Color("f1f6ff", 0.7), false, 1.2)
+	var fill_color := Color("ef8b78", low_pulse) if health <= 30.0 else Color("f5e6bd") if health <= 60.0 else friendly
+	draw_rect(track, Color("0b1730", 0.72))
+	if fraction > 0.0:
+		draw_rect(Rect2(track.position, Vector2(track.size.x * fraction, track.size.y)), Color(fill_color, 0.92))
+	var ticks: Array[float] = [0.25, 0.5, 0.75]
+	for tick in ticks:
+		var tick_x: float = track.position.x + track.size.x * tick
+		draw_line(Vector2(tick_x, track.position.y), Vector2(tick_x, track.end.y), Color("0b1730", 0.55), 1.0)
+	draw_rect(track, Color("f1f6ff", 0.7), false, 1.2)
+	var label := str(ceili(health))
+	var font := ThemeDB.fallback_font
+	var label_width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+	draw_string(font, Vector2(track.get_center().x - label_width * 0.5, track.position.y - 5.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("f1f6ff", 0.9))
 
 
 func _team_color(team: int) -> Color:
@@ -1074,11 +1086,12 @@ func _settings_control_at(panel: Rect2, point: Vector2) -> String:
 		return "ads_look_chip"
 	if _hud_layout_rect(panel).has_point(point):
 		return "hud_layout_chip"
-	if _reset_training_rect(panel).has_point(point):
-		return "reset_training_chip"
 	if _rift_link_rect(panel).has_point(point):
 		return "rift_link_chip"
-	# QUICK SWAP is drawn but stays inert on purpose.
+	if _reset_training_rect(panel).has_point(point):
+		return "reset_training_chip"
+	if _main_menu_rect(panel).has_point(point):
+		return "main_menu_chip"
 	return ""
 
 func _camera_track_rect(panel: Rect2) -> Rect2:
@@ -1125,6 +1138,10 @@ func _apply_settings_press(control: String, point: Vector2, panel: Rect2) -> voi
 			_settings_open = false
 			_release_all_touch_ownership()
 			rift_link_requested.emit()
+		"main_menu_chip":
+			_settings_open = false
+			_release_all_touch_ownership()
+			main_menu_requested.emit()
 		_:
 			pass
 
@@ -1170,15 +1187,17 @@ func _draw_settings_panel(friendly: Color, enemy: Color) -> void:
 	draw_string(font, panel.position + Vector2(24, 157), "ADS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, enemy)
 	_draw_setting_slider(_camera_track_rect(panel).position, panel.size.x - 190, camera_sensitivity, friendly)
 	_draw_setting_slider(_ads_track_rect(panel).position, panel.size.x - 190, ads_sensitivity, friendly)
-	_draw_setting_chip(Rect2(panel.position + Vector2(24, 188), Vector2(142, 44)), "AIM %s" % ("TAP" if _aim_toggle else "HOLD"), friendly, _aim_toggle)
-	_draw_setting_chip(Rect2(panel.position + Vector2(184, 188), Vector2(142, 44)), "GYRO %s" % ("ON" if gyro_enabled else "OFF"), Color("c292ff"), gyro_enabled)
-	_draw_setting_chip(Rect2(panel.position + Vector2(344, 188), Vector2(142, 44)), "QUICK SWAP", Color("c292ff"), true)
+	draw_string(font, panel.position + Vector2(24, SETTINGS_TOGGLES_TOP - SETTINGS_LABEL_GAP), "CONTROLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("92a7c7"))
+	_draw_setting_chip(_aim_rect(panel), "AIM %s" % ("TAP" if _aim_toggle else "HOLD"), friendly, _aim_toggle)
+	_draw_setting_chip(_gyro_rect(panel), "GYRO %s" % ("ON" if gyro_enabled else "OFF"), Color("c292ff"), gyro_enabled)
 	_draw_setting_chip(_effects_rect(panel), "EFFECTS %s" % ("ON" if effects_enabled else "OFF"), friendly, effects_enabled)
 	_draw_setting_chip(_stick_mode_rect(panel), "STICK %s" % ("FLOAT" if _stick_mode == MobileTouchRouter.StickMode.FLOATING else "FIXED"), friendly, _stick_mode == MobileTouchRouter.StickMode.FLOATING)
 	_draw_setting_chip(_ads_look_rect(panel), "ADS LOOK %s" % ("ON" if ads_button_look else "OFF"), Color("c292ff"), ads_button_look)
+	draw_string(font, panel.position + Vector2(24, _settings_actions_top() - SETTINGS_LABEL_GAP), "ACTIONS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("92a7c7"))
 	_draw_setting_chip(_hud_layout_rect(panel), "HUD LAYOUT", enemy, true)
-	_draw_setting_chip(_reset_training_rect(panel), "RESET TRAINING", Color("e57c70"), false)
 	_draw_setting_chip(_rift_link_rect(panel), "RIFT LINK", Color("71cfff"), false)
+	_draw_setting_chip(_reset_training_rect(panel), "RESET TRAINING", Color("e57c70"), false)
+	_draw_setting_chip(_main_menu_rect(panel), "MAIN MENU", Color("e57c70"), false)
 	draw_string(font, panel.position + Vector2(24, panel.size.y - 22), "Tap outside to return", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("92a7c7"))
 
 func _draw_setting_slider(position: Vector2, width: float, value: float, color: Color) -> void:
@@ -1363,29 +1382,56 @@ func _editor_button_rect(button: String) -> Rect2:
 func _settings_panel() -> Rect2:
 	var safe := _safe_rect()
 	var width := clampf(safe.size.x * 0.72, 520.0, 760.0)
-	var height := clampf(safe.size.y * 0.82, 500.0, 620.0)
+	var height := clampf(safe.size.y * 0.82, 540.0, 620.0)
 	return Rect2(safe.get_center() - Vector2(width, height) * 0.5, Vector2(width, height))
 
-func _rift_link_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(244, 418), Vector2(180, 44))
+## A consistent 2-column grid shared by every toggle and action chip, so
+## nothing in the panel is hand-placed pixel-by-pixel: every row lines up
+## under the same margins and every chip in a column shares the same width.
+const SETTINGS_GRID_MARGIN := 24.0
+const SETTINGS_GRID_GAP := 10.0
+const SETTINGS_CHIP_HEIGHT := 42.0
+const SETTINGS_ROW_PITCH := 50.0
+const SETTINGS_TOGGLES_TOP := 212.0
+const SETTINGS_SECTION_GAP := 20.0
+const SETTINGS_LABEL_GAP := 18.0
 
-func _stick_mode_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(184, 250), Vector2(142, 44))
+func _settings_grid_rect(panel: Rect2, top: float, col: int, row: int) -> Rect2:
+	var content_width := panel.size.x - SETTINGS_GRID_MARGIN * 2.0
+	var chip_width := (content_width - SETTINGS_GRID_GAP) * 0.5
+	var x := panel.position.x + SETTINGS_GRID_MARGIN + float(col) * (chip_width + SETTINGS_GRID_GAP)
+	var y := panel.position.y + top + float(row) * SETTINGS_ROW_PITCH
+	return Rect2(Vector2(x, y), Vector2(chip_width, SETTINGS_CHIP_HEIGHT))
 
-func _ads_look_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(24, 306), Vector2(142, 44))
+func _aim_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, SETTINGS_TOGGLES_TOP, 0, 0)
 
-func _hud_layout_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(184, 306), Vector2(210, 44))
-
-func _reset_training_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(24, 418), Vector2(210, 44))
+func _gyro_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, SETTINGS_TOGGLES_TOP, 1, 0)
 
 func _effects_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(24, 250), Vector2(142, 44))
+	return _settings_grid_rect(panel, SETTINGS_TOGGLES_TOP, 0, 1)
 
-func _haptics_rect(panel: Rect2) -> Rect2:
-	return Rect2(panel.position + Vector2(184, 250), Vector2(142, 44))
+func _stick_mode_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, SETTINGS_TOGGLES_TOP, 1, 1)
+
+func _ads_look_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, SETTINGS_TOGGLES_TOP, 0, 2)
+
+func _settings_actions_top() -> float:
+	return SETTINGS_TOGGLES_TOP + SETTINGS_ROW_PITCH * 3.0 + SETTINGS_SECTION_GAP
+
+func _hud_layout_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, _settings_actions_top(), 0, 0)
+
+func _rift_link_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, _settings_actions_top(), 1, 0)
+
+func _reset_training_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, _settings_actions_top(), 0, 1)
+
+func _main_menu_rect(panel: Rect2) -> Rect2:
+	return _settings_grid_rect(panel, _settings_actions_top(), 1, 1)
 
 func _safe_rect() -> Rect2:
 	return RESPONSIVE.safe_rect(self)

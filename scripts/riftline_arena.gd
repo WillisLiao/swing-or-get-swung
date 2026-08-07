@@ -508,6 +508,7 @@ func _build_hud() -> void:
 	hud = DuelHud.new()
 	layer.add_child(hud)
 	hud.rift_link_requested.connect(_on_rift_link_requested)
+	hud.main_menu_requested.connect(_on_rift_link_cancelled)
 	hud.feedback_preferences_changed.connect(_on_feedback_preferences_changed)
 	hud.view_fov_changed.connect(_on_view_fov_changed)
 	_build_combat_feedback()
@@ -1736,9 +1737,16 @@ func _build_projectile_presentation_pool() -> void:
 	add_child(_projectile_presentation_pool)
 	for _index in 12:
 		var tracer := MeshInstance3D.new()
-		var tracer_mesh := BoxMesh.new()
-		tracer_mesh.size = Vector3(0.032, 0.032, 1.2)
+		var tracer_mesh := SphereMesh.new()
+		tracer_mesh.radius = 0.045
+		tracer_mesh.height = 0.09
+		tracer_mesh.radial_segments = 8
+		tracer_mesh.rings = 6
 		tracer.mesh = tracer_mesh
+		# A slight stretch along the direction of travel reads as a fast-moving
+		# round without becoming a streak/line - the bullet itself stays a small
+		# projectile, not a cross or a bar.
+		tracer.scale = Vector3(1.0, 1.0, 2.4)
 		tracer.material_override = NuclearMaterials.emissive(Color("fff0b0"), 6.0).duplicate()
 		tracer.visible = false
 		_projectile_presentation_pool.add_child(tracer)
@@ -1747,18 +1755,18 @@ func _build_projectile_presentation_pool() -> void:
 		var impact := Node3D.new()
 		impact.name = "CarbineImpact"
 		impact.visible = false
-		var vertical := MeshInstance3D.new()
-		var vertical_mesh := BoxMesh.new()
-		vertical_mesh.size = Vector3(0.055, 0.48, 0.025)
-		vertical.mesh = vertical_mesh
-		vertical.material_override = NuclearMaterials.emissive(Color("fff0b0"), 5.0).duplicate()
-		impact.add_child(vertical)
-		var horizontal := MeshInstance3D.new()
-		var horizontal_mesh := BoxMesh.new()
-		horizontal_mesh.size = Vector3(0.48, 0.055, 0.025)
-		horizontal.mesh = horizontal_mesh
-		horizontal.material_override = NuclearMaterials.emissive(Color("fff0b0"), 5.0).duplicate()
-		impact.add_child(horizontal)
+		# A flush circular scorch mark against the surface - an actual bullet
+		# mark, not two crossed bars.
+		var mark := MeshInstance3D.new()
+		var mark_mesh := CylinderMesh.new()
+		mark_mesh.top_radius = 0.05
+		mark_mesh.bottom_radius = 0.1
+		mark_mesh.height = 0.012
+		mark_mesh.radial_segments = 10
+		mark.mesh = mark_mesh
+		mark.rotation.x = PI * 0.5
+		mark.material_override = NuclearMaterials.emissive(Color("fff0b0"), 5.0).duplicate()
+		impact.add_child(mark)
 		var ring := MeshInstance3D.new()
 		var ring_mesh := TorusMesh.new()
 		ring_mesh.inner_radius = 0.18
@@ -1789,7 +1797,7 @@ func _spawn_projectile_tracer(fact: Dictionary) -> void:
 	var direction := velocity.normalized()
 	tracer.global_position = origin + direction * 0.55
 	tracer.look_at(tracer.global_position + direction, Vector3.UP)
-	tracer.scale = Vector3.ONE
+	tracer.scale = Vector3(1.0, 1.0, 2.4)
 	tracer.visible = true
 	var team := int(fact.get("team", int(Duelist.Team.RED))) as Duelist.Team
 	_set_projectile_color(tracer, Color("ff6a57") if team == Duelist.Team.RED else Color("75dbff"), 4.0)
@@ -1833,7 +1841,7 @@ func _spawn_projectile_impact(point: Vector3, normal: Vector3, team: Duelist.Tea
 	var safe_normal := normal.normalized() if normal.length_squared() > 0.0001 else Vector3.UP
 	impact.look_at(point + safe_normal, Vector3.RIGHT if absf(safe_normal.dot(Vector3.UP)) > 0.92 else Vector3.UP)
 	impact.scale = Vector3.ONE * (0.8 if hit_duelist else 0.5)
-	var ring := impact.get_child(2) as MeshInstance3D
+	var ring := impact.get_child(1) as MeshInstance3D
 	if ring != null:
 		ring.visible = hit_duelist
 	for child in impact.get_children():
@@ -2363,7 +2371,7 @@ func _show_capture_impact(point: Vector3, normal: Vector3, team: Duelist.Team, h
 	impact.global_position = point
 	impact.look_at(point + normal, Vector3.UP)
 	impact.scale = Vector3.ONE * (0.8 if hit_duelist else 0.5)
-	var ring := impact.get_child(2) as MeshInstance3D
+	var ring := impact.get_child(1) as MeshInstance3D
 	if ring != null:
 		ring.visible = hit_duelist
 	for child in impact.get_children():

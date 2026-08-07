@@ -64,6 +64,53 @@ func _initialize() -> void:
 	assert(int(squad.public_state().team_size) == 4)
 	assert(not squad.admit_peer(20).is_empty())
 
+	# A dropped connection mid-match is a reserved grace window, not an
+	# instant loss for the other seven players - this is the mobile-network
+	# hardening the reconnect flow exists for.
+	var grace := RiftlineLobby.new()
+	grace.configure(4, true)
+	var grace_records: Array[Dictionary] = []
+	for peer_id in range(1, 9):
+		grace_records.append(grace.admit_peer(peer_id))
+	for peer_id in range(1, 9):
+		assert(grace.set_ready(peer_id, true))
+	assert(grace.start_live())
+	assert(grace.commit_live(grace.current_generation()))
+	var dropped_token := str(grace_records[2].get("rejoin_token", ""))
+	assert(not dropped_token.is_empty())
+	var dropped_team := int(grace_records[2].get("team", -1))
+	var grace_revision := int(grace.public_state().revision)
+	var disconnected := grace.disconnect_peer(3)
+	assert(not disconnected.is_empty())
+	assert(not bool(disconnected.get("connected", true)))
+	assert(int(grace.public_state().phase) == RiftlineLobby.Phase.LIVE)
+	assert(int(grace.public_state().revision) > grace_revision)
+	var disconnected_record: Dictionary = {}
+	for record in grace.public_state().records:
+		if str(record.get("actor_id", "")) == str(disconnected.get("actor_id", "")):
+			disconnected_record = record
+	assert(not disconnected_record.is_empty())
+	assert(not bool(disconnected_record.get("connected", true)))
+
+	# A stranger presenting a wrong token cannot steal the reserved slot.
+	assert(grace.reclaim_peer("not-the-token", 9).is_empty())
+	assert(not grace.sweep_grace(Time.get_ticks_msec()))
+
+	# The same client, presenting the token it was issued, gets its actor
+	# identity and team back under a brand new peer id.
+	var reclaimed := grace.reclaim_peer(dropped_token, 9)
+	assert(not reclaimed.is_empty())
+	assert(int(reclaimed.get("team", -1)) == dropped_team)
+	assert(int(grace.public_state().phase) == RiftlineLobby.Phase.LIVE)
+	assert(bool(reclaimed.get("connected", false)))
+
+	# A grace window that fully expires without reconnect still abandons the
+	# match, exactly as an immediate disconnect used to.
+	grace.disconnect_peer(9)
+	assert(int(grace.public_state().phase) == RiftlineLobby.Phase.LIVE)
+	assert(grace.sweep_grace(Time.get_ticks_msec() + RiftlineLobby.RECONNECT_GRACE_MS + 1))
+	assert(int(grace.public_state().phase) == RiftlineLobby.Phase.ABANDONED)
+
 	print("Riftline lobby exercise: PASS")
 	quit()
 

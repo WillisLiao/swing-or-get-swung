@@ -28,12 +28,29 @@ The settings-panel touch-capture bug (a sliding finger activating other controls
 Headless import is clean and all 16 exercises pass.
 Full detail: `devlogs/2026-08-07.md`.
 
-**Next up, in rough priority order:**
+**Same day, second session - multiplayer hardening and three bug fixes:**
+- **Reconnect grace period.** A human actor's connection dropping during a LIVE/ARMING match no longer instantly abandons the match. The dropped slot is reserved under a rejoin token for `RiftlineLobby.RECONNECT_GRACE_MS` (20s); the same client reconnecting within that window is restored to its original actor/team identity. Only a grace-window timeout (or a non-live-phase disconnect, unchanged) abandons the match. New: `RiftlineRoster.disconnect_peer/reclaim/disconnected_records`, `RiftlineLobby.disconnect_peer/reclaim_peer/sweep_grace`, network-level rejoin handshake in `riftline_network.gd`. This is foundation work for eventual internet play (still LAN/ENet only today, by explicit user decision - see `devlogs/2026-08-07.md`), not internet play itself.
+- **Health bar fixed.** `duel_hud.gd`'s vitality strip was rendering `ceili(health/20)` as 5 discrete plates (a "5 hits and you're dead" display) even though the underlying model was already a real 100 HP value. It is now a continuous 0-100 bar with a numeric readout.
+- **Damage falloff/range bug fixed.** `rift_ballistics.gd`'s `M4_MAX_RANGE` was 48m on a 60m-radius (120m diameter) map - long-sightline shots were vanishing with zero damage and no feedback, which read as "shots not registering." Range raised to 95m with a real linear damage falloff (23 near, floors at 14 far) instead of a hard cutoff.
+- **Bullet/impact visuals fixed.** The in-flight tracer was a thin box streak and the wall/duelist impact effect was a literal `+`-shaped cross (two crossed boxes). Tracer is now a small stretched sphere; impact is a circular scorch mark + ring, not a cross.
+- **Settings panel redesigned + Main Menu added.** There was previously no way back to the connection/staging screen from inside a match short of restarting the app. `duel_hud.gd` settings now has a MAIN MENU action (reuses the existing `_on_rift_link_cancelled()` leave/severed path) and the whole panel moved from hand-placed pixel offsets to a real 2-column grid with section headers; the dead inert "QUICK SWAP" chip was removed.
+- All 16 exercises still pass, including a new reconnect-grace block in `tools/riftline_lobby_exercise.gd`.
+
+**Deferred by explicit user decision to their own sessions - do not start these inline, use the bootstrap files:**
+- `handoffs/NEXT-SESSION-weapons-and-loadouts.md` - remove iron sights and the knife, real per-stance/movement/ADS accuracy model, five real weapons (AR/SMG/shotgun/pistol/sniper) replacing the one generic M4, four-class 2-slot loadout rebuild (frontline/sniper/runner/shield), nuclear vest mechanic.
+- `handoffs/NEXT-SESSION-art-ui-redesign.md` - full Halo/Destiny-register art, character/weapon materials off `pulp_lit`, and a full UI pass (not just the settings-panel layout fix already done). **Run after** the weapons/loadouts session - they touch the same files.
+- `handoffs/NEXT-SESSION-respawn-logic.md` - respawn timing considered as part of the whole game-mode-rule chain, not an isolated number. Framing only so far, no design.
+
+These three touch `scripts/duelist.gd`, `scripts/riftline_arena.gd`, and `scripts/duel_hud.gd` in overlapping ways.
+**Run them sequentially, one at a time, not as concurrently-running sessions against the same checkout** - see the "Sequencing" note in `NEXT-SESSION-art-ui-redesign.md` for what happens if you don't and how to do it safely with worktrees if you really want two running at once.
+
+**Older backlog, still real but lower priority than the above:**
 1. **Objective-aware bots.** `bot_duelist.gd` is combat-only. `set_objective_context()` exists and the arena feeds it, but nothing consumes it, so bots ignore the core entirely. This is the biggest gap for offline and bot-filled 4v4.
-2. **Character and weapon materials.** `duelist.gd` still uses `pulp_lit`, so players read as flat silhouettes against PBR level geometry.
-3. **Surface relief bands on large flat areas.** Drive albedo from the isotropic value noise and leave the sine sum for the normal only.
-4. **Palette is over-saturated.** Team accents are on whole base walls; the pad emissive ring blows out. Large surfaces should be concrete/steel with team colour as accent only.
-5. **On-device touch playtest** of install/cancel, which PR #1's review asked for.
+2. **Surface relief bands on large flat areas.** Drive albedo from the isotropic value noise and leave the sine sum for the normal only.
+3. **Palette is over-saturated.** Team accents are on whole base walls; the pad emissive ring blows out. Large surfaces should be concrete/steel with team colour as accent only. (Likely absorbed into the art/UI redesign session rather than done separately - see that bootstrap file.)
+4. **On-device touch playtest** of install/cancel, which PR #1's review asked for.
+
+Character/weapon materials being on `pulp_lit` moved from this list into the art/UI redesign bootstrap file - it is the same underlying gap, just now scoped with the rest of the visual redesign instead of as a standalone item.
 
 ## THE GAME MODE - FINAL RULES
 
