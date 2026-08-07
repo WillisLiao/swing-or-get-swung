@@ -1,0 +1,52 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/maps/riftline_map_concourse_cover_v2.glb" id="1_map"]
+[ext_resource type="Script" path="res://scripts/cover_v2_preview.gd" id="2_script"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_preview"]
+sky_top_color = Color(0.105882, 0.184314, 0.270588, 1)
+sky_horizon_color = Color(0.560784, 0.65098, 0.72549, 1)
+ground_bottom_color = Color(0.0509804, 0.0588235, 0.0705882, 1)
+ground_horizon_color = Color(0.345098, 0.360784, 0.380392, 1)
+
+[sub_resource type="Sky" id="Sky_preview"]
+sky_material = SubResource("ProceduralSkyMaterial_preview")
+
+[sub_resource type="Environment" id="Environment_preview"]
+background_mode = 2
+sky = SubResource("Sky_preview")
+ambient_light_source = 3
+ambient_light_color = Color(0.72, 0.79, 0.88, 1)
+ambient_light_energy = 0.8
+reflected_light_source = 2
+tonemap_mode = 2
+
+[node name="CoverV2Preview" type="Node3D"]
+script = ExtResource("2_script")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_preview")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-55, -30, 0)
+light_color = Color(1, 0.9, 0.78, 1)
+light_energy = 1.4
+shadow_enabled = true
+
+[node name="ImportedMap" parent="." instance=ExtResource("1_map")]
+
+[node name="CameraRig" type="Node3D" parent="."]
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 58, 78)
+current = true
+fov = 58.0
+
+[node name="PreviewLabel" type="Label" parent="."]
+offset_left = 24.0
+offset_top = 20.0
+offset_right = 460.0
+offset_bottom = 58.0
+theme_override_colors/font_color = Color(0.95, 0.97, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "CONCOURSE COVER V2  •  HOLD SPACE TO PAUSE ORBIT"
