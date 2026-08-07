@@ -407,6 +407,15 @@ func build(assigned_team: Team, local_camera: bool, render_visuals: bool = true,
 		_scope_viewport.name = "ScopeViewport"
 		_scope_viewport.size = Vector2i(SCOPE_VIEWPORT_SIZE, SCOPE_VIEWPORT_SIZE)
 		_scope_viewport.transparent_bg = false
+		# A SubViewport otherwise inherits the project's default 3D AA
+		# settings (project.godot: msaa_3d=2x) - a second full-scene render
+		# is expensive enough without also paying an MSAA resolve on a
+		# tile-based mobile GPU for a small magnified inset that gets drawn
+		# scaled up anyway. Disable AA on this pass specifically; the main
+		# camera's own AA is untouched.
+		_scope_viewport.msaa_3d = Viewport.MSAA_DISABLED
+		_scope_viewport.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+		_scope_viewport.use_taa = false
 		_scope_viewport.own_world_3d = false
 		_scope_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		add_child(_scope_viewport)
