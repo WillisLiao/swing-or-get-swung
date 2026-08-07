@@ -20,6 +20,8 @@ This repo is protected on `main` - land changes by branch + PR, not a direct pus
 
 ## Current state (2026-08-07)
 
+**Open regression, filed not fixed: the deployed iPad build from the fourteenth session (below) is "super laggy."** None of sessions twelve through fourteen measured frame time or GPU/CPU cost - every verification pass checked correctness, never speed, despite `handoffs/HANDOFF.md`'s own long-standing Mobile-renderer-at-120Hz constraint. Three suspects are recorded with concrete file:line pointers and a bisection methodology in `handoffs/NEXT-SESSION-performance-regression.md` - the new sniper-scope picture-in-picture (a full second 3D render pass while scoped), the seven autonomous bots recomputing pathfinding every physics tick, and the High Alert chip's per-opponent raycast. The user wants the real cause found with numbers, then re-implemented more cheaply - not a blind revert of any of the three features, all of which are wanted long-term. Use the bootstrap file for the next session on this.
+
 **Latest - fourteenth session, High Alert threat warning chip (Robert, PR #8):**
 A universal local passive (no chip-selection UI yet, everyone gets it) that warns the local player when an enemy is aiming at them: alive, opposing team, 55%+ into ADS, within 95m, inside a 5.5-degree aim cone, outside the player's own view, and unobstructed - a pulsing edge arc/chevron plus a `HIGH ALERT` plate. Restyled onto the twelfth session's HUD token/plate system on merge (`HUD_ALERT`, `draw_plate`, `draw_tracked_centered`), same trigger logic and public contract. Full detail: "Fourteenth session" in `devlogs/2026-08-07.md`.
 
