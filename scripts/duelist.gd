@@ -50,6 +50,13 @@ const FIRST_PERSON_WEAPON_SCALE := 0.38
 # keep showing the actual, unmagnified surroundings instead of a flat mask
 # fill (see `duel_hud.gd::_draw_scope_overlay`, which draws this texture).
 const SCOPE_VIEWPORT_SIZE := 512
+# The scope picture is a second full-scene render - throttling how often it
+# actually re-renders is the cheapest way to cut that cost without losing
+# the picture-in-picture. 30 Hz reads as live for a small magnified inset
+# (recoil kick still updates the camera transform every frame below; only
+# the render itself is throttled) while cutting the extra full-scene
+# render/shade pass to a quarter of a 120 Hz frame budget.
+const SCOPE_REFRESH_SECONDS := 1.0 / 30.0
 # How hard the scope PICTURE kicks under recoil, in radians per unit of
 # `_recoil_kick`/`_recoil_lateral`. This is deliberately much smaller than the
 # weapon-rig's own recoil rotation - that rotates a prop a few centimetres
@@ -354,6 +361,16 @@ var camera: Camera3D
 ## local player ever needs one - see `build()`.
 var _scope_viewport: SubViewport
 var _scope_camera: Camera3D
+## While scoped, the scope picture is a full second render of the same
+## `World3D` (full geometry, full `nuclear_pbr` shading) on top of the main
+## camera's own render every frame - by construction the single most
+## expensive thing the sniper does, and the prime suspect in the
+## post-redesign "super laggy" report (see
+## `handoffs/NEXT-SESSION-performance-regression.md`). A small magnified
+## inset does not need to refresh at the full display rate to read as live,
+## so it is throttled to `SCOPE_REFRESH_SECONDS` via `UPDATE_ONCE` instead of
+## running `UPDATE_ALWAYS` every frame.
+var _scope_refresh_remaining := 0.0
 
 func build(assigned_team: Team, local_camera: bool, render_visuals: bool = true, authoritative_collision: bool = true) -> void:
 	team = assigned_team
@@ -567,7 +584,14 @@ func _process(delta: float) -> void:
 			_weapon_rig.visible = weapon != Weapon.SNIPER or ads_progress < SNIPER_SCOPE_HANDOVER
 		if _scope_camera != null and _scope_viewport != null and _local_camera and camera != null:
 			var scoped := weapon == Weapon.SNIPER and ads_progress > 0.02
-			_scope_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if scoped else SubViewport.UPDATE_DISABLED
+			if scoped:
+				_scope_refresh_remaining -= delta
+				if _scope_refresh_remaining <= 0.0:
+					_scope_refresh_remaining = SCOPE_REFRESH_SECONDS
+					_scope_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+			else:
+				_scope_refresh_remaining = 0.0
+				_scope_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 			if scoped:
 				_scope_camera.global_transform = camera.global_transform
 				# The scope picture itself kicks under recoil - see
