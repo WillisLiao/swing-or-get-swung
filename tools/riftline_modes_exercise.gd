@@ -74,6 +74,10 @@ func _test_pickup_at_center(root: Node3D) -> void:
 	assert(match_node.core_carrier_id == "pick_red")
 	assert(match_node.core_carrier_team == RED)
 	assert(red.is_carrying_core())
+	var health_before_carry: float = red.health
+	red._simulate_motion(Vector2.ZERO, false, 1.0)
+	assert(is_equal_approx(red.health, health_before_carry))
+	assert(is_equal_approx(red.movement_speed_multiplier(), Duelist.CORE_CARRY_SPEED_MULTIPLIER))
 
 func _test_carrier_flag_set_and_cleared(root: Node3D) -> void:
 	var match_node := _make_match(root, _default_pads())
