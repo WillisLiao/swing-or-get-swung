@@ -20,6 +20,22 @@ This repo is protected on `main` - land changes by branch + PR, not a direct pus
 
 ## Current state (2026-08-08)
 
+**Latest - L1 Competitive Concourse V2 gameplay blockout:** the old heuristic Concourse map was replaced with an immutable `RiftlineMapLayout` version 2 contract and explicit collision solids, mirrored RED/BLUE bases, center, maintenance, and overlook route graphs.
+`RiftlineMap` keeps its public arena API, builds collision without meshes when presentation is disabled, loads `res://scenes/concourse_v2_visual.tscn` once when available, and uses a procedural greybox fallback with one logged error while that visual scene is still missing.
+The map has 129 authored collision solids, includes the 40-segment circular shell, frozen central bridge and blocker, symmetric base interiors, maintenance corridors, overlook decks, ramps, upper connectors, launch pads, gates, and spawn pockets.
+Ambient decorative motion is removed; objective pulsing is the only event-driven processing and is disabled while inactive.
+Bot roles now map Runner to center, Escort to maintenance, Defender to center, and Raider to overlook, with carriers and Escorts preferring the maintenance return route.
+Lane changes invalidate cached bot waypoints, and `ai_state()` exposes the active lane.
+
+Verification for this session is complete: the Godot MCP 3.1.2 editor connection was live for runtime inspection, live screenshots were checked at center, base, east flank, and upper-overlook poses, and live route state reported zero ambient motion and inactive map processing outside a pulse.
+The headless import check passed, all 18 `tools/*_exercise.gd` scripts passed, and the direct 4v4 arena performance sample remained `avg_ms=16.67`, `min_ms=16.67`, `max_ms=16.67` over 120 frames.
+The required serial runner command returned an empty capture again, so the direct Godot binary result is the recorded performance evidence rather than pretending the runner emitted a sample.
+Windowed MCP renderer monitors stayed at 308 draw calls and 145 FPS across samples, with physics process around `0.000041-0.000072` seconds and process around `0.001674-0.001759` seconds.
+The separate visual-scene import and on-device human feel or thermal checks remain outside this map scope.
+The uncommitted build was nevertheless exported, signed, installed, launched, and process-verified on the connected iPad Pro 12.9 (5th generation) through `devicectl` as `com.lull.riftline`.
+No human touch or thermal playtest was performed by the agent.
+The coordinator's later correction excludes all weapon, sniper, HUD, recoil, damage-feedback, and viewmodel requests from L1; none of those files were edited here.
+
 **Agent tooling hard gate:** every implementation, debugging, review, test, or verification task that touches game behavior must prove a live `godot-ai` MCP editor-plugin connection with an actual successful tool call before substantive investigation or any repository write.
 Godot CLI and headless checks remain complementary validation and are never a fallback for missing MCP.
 Any Blender or 3D-model task likewise requires an actual successful Blender MCP call, and a Blender-authored game asset requires both Blender MCP for source work and Godot MCP for import and live-game verification.

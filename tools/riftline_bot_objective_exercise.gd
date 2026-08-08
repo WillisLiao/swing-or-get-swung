@@ -3,13 +3,25 @@ extends SceneTree
 func _initialize() -> void:
 	var root := Node3D.new()
 	get_root().add_child(root)
+	var map := RiftlineMap.new()
+	root.add_child(map)
+	map.configure(RiftlineMap.Id.CONCOURSE, false)
 	var runner := _new_bot(root, "red_runner", Duelist.Team.RED, 0)
 	var escort := _new_bot(root, "red_escort", Duelist.Team.RED, 1)
 	var defender := _new_bot(root, "red_defender", Duelist.Team.RED, 2)
+	var raider := _new_bot(root, "red_raider", Duelist.Team.RED, 3)
 	await process_frame
-	var own_pad := Vector3(0.0, 0.1, 50.0)
-	var enemy_pad := Vector3(0.0, 0.1, -50.0)
+	runner.configure_objective_ai(map, 0)
+	escort.configure_objective_ai(map, 1)
+	defender.configure_objective_ai(map, 2)
+	raider.configure_objective_ai(map, 3)
+	var own_pad: Vector3 = map.launch_pad_positions()[Duelist.Team.RED]
+	var enemy_pad: Vector3 = map.launch_pad_positions()[Duelist.Team.BLUE]
 	var center := Vector3.ZERO
+	assert(str(runner.ai_state().lane) == "center")
+	assert(str(escort.ai_state().lane) == "maintenance")
+	assert(str(defender.ai_state().lane) == "center")
+	assert(str(raider.ai_state().lane) == "overlook")
 
 	runner.set_objective_context(_context(0, center, "", Duelist.Team.RED, Duelist.Team.RED, own_pad, enemy_pad))
 	var neutral_plan: Dictionary = runner.objective_plan()
@@ -17,6 +29,7 @@ func _initialize() -> void:
 	assert((neutral_plan.goal as Vector3).is_equal_approx(center))
 
 	runner.set_objective_context(_context(1, Vector3(0.0, 0.1, 18.0), runner.actor_id, Duelist.Team.RED, Duelist.Team.RED, own_pad, enemy_pad))
+	assert(str(runner.objective_lane()) == "maintenance")
 	var delivery_plan: Dictionary = runner.objective_plan()
 	assert(str(delivery_plan.intent) == "deliver_core")
 	assert(not bool(delivery_plan.interact))
@@ -38,6 +51,36 @@ func _initialize() -> void:
 	assert(bool(cancel_plan.interact))
 	defender.set_objective_context(_context(3, own_pad, "", Duelist.Team.RED, Duelist.Team.RED, own_pad, enemy_pad))
 	assert(str(defender.objective_plan().intent) == "defend_launch")
+
+	# A lane change must invalidate the expensive waypoint cache immediately.
+	runner.set_objective_context(_context(0, center, "", Duelist.Team.RED, Duelist.Team.RED, own_pad, enemy_pad))
+	runner.position = map.spawn_points(Duelist.Team.RED)[0]
+	runner._objective_goal = center
+	runner._objective_intent = "claim_core"
+	runner.set_objective_lane(&"center")
+	runner._objective_move_input()
+	assert(runner._route_waypoint_valid)
+	runner.set_objective_lane(&"overlook")
+	assert(not runner._route_waypoint_valid)
+
+	# Each authored lane can move an objective-aware bot from a spawn toward the
+	# core without falling back to the destination-only route.
+	for lane in [&"center", &"maintenance", &"overlook"]:
+		runner.set_objective_lane(lane)
+		runner.position = map.spawn_points(Duelist.Team.RED)[0]
+		runner._objective_goal = center
+		runner._objective_intent = "claim_core"
+		runner._route_waypoint_valid = false
+		var reached_core := false
+		for _step in 96:
+			runner._route_recompute_remaining = 0.0
+			runner._objective_move_input()
+			var waypoint: Vector3 = runner._route_waypoint
+			if waypoint.distance_to(center) < 1.0:
+				reached_core = true
+				break
+			runner.position = waypoint
+		assert(reached_core, "bot objective route did not reach core in %s" % lane)
 
 	# Integrate the two critical autonomous interactions with the real rules:
 	# runner installs at its own pad, then the enemy bot cancels that launch.

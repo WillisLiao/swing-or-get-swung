@@ -56,6 +56,8 @@ var _unstick_sign := 1.0
 var _unstick_jump_pending := false
 var _objective_context: Dictionary = {}
 var _objective_role: ObjectiveRole = ObjectiveRole.RUNNER
+var _objective_lane: StringName = &"center"
+var _route_lane_cache: StringName = &""
 var _objective_intent := "seek_core"
 var _objective_goal := Vector3.ZERO
 var _wants_objective_interact := false
@@ -68,7 +70,18 @@ func set_opponents(enemies: Array[Duelist]) -> void:
 func configure_objective_ai(route_map: RiftlineMap, squad_index: int) -> void:
 	_route_map = route_map
 	_objective_role = posmod(squad_index, ObjectiveRole.size()) as ObjectiveRole
+	_objective_lane = lane_for_role(_objective_role)
+	_invalidate_route_cache()
 	_unstick_sign = -1.0 if squad_index % 2 == 0 else 1.0
+
+func set_objective_lane(lane: StringName) -> void:
+	if lane == _objective_lane:
+		return
+	_objective_lane = lane
+	_invalidate_route_cache()
+
+func objective_lane() -> StringName:
+	return _effective_lane()
 
 ## Expected keys: `core_state`, `core_position`, `core_carrier_id`,
 ## `core_carrier_team`, `installed_team`, `own_pad`, and `enemy_pad`.
@@ -138,6 +151,7 @@ func objective_plan() -> Dictionary:
 func ai_state() -> Dictionary:
 	return {
 		"role": role_name(_objective_role),
+		"lane": str(_effective_lane()),
 		"intent": _objective_intent,
 		"goal": _objective_goal,
 		"wants_interact": wants_objective_interact(),
@@ -154,6 +168,15 @@ static func role_name(role: ObjectiveRole) -> String:
 			return "raider"
 		_:
 			return "runner"
+
+static func lane_for_role(role: ObjectiveRole) -> StringName:
+	match role:
+		ObjectiveRole.ESCORT:
+			return &"maintenance"
+		ObjectiveRole.RAIDER:
+			return &"overlook"
+		_:
+			return &"center"
 
 func _ready() -> void:
 	_random.randomize()
@@ -284,9 +307,13 @@ func _objective_move_input() -> Vector2:
 		return Vector2(_unstick_sign * 0.92, -0.24)
 	var waypoint := _objective_goal
 	if _route_map != null and is_instance_valid(_route_map):
+		var lane := _effective_lane()
+		if lane != _route_lane_cache:
+			_route_lane_cache = lane
+			_route_waypoint_valid = false
 		var goal_changed := not _route_waypoint_valid or _route_goal_cache.distance_squared_to(_objective_goal) > 9.0
 		if _route_recompute_remaining <= 0.0 or goal_changed:
-			_route_waypoint = _route_map.route_toward(global_position, _objective_goal)
+			_route_waypoint = _route_map.route_toward(global_position, _objective_goal, lane)
 			_route_goal_cache = _objective_goal
 			_route_waypoint_valid = true
 			# Small per-bot jitter so seven bots don't all recompute on the
@@ -304,6 +331,24 @@ func _objective_move_input() -> Vector2:
 	forward.y = 0.0
 	var move_input := Vector2(world_direction.dot(right.normalized()), -world_direction.dot(forward.normalized()))
 	return move_input.limit_length(1.0)
+
+func _effective_lane() -> StringName:
+	# A carrier and its maintenance-lane escort use the safer covered return
+	# route, while the four-slot opening formation keeps the authored role lanes.
+	if _objective_intent == "deliver_core":
+		return &"maintenance"
+	var context_state := int(_objective_context.get("core_state", CORE_AT_CENTER))
+	var context_carrier := str(_objective_context.get("core_carrier_id", ""))
+	if context_state == CORE_CARRIED and context_carrier == actor_id:
+		return &"maintenance"
+	if _objective_role == ObjectiveRole.ESCORT:
+		return &"maintenance"
+	return _objective_lane
+
+func _invalidate_route_cache() -> void:
+	_route_waypoint_valid = false
+	_route_lane_cache = &""
+	_route_recompute_remaining = 0.0
 
 func _combat_move_input(distance: float, has_los: bool) -> Vector2:
 	var objective_move := _objective_move_input()
