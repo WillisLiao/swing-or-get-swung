@@ -272,6 +272,8 @@ var _settings_owner_touch := -1
 var _settings_captures: Dictionary = {}
 var _red_score := 0
 var _blue_score := 0
+var _local_kills := 0
+var _local_deaths := 0
 var _roster_state: Array[Dictionary] = []
 var _roster_local_team := int(Duelist.Team.RED)
 var _squad_readability := false
@@ -512,6 +514,15 @@ func set_touch_preview(preview: String) -> void:
 func set_score(red_score: int, blue_score: int) -> void:
 	_red_score = clampi(red_score, 0, 3)
 	_blue_score = clampi(blue_score, 0, 3)
+	queue_redraw()
+
+func set_combat_stats(kills: int, deaths: int) -> void:
+	var next_kills := maxi(0, kills)
+	var next_deaths := maxi(0, deaths)
+	if next_kills == _local_kills and next_deaths == _local_deaths:
+		return
+	_local_kills = next_kills
+	_local_deaths = next_deaths
 	queue_redraw()
 
 func set_roster_state(records: Array[Dictionary], local_team: int, squad_readability: bool) -> void:
@@ -986,6 +997,7 @@ func _draw_gameplay_hud() -> void:
 	var safe := _safe_rect()
 	_draw_vitality_strip(safe, friendly)
 	_draw_objective_strip(safe, friendly, enemy)
+	_draw_combat_stats(safe, friendly)
 	if _squad_readability:
 		_draw_team_life_strip(safe, friendly, enemy)
 	if damage_direction_intensity > 0.0:
@@ -1133,6 +1145,22 @@ func _draw_objective_strip(safe: Rect2, friendly: Color, enemy: Color) -> void:
 	if objective_feedback_pulse > 0.0:
 		var feedback_color := _team_color(objective_feedback_team) if objective_feedback_team >= 0 else HUD_SIGNAL
 		draw_plate(self, bar.grow(2.0 + (1.0 - objective_feedback_pulse) * 12.0), Color(0, 0, 0, 0), Color(feedback_color, objective_feedback_pulse * 0.85), HUD_CUT_SM, CHAMFER_ALL, 2.0)
+
+## Personal combat totals for the current match. This stays separate from the
+## objective score: launching the core wins the match, while K/D is supporting
+## information the player can read without mistaking eliminations for points.
+func _draw_combat_stats(safe: Rect2, friendly: Color) -> void:
+	var plate := Rect2(safe.position, Vector2(154.0, 40.0))
+	draw_plate(self, plate, Color(HUD_INK, 0.86), Color(HUD_EDGE, 0.9), HUD_CUT_SM, CHAMFER_ALL)
+	draw_accent_edge(self, plate, Color(friendly, 0.92), true, 2.5)
+	var divider_x := plate.position.x + plate.size.x * 0.5
+	draw_line(Vector2(divider_x, plate.position.y + 8.0), Vector2(divider_x, plate.end.y - 8.0), Color(HUD_EDGE, 0.72), 1.0)
+	var left_center := Vector2(plate.position.x + plate.size.x * 0.25, plate.position.y)
+	var right_center := Vector2(plate.position.x + plate.size.x * 0.75, plate.position.y)
+	draw_tracked_centered(self, left_center + Vector2(0.0, 13.0), "KILLS", FS_MICRO, HUD_TEXT_FAINT, HUD_TRACK_TIGHT)
+	draw_tracked_centered(self, left_center + Vector2(0.0, 32.0), str(_local_kills), FS_SUB, HUD_SIGNAL, HUD_TRACK_TIGHT)
+	draw_tracked_centered(self, right_center + Vector2(0.0, 13.0), "DEATHS", FS_MICRO, HUD_TEXT_FAINT, HUD_TRACK_TIGHT)
+	draw_tracked_centered(self, right_center + Vector2(0.0, 32.0), str(_local_deaths), FS_SUB, HUD_TEXT, HUD_TRACK_TIGHT)
 
 ## Points-to-win as a ladder of chevron pips, filled for points held. Reading
 ## "how close is either team to winning" off a shape is faster than parsing
