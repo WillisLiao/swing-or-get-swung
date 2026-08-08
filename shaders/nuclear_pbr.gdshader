@@ -123,14 +123,27 @@ void fragment() {
 	float freq_hi = detail_scale * OCTAVE_HI;
 	vec3 sample_point = NOISE_BASIS * world_position;
 	vec3 grad_lo;
-	vec3 grad_hi;
 	float noise_lo = value_noise_d(sample_point * freq_lo, grad_lo);
-	float noise_hi = value_noise_d(sample_point * freq_hi, grad_hi);
-	float height = noise_lo * WEIGHT_LO + noise_hi * WEIGHT_HI;
+	// The high octave (freq_hi = detail_scale * 3.10) is sub-pixel - pure
+	// aliasing, not signal - past a few metres, so its 8 extra hash13 calls
+	// are wasted work on most of a scene this size (the map floor alone is
+	// a 120m disc). VERTEX is camera-space here, so its length is exactly
+	// distance-to-camera; that varies smoothly across a surface, so this
+	// branch has near-zero divergence within a quad on tile-based mobile
+	// GPUs. detail_fade still ramps the octave's contribution to zero
+	// continuously before the branch skips computing it, so there is no pop
+	// at the cutoff. See handoffs/HANDOFF.md's "Performance discipline".
+	float detail_fade = 1.0 - smoothstep(12.0, 30.0, length(VERTEX));
+	float noise_hi = 0.0;
+	vec3 grad_hi = vec3(0.0);
+	if (detail_fade > 0.004) {
+		noise_hi = value_noise_d(sample_point * freq_hi, grad_hi);
+	}
+	float height = noise_lo * WEIGHT_LO + noise_hi * WEIGHT_HI * detail_fade;
 	// Chain rule back to world space: scale each octave's gradient by its own
 	// frequency, then undo the basis rotation (v * M == transpose(M) * v).
 	vec3 relief_gradient = (grad_lo * (freq_lo * WEIGHT_LO)
-		+ grad_hi * (freq_hi * WEIGHT_HI)) * NOISE_BASIS;
+		+ grad_hi * (freq_hi * WEIGHT_HI * detail_fade)) * NOISE_BASIS;
 
 	// Build a tangent frame from the world normal alone.  Mesh tangents are not
 	// reliable here - the ramps are hand-built ArrayMeshes - so NORMAL_MAP is not

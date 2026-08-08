@@ -34,6 +34,19 @@ var _last_target_velocity := Vector3.ZERO
 var _aim_offset := Vector3.ZERO
 var _move_goal := Vector2.ZERO
 var _random := RandomNumberGenerator.new()
+## `RiftlineMap.route_toward()` walks every route node against every route
+## blocker/solid when the direct line is obstructed - real CPU cost, and
+## unconditional every physics tick for all seven bots was flagged as the
+## likely-general-lag suspect in
+## `handoffs/NEXT-SESSION-performance-regression.md`. The steering direction
+## itself is still recomputed every tick from the cached waypoint below (a
+## bot never looks frozen), only the expensive "which via-node to route
+## through" decision is throttled.
+const ROUTE_RECOMPUTE_SECONDS := 0.2
+var _route_recompute_remaining := 0.0
+var _route_waypoint := Vector3.ZERO
+var _route_goal_cache := Vector3.ZERO
+var _route_waypoint_valid := false
 var _last_seen_position := Vector3.ZERO
 var _last_seen_remaining := 0.0
 var _stuck_elapsed := 0.0
@@ -237,6 +250,7 @@ func _tick_timers(delta: float) -> void:
 	_shot_cadence_remaining = maxf(0.0, _shot_cadence_remaining - delta)
 	_burst_remaining = maxf(0.0, _burst_remaining - delta)
 	_unstick_remaining = maxf(0.0, _unstick_remaining - delta)
+	_route_recompute_remaining = maxf(0.0, _route_recompute_remaining - delta)
 
 func _update_stuck_recovery(delta: float) -> void:
 	if _move_goal.length_squared() > 0.04 and global_position.distance_to(_last_motion_position) < 0.035:
@@ -270,7 +284,15 @@ func _objective_move_input() -> Vector2:
 		return Vector2(_unstick_sign * 0.92, -0.24)
 	var waypoint := _objective_goal
 	if _route_map != null and is_instance_valid(_route_map):
-		waypoint = _route_map.route_toward(global_position, _objective_goal)
+		var goal_changed := not _route_waypoint_valid or _route_goal_cache.distance_squared_to(_objective_goal) > 9.0
+		if _route_recompute_remaining <= 0.0 or goal_changed:
+			_route_waypoint = _route_map.route_toward(global_position, _objective_goal)
+			_route_goal_cache = _objective_goal
+			_route_waypoint_valid = true
+			# Small per-bot jitter so seven bots don't all recompute on the
+			# same tick.
+			_route_recompute_remaining = ROUTE_RECOMPUTE_SECONDS + _random.randf_range(0.0, 0.08)
+		waypoint = _route_waypoint
 	var world_direction := waypoint - global_position
 	world_direction.y = 0.0
 	if world_direction.length() <= OBJECTIVE_STOP_RADIUS:

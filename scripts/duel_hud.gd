@@ -302,9 +302,6 @@ var _zoom_index := 0
 ## arena each frame alongside _ads_progress/_zoom_index. See set_recoil_state().
 var _recoil_kick := 0.0
 var _recoil_lateral := 0.0
-## Duelist._scope_camera's render, pushed in by the arena each frame. See
-## set_scope_texture() and _draw_scope_overlay().
-var _scope_texture: Texture2D = null
 var _settings_open := false
 var _layout_editor := false
 var _aim_toggle := false
@@ -366,12 +363,71 @@ func _process(delta: float) -> void:
 	_coach_visual_opacity = move_toward(_coach_visual_opacity, _coach_visual_target, delta * 5.5)
 	if _coach_visual_target <= 0.0 and _coach_visual_opacity <= 0.01:
 		_coach_display_cue = {}
-	queue_redraw()
+	if _needs_continuous_redraw():
+		queue_redraw()
+
+## Every setter in this file already calls queue_redraw() itself on a real
+## state change (see show_damage()/set_ads_state() for the pattern) - this
+## file used to redraw unconditionally here every frame regardless, which
+## made every one of those change-guards pointless. This covers only what
+## genuinely has no discrete "changed" event to hook: values still decaying
+## toward zero, opacity tweens still in motion, a movement stick actively
+## following a live touch (drag events don't call queue_redraw() themselves),
+## a continuously time-driven pulse (the interact ring), and any full-screen
+## state where staying live-drawn just isn't worth the risk of missing a case
+## (settings, layout editor, match result, round start). The sniper scope's
+## tube/vignette is pure 2D drawn from ads_progress/zoom_index, both already
+## change-guarded via set_ads_state() - it needs no entry here, since (unlike
+## the picture-in-picture design this replaced) there is no texture to
+## re-blit every frame; the real 3D view shows through the mask's hole via
+## the engine's own always-live render, entirely independent of this
+## Control's _draw() cycle. See handoffs/HANDOFF.md's "Performance
+## discipline" section for why this needed measuring at all.
+func _needs_continuous_redraw() -> bool:
+	if damage_flash > 0.0 or hit_confirm > 0.0 or primary_fire_bloom > 0.0:
+		return true
+	if damage_direction_intensity > 0.0 or high_alert_intensity > 0.0 or objective_feedback_pulse > 0.0:
+		return true
+	if _objective_message_remaining > 0.0 or _connection_message_remaining > 0.0 or _score_pulse > 0.0:
+		return true
+	if not is_equal_approx(_stick_visual_opacity, _stick_visual_target):
+		return true
+	if not is_equal_approx(_coach_visual_opacity, _coach_visual_target):
+		return true
+	if _touch_router.has_movement_owner():
+		return true
+	if _interact_available:
+		return true
+	if _settings_open or _layout_editor or not _touch_preview.is_empty():
+		return true
+	if _match_result_visible or _match_phase == RiftlineMatch.Phase.OPENING:
+		return true
+	return false
 
 func take_look_delta() -> Vector2:
 	var delta := _look_delta + _touch_router.take_look_delta()
 	_look_delta = Vector2.ZERO
-	return delta * (ads_sensitivity if aim_held else camera_sensitivity)
+	if not aim_held:
+		return delta * camera_sensitivity
+	return delta * ads_sensitivity / _ads_magnification()
+
+## The sniper's ADS magnification (3x/6x) is far higher than any other
+## weapon's (1.1x-1.5x - see RiftWeapons' zoom_steps). The same flat
+## ads_sensitivity that already feels right for those small zooms would turn
+## a sniper pan into a wild, twitchy swing at 6x if left uncompensated, since
+## the same physical input now sweeps far fewer screen-degrees per unit of
+## camera rotation. Only the sniper gets this extra division, so every other
+## weapon's already-tuned ADS feel is untouched. This matters now that the
+## sniper's zoom lives on the main camera's own FOV (see
+## Duelist.set_combat_pose()) instead of a separate scope camera the player's
+## look input never actually reached.
+func _ads_magnification() -> float:
+	if _weapon != Duelist.Weapon.SNIPER:
+		return 1.0
+	var steps: Array = RiftWeapons.row(int(_weapon)).zoom_steps
+	if steps.is_empty():
+		return 1.0
+	return maxf(1.0, float(steps[clampi(_zoom_index, 0, steps.size() - 1)]))
 
 func take_jump() -> bool:
 	var requested := _jump_requested
@@ -509,9 +565,14 @@ func show_practice_cue(message: String) -> void:
 	queue_redraw()
 
 func set_stance(stance: Duelist.Stance) -> void:
+	if stance == _stance:
+		return
 	_stance = stance
+	queue_redraw()
 
 func set_weapon(weapon: Duelist.Weapon) -> void:
+	if weapon == _weapon:
+		return
 	_weapon = weapon
 	queue_redraw()
 
@@ -541,14 +602,6 @@ func set_recoil_state(recoil: Vector2) -> void:
 	_recoil_lateral = next_lateral
 	queue_redraw()
 
-## Pushes Duelist._scope_camera's live render in each frame while scoped;
-## null the rest of the time (see Duelist.scope_viewport_texture()). Not
-## redraw-gated like the scalar setters above - a SubViewport's ViewportTexture
-## updates its own pixels without a new reference, so equality-checking the
-## reference would never catch the picture actually changing frame to frame.
-func set_scope_texture(texture: Texture2D) -> void:
-	_scope_texture = texture
-
 func set_view_fov(value: float, persist: bool = true) -> void:
 	var next := clampf(value, Duelist.MIN_HORIZONTAL_FOV, Duelist.MAX_HORIZONTAL_FOV) if is_finite(value) else Duelist.DEFAULT_HORIZONTAL_FOV
 	if absf(next - horizontal_fov) < 0.001:
@@ -563,9 +616,18 @@ func show_ammo(magazine: int, reserve: int, reload_time: float) -> void:
 	if _ammo_preview_override:
 		return
 	var row := RiftWeapons.row(int(_weapon))
-	magazine_rounds = clampi(magazine, 0, int(row.magazine_size))
-	reserve_ammo = clampi(reserve, 0, int(row.reserve_ammo))
-	reload_remaining = maxf(0.0, reload_time)
+	var next_magazine := clampi(magazine, 0, int(row.magazine_size))
+	var next_reserve := clampi(reserve, 0, int(row.reserve_ammo))
+	var next_reload := maxf(0.0, reload_time)
+	# Called every physics tick regardless of whether ammo actually changed -
+	# an unconditional redraw here would defeat every other change-gated
+	# setter in this file. reload_remaining ticks down continuously during
+	# an active reload, so the sweep animation still redraws every tick then.
+	if next_magazine == magazine_rounds and next_reserve == reserve_ammo and is_equal_approx(next_reload, reload_remaining):
+		return
+	magazine_rounds = next_magazine
+	reserve_ammo = next_reserve
+	reload_remaining = next_reload
 	queue_redraw()
 
 func open_settings() -> void:
@@ -622,6 +684,15 @@ func take_rematch() -> bool:
 	return requested
 
 func show_damage(current_health: float) -> void:
+	# Called every physics tick as a continuous health sync (see the call
+	# site's own comment in riftline_arena.gd), not just on the `damaged`
+	# signal - without a change guard this alone forced a full HUD redraw
+	# every tick regardless of anything else in this file, the single
+	# biggest reason the always-on redraw mattered at all. Health is
+	# otherwise constant outside a real hit/heal event, so an exact
+	# comparison is correct here, not just an optimization.
+	if is_equal_approx(current_health, health):
+		return
 	health = current_health
 	damage_flash = maxf(damage_flash, 1.0)
 	queue_redraw()
@@ -673,6 +744,10 @@ func _gui_input(event: InputEvent) -> void:
 			_handle_settings_touch(event.index, event.position, event.pressed)
 		else:
 			_handle_touch(event.index, event.position, event.pressed)
+		# A discrete press/release, not a per-frame call - the button-active
+		# visuals this flips (see _draw_button()) have no other redraw
+		# trigger now that _process() only redraws on real change.
+		queue_redraw()
 	elif event is InputEventScreenDrag:
 		if _layout_editor:
 			_handle_editor_drag(event.index, event.position)
@@ -700,6 +775,7 @@ func _gui_input(event: InputEvent) -> void:
 				fire_held = false
 			else:
 				fire_held = event.pressed
+		queue_redraw()
 	elif event is InputEventMouseMotion:
 		if _layout_editor and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 			_handle_editor_drag(0, event.position)
@@ -1270,7 +1346,7 @@ func _draw_reload_icon(center: Vector2, radius: float, color: Color) -> void:
 var _loadout_slots: Array = [Duelist.Weapon.RIFLE, Duelist.Weapon.PISTOL]
 
 func set_loadout_slots(slots: Array) -> void:
-	if slots.is_empty():
+	if slots.is_empty() or slots == _loadout_slots:
 		return
 	_loadout_slots = slots.duplicate()
 	queue_redraw()
@@ -1443,6 +1519,17 @@ func _ads_cone_radius_px() -> float:
 ## physically move on screen); `reticle_center` positions only the reticle
 ## drawn inside it, which is where the recoil kick belongs - see the one
 ## caller in _draw_reticle().
+##
+## The picture inside the tube is the main camera's own render - `Duelist`
+## zooms its FOV the same way every other weapon's ADS already does (see
+## `RiftWeapons.ads_horizontal_fov()`), not a separate picture-in-picture
+## camera - so there is no texture to draw here. This masks the whole screen
+## outside the ocular circle instead of just the tube's own square footprint,
+## which is what "the whole screen zoomed and masked" (the alternative this
+## project tried before the picture-in-picture rework, and reverted to after
+## that rework turned out to cost a full second scene render every frame -
+## see handoffs/HANDOFF.md's "Performance discipline" section) actually
+## means.
 func _draw_scope_overlay(center: Vector2, ads: float, reticle_center: Vector2) -> void:
 	# Closed by `Duelist.SNIPER_SCOPE_HANDOVER`, which is the same value the
 	# rifle's view model stops drawing on. Beyond that point this overlay *is*
@@ -1453,26 +1540,27 @@ func _draw_scope_overlay(center: Vector2, ads: float, reticle_center: Vector2) -
 	# is legible the instant it happens.
 	var target := short_edge * (0.430 if _zoom_index < 1 else 0.335)
 	var radius := lerpf(short_edge * 0.95, target, seated)
-	# The picture inside the tube is `Duelist._scope_camera`'s own render, a
-	# real second camera at the zoomed FOV - not the main view zoomed and
-	# masked - so it is drawn as a small square exactly `2*radius` across,
-	# not a full-screen quad. That is what keeps the masking below contained
-	# to the tube's own footprint instead of covering the real, unmagnified
-	# background the main camera is still rendering everywhere else.
-	var picture_rect := Rect2(center - Vector2.ONE * radius, Vector2.ONE * radius * 2.0)
-	if _scope_texture != null:
-		draw_texture_rect(_scope_texture, picture_rect, false, Color(1.0, 1.0, 1.0, seated))
-	else:
-		draw_rect(picture_rect, Color(0.010, 0.018, 0.030, seated))
+	var mask_color := Color(0.010, 0.018, 0.030, seated)
+	# Four bands cover the whole screen outside the circle's bounding square;
+	# the annulus below (unchanged) then masks the four corner triangles
+	# between that square and the circle itself, so together they cover
+	# everything outside the ocular circle, all the way to the screen edges.
+	if center.y - radius > 0.0:
+		draw_rect(Rect2(0.0, 0.0, size.x, center.y - radius), mask_color)
+	if center.y + radius < size.y:
+		draw_rect(Rect2(0.0, center.y + radius, size.x, size.y - (center.y + radius)), mask_color)
+	if center.x - radius > 0.0:
+		draw_rect(Rect2(0.0, center.y - radius, center.x - radius, radius * 2.0), mask_color)
+	if center.x + radius < size.x:
+		draw_rect(Rect2(center.x + radius, center.y - radius, size.x - (center.x + radius), radius * 2.0), mask_color)
 	# One stroked annulus from the circle out to the square's own corner
 	# masks exactly the four corner triangles between the ocular circle and
 	# its bounding square - by construction (a circle inscribed in a square
 	# always sits at distance `radius` along each edge midpoint and
 	# `radius * sqrt(2)` at each corner) this never reaches past the square's
-	# own bounds, so nothing outside the tube's footprint is touched and the
-	# real environment keeps showing through everywhere else on screen.
+	# own bounds.
 	var reach := radius * 1.4143
-	draw_arc(center, (radius + reach) * 0.5, 0.0, TAU, 96, Color(0.010, 0.018, 0.030, seated), reach - radius)
+	draw_arc(center, (radius + reach) * 0.5, 0.0, TAU, 96, mask_color, reach - radius)
 	# Tube wall, the soft shadow a real ocular throws inside the edge, and a
 	# single cold highlight so the rim is not a flat black band.
 	draw_arc(center, radius - 1.0, 0.0, TAU, 96, Color(0.03, 0.05, 0.08, seated), 6.0)

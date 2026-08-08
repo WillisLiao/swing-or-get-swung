@@ -466,6 +466,12 @@ func _add_landmark_part(parent: Node3D, mesh: Mesh, position: Vector3, material:
 	instance.position = position
 	instance.rotation = rotation
 	instance.material_override = material
+	# Landmarks (storm-ring bars, deck/corridor accent strips, pad/core rings)
+	# are presentation-only - never a route blocker or a `_build_solids()`
+	# collision body - so they never need to read as cover in a shadow.  Every
+	# one of them is a full extra draw across all shadow cascades otherwise;
+	# see handoffs/HANDOFF.md's "Performance discipline" section.
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(instance)
 
 func _add_cylinder_landmark(parent: Node3D, position: Vector3, diameter: float, height: float, material: ShaderMaterial) -> void:
@@ -478,6 +484,7 @@ func _add_cylinder_landmark(parent: Node3D, position: Vector3, diameter: float, 
 	cylinder.mesh = mesh
 	cylinder.position = position
 	cylinder.material_override = material
+	cylinder.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(cylinder)
 
 func _box_mesh(dimensions: Vector3) -> BoxMesh:

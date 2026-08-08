@@ -1,3 +1,8 @@
+**Historical - done, see the fifteenth session in `devlogs/2026-08-08.md` and `handoffs/HANDOFF.md`'s "Current state" and "Performance discipline" sections.**
+Every suspect below was checked with real numbers, not guessed. The scope viewport and bot pathfinding were confirmed as real costs and made cheaper (throttled render, cached routing) without reverting either system; High Alert was confirmed already well-gated and left unchanged.
+**Still open: on-device (iPad) re-verification** - this file's own methodology's step 4 has not run yet.
+Kept below as the original diagnosis record, not as open work.
+
 # NEXT SESSION - Diagnose and fix the post-redesign performance regression
 
 Bootstrap file for a fresh session (does not need to be `/sonnet-opus` - this is diagnosis-first, not visual work, though a real fix might route through it once the cause is known).

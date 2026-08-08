@@ -44,24 +44,18 @@ const DEFAULT_HORIZONTAL_FOV := 80.0
 const MIN_HORIZONTAL_FOV := 70.0
 const MAX_HORIZONTAL_FOV := 90.0
 const FIRST_PERSON_WEAPON_SCALE := 0.38
-# The sniper scope is a second, small-viewport camera rendering the same
-# World3D at the zoomed FOV - a real picture-in-picture, not the whole screen
-# zoomed and masked. That is what lets the area outside the ocular circle
-# keep showing the actual, unmagnified surroundings instead of a flat mask
-# fill (see `duel_hud.gd::_draw_scope_overlay`, which draws this texture).
-const SCOPE_VIEWPORT_SIZE := 512
-# How hard the scope PICTURE kicks under recoil, in radians per unit of
-# `_recoil_kick`/`_recoil_lateral`. This is deliberately much smaller than the
-# weapon-rig's own recoil rotation - that rotates a prop a few centimetres
-# from the eye, this rotates what reads as the entire magnified world, so the
-# same angular units feel enormously bigger. Tuned by eye against a live ADS
-# screenshot mid-recoil so the scope visibly jumps without becoming
-# disorienting. This is also, by construction, the fix for "the sniper has no
-# recoil": the 3D weapon prop is intentionally hidden once the scope takes
-# over (see `SNIPER_SCOPE_HANDOVER` below), so the scope picture kicking is
-# the only recoil feedback there is while scoped - it has to carry the whole
-# effect on its own, not just nudge a reticle mark over a static background.
-const SCOPE_RECOIL_ROTATION_SCALE := 0.34
+# The sniper scope zooms the main camera's own FOV, same mechanism every
+# other weapon's ADS already uses (see `RiftWeapons.ads_horizontal_fov()`,
+# `set_combat_pose()`). An earlier design used a second small-viewport camera
+# rendering the same World3D as a real picture-in-picture, so the area
+# outside the ocular circle kept showing unmagnified surroundings - but at
+# the size the picture actually needed to read as "looking through a scope"
+# (~86% of screen height at the first zoom stage), that was a second
+# full-scene render at close to main-view resolution every frame, a bad
+# trade on a tile-based mobile GPU. See handoffs/HANDOFF.md's "Performance
+# discipline" section for the full diagnosis. Recoil while scoped is carried
+# entirely by the HUD's reticle kick (duel_hud.gd), same as it was before the
+# picture-in-picture design ever existed.
 # Where the view model rests when not aiming. The old value sat the weapon so
 # low that only a black sliver of it was ever on screen; this puts roughly the
 # top third of the receiver in frame, bottom-right, the way a first-person
@@ -348,12 +342,6 @@ const DEATH_VISUAL_FADE_SECONDS := 0.7
 
 var head: Node3D
 var camera: Camera3D
-## Second camera + viewport for the sniper scope picture-in-picture. Renders
-## the same World3D (own_world_3d stays false) at the zoomed FOV into a small
-## square texture that `duel_hud.gd` draws inside the ocular circle. Only the
-## local player ever needs one - see `build()`.
-var _scope_viewport: SubViewport
-var _scope_camera: Camera3D
 
 func build(assigned_team: Team, local_camera: bool, render_visuals: bool = true, authoritative_collision: bool = true) -> void:
 	team = assigned_team
@@ -386,20 +374,6 @@ func build(assigned_team: Team, local_camera: bool, render_visuals: bool = true,
 		camera.cull_mask = 1 | 2
 		camera.current = true
 		head.add_child(camera)
-		_scope_viewport = SubViewport.new()
-		_scope_viewport.name = "ScopeViewport"
-		_scope_viewport.size = Vector2i(SCOPE_VIEWPORT_SIZE, SCOPE_VIEWPORT_SIZE)
-		_scope_viewport.transparent_bg = false
-		_scope_viewport.own_world_3d = false
-		_scope_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
-		add_child(_scope_viewport)
-		_scope_camera = Camera3D.new()
-		_scope_camera.keep_aspect = Camera3D.KEEP_HEIGHT
-		# World geometry only (layer 1) - the local first-person weapon/hands
-		# (layer 2) have no business appearing magnified in the scope picture;
-		# they are hidden entirely past the handover anyway (see set_combat_pose).
-		_scope_camera.cull_mask = 1
-		_scope_viewport.add_child(_scope_camera)
 
 	configure_loadout(player_class, loadout_slots[0] as Weapon)
 
@@ -475,7 +449,7 @@ func _update_camera_projection() -> void:
 		return
 	camera.keep_aspect = Camera3D.KEEP_HEIGHT
 	var target_horizontal := horizontal_fov
-	if _aiming and weapon != Weapon.SNIPER:
+	if _aiming:
 		target_horizontal = RiftWeapons.ads_horizontal_fov(horizontal_fov, int(weapon), zoom_index)
 	camera.fov = _vertical_fov_for_horizontal(target_horizontal, _viewport_aspect())
 
@@ -559,25 +533,13 @@ func _process(delta: float) -> void:
 			# the eye sits well behind the ocular, so the tube's far end always
 			# projects as a small aperture ring parked over the crosshair. Every
 			# shooter solves this the same way - once the scope picture has
-			# taken over, the view model stops being drawn, and the HUD's tube
-			# is the scope (a real picture-in-picture from `_scope_camera` -
-			# see below - not the whole screen zoomed and masked). The handover
-			# is timed to the moment the vignette reaches full closure so there
-			# is nothing left to see it happen.
+			# taken over (the main camera's own zoomed view, masked by the
+			# HUD's tube/vignette - see duel_hud.gd's _draw_scope_overlay()),
+			# the view model stops being drawn. The handover is timed to the
+			# moment the vignette reaches full closure so there is nothing
+			# left to see it happen. Recoil still reads while scoped via the
+			# HUD's reticle kick (duel_hud.gd), independent of this.
 			_weapon_rig.visible = weapon != Weapon.SNIPER or ads_progress < SNIPER_SCOPE_HANDOVER
-		if _scope_camera != null and _scope_viewport != null and _local_camera and camera != null:
-			var scoped := weapon == Weapon.SNIPER and ads_progress > 0.02
-			_scope_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if scoped else SubViewport.UPDATE_DISABLED
-			if scoped:
-				_scope_camera.global_transform = camera.global_transform
-				# The scope picture itself kicks under recoil - see
-				# SCOPE_RECOIL_ROTATION_SCALE - since the 3D weapon prop is
-				# hidden past the handover and this is the only place recoil
-				# can read at all while scoped.
-				_scope_camera.rotate_object_local(Vector3.RIGHT, -_recoil_kick * SCOPE_RECOIL_ROTATION_SCALE)
-				_scope_camera.rotate_object_local(Vector3.UP, _recoil_lateral * SCOPE_RECOIL_ROTATION_SCALE)
-				var horizontal := RiftWeapons.ads_horizontal_fov(horizontal_fov, int(weapon), zoom_index)
-				_scope_camera.fov = _vertical_fov_for_horizontal(horizontal, 1.0)
 		if _local_camera:
 			var breathing := sin(Time.get_ticks_msec() * 0.0017) * (0.004 if _aiming else 0.009)
 			var walking := sin(_pose_distance * 1.35) if moving else 0.0
@@ -968,6 +930,11 @@ func reconcile_from_authority(state: Dictionary, unacknowledged_frames: Array, d
 	if position_error <= 0.8 and yaw_error <= 0.22:
 		corrected["position"] = global_position.lerp(server_position, clampf(delta * 10.0, 0.0, 1.0))
 		corrected["yaw"] = lerp_angle(rotation.y, server_yaw, clampf(delta * 10.0, 0.0, 1.0))
+	else:
+		# A hard authoritative reset, not the usual small-error blend above -
+		# a real discontinuity, so physics interpolation should snap instead
+		# of smearing across it.
+		reset_physics_interpolation()
 	apply_presentation_state(corrected)
 	for frame in unacknowledged_frames:
 		if frame is Dictionary:
@@ -1048,13 +1015,17 @@ func set_combat_pose(aiming: bool, delta: float) -> void:
 		return
 	_aiming = aiming
 	if camera != null:
-		# The sniper's magnification lives entirely in the scope
-		# picture-in-picture (see _scope_camera below) - the main camera
-		# never narrows its own FOV for it, so the area outside the ocular
-		# circle keeps showing the real, unmagnified surroundings instead of
-		# the whole screen (background included) zooming in behind a mask.
+		# The sniper zooms the main camera's own FOV, same as every other
+		# weapon - not a separate picture-in-picture camera. A PiP big enough
+		# to read as "looking through a scope" (it was ~86% of screen height
+		# at the first zoom stage) meant a second full-scene render at
+		# something close to main-view resolution, which is a bad trade on a
+		# tile-based mobile GPU: see handoffs/HANDOFF.md's "Performance
+		# discipline" section for the full diagnosis. The HUD's tube/vignette
+		# art (duel_hud.gd's _draw_scope_overlay()) now masks this same
+		# zoomed main view instead of compositing a separate texture.
 		var target_horizontal := horizontal_fov
-		if aiming and weapon != Weapon.SNIPER:
+		if aiming:
 			target_horizontal = RiftWeapons.ads_horizontal_fov(horizontal_fov, int(weapon), zoom_index)
 		var target_vertical := _vertical_fov_for_horizontal(target_horizontal, _viewport_aspect())
 		camera.keep_aspect = Camera3D.KEEP_HEIGHT
@@ -1214,6 +1185,12 @@ func take_damage(amount: float, attacker: Duelist) -> void:
 
 func respawn_at(point: Vector3) -> void:
 	global_position = point
+	# A genuine teleport, not a continuous move - without this, physics
+	# interpolation (see project.godot's physics_interpolation and the 60Hz
+	# physics_ticks_per_second in handoffs/HANDOFF.md's "Performance
+	# discipline" section) would smear the render from the old position to
+	# the new one over the next interpolated frame instead of snapping.
+	reset_physics_interpolation()
 	velocity = Vector3.ZERO
 	health = HEALTH
 	eliminated = false
@@ -1292,12 +1269,6 @@ func _set_visual_transparency(amount: float) -> void:
 ## making the housing's own motion visible in the reticle too.
 func recoil_presentation() -> Vector2:
 	return Vector2(_recoil_kick, _recoil_lateral)
-
-## The sniper scope's picture-in-picture texture, for `DuelHud` to draw inside
-## the ocular circle - see `_scope_camera`/`SCOPE_VIEWPORT_SIZE` above. Null
-## for non-local or non-visual actors, which never build a `_scope_viewport`.
-func scope_viewport_texture() -> Texture2D:
-	return _scope_viewport.get_texture() if _scope_viewport != null else null
 
 func authoritative_eye_origin() -> Vector3:
 	return head.global_position if head != null else global_position + Vector3.UP * 1.46
