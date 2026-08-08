@@ -89,6 +89,55 @@ func _initialize() -> void:
 	assert(router.begin(9, Vector2(120.0, 410.0), left, 58.0) == MobileTouchRouter.Role.MOVE)
 	router.end(9)
 
+	# A two-thumb player must be able to keep moving with the left thumb while
+	# the right thumb holds the ADS button and drags that same touch to aim.
+	var aim_hud := DuelHud.new()
+	get_root().add_child(aim_hud)
+	aim_hud.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	aim_hud.size = Vector2(1280.0, 588.0)
+	await process_frame
+	aim_hud._aim_toggle = false
+	aim_hud.ads_button_look = true
+	var legacy_controls := ConfigFile.new()
+	legacy_controls.set_value(DuelHud.CONTROLS_SECTION, "ads_button_look", false)
+	assert(aim_hud._ads_button_look_from_config(legacy_controls))
+	var current_controls := ConfigFile.new()
+	current_controls.set_value(DuelHud.CONTROLS_SECTION, "version", DuelHud.CONTROLS_VERSION)
+	current_controls.set_value(DuelHud.CONTROLS_SECTION, "ads_button_look", false)
+	assert(not aim_hud._ads_button_look_from_config(current_controls))
+	var aim_touch := InputEventScreenTouch.new()
+	aim_touch.index = 10
+	aim_touch.position = aim_hud._control_center("ads")
+	aim_touch.pressed = true
+	aim_hud._gui_input(aim_touch)
+	assert(aim_hud.aim_held)
+	assert(aim_hud._aim_touch == 10)
+	var move_touch := InputEventScreenTouch.new()
+	move_touch.index = 11
+	move_touch.position = aim_hud._control_center("move")
+	move_touch.pressed = true
+	aim_hud._gui_input(move_touch)
+	var move_drag := InputEventScreenDrag.new()
+	move_drag.index = 11
+	move_drag.position = move_touch.position + Vector2(40.0, 0.0)
+	move_drag.relative = Vector2(40.0, 0.0)
+	aim_hud._gui_input(move_drag)
+	assert(aim_hud.movement.x > 0.5)
+	var aim_drag := InputEventScreenDrag.new()
+	aim_drag.index = 10
+	aim_drag.position = aim_touch.position + Vector2(18.0, -9.0)
+	aim_drag.relative = Vector2(18.0, -9.0)
+	aim_hud._gui_input(aim_drag)
+	_assert_vector_near(aim_hud.take_look_delta(), aim_drag.relative * aim_hud.ads_sensitivity)
+	var aim_release := InputEventScreenTouch.new()
+	aim_release.index = 10
+	aim_release.position = aim_drag.position
+	aim_release.pressed = false
+	aim_hud._gui_input(aim_release)
+	assert(not aim_hud.aim_held)
+	assert(aim_hud.movement.x > 0.5)
+	aim_hud.free()
+
 	# Untouched legacy defaults migrate, while a deliberately customized saved
 	# layout remains distinguishable and therefore stays in place.
 	var hud := DuelHud.new()
