@@ -120,6 +120,20 @@ var _impact_cursor := 0
 var _preview_ballistics_bodies: Array[Node] = []
 
 func _ready() -> void:
+	# Set here rather than in project.godot: the Godot *editor* in this
+	# environment does not reliably persist new project.godot sections/keys
+	# added by a direct file edit - opening or relaunching it can silently
+	# drop them back to whatever it had cached, confirmed by repro this
+	# session (worse than HANDOFF.md's existing "stale in-memory copy"
+	# warning - it dropped an entire new [physics] section outright, not
+	# just reverted one value). Setting performance-critical engine/viewport
+	# state here instead is immune to that, since it isn't project.godot
+	# text. See handoffs/HANDOFF.md's "Performance discipline" section for
+	# why render scale and physics tick rate were cut in the first place.
+	Engine.physics_ticks_per_second = 60
+	get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	get_viewport().scaling_3d_scale = 0.7
+	get_tree().physics_interpolation = true
 	_build_network()
 	var command_line_lan := network.start_command_line_mode()
 	if not network.configuration_valid():
@@ -245,7 +259,6 @@ func _physics_process(delta: float) -> void:
 	hud.set_weapon(_local_duelist.weapon)
 	hud.set_ads_state(_local_duelist.ads_progress, _local_duelist.zoom_index)
 	hud.set_recoil_state(_local_duelist.recoil_presentation())
-	hud.set_scope_texture(_local_duelist.scope_viewport_texture())
 	hud.set_loadout_slots(_local_duelist.loadout_slots)
 	hud.show_ammo(_local_duelist.magazine_rounds, _local_duelist.reserve_ammo, _local_duelist.reload_remaining)
 	# Continuous sync, not just on the `damaged` signal - a signal only fires
@@ -280,6 +293,13 @@ func _build_environment() -> void:
 	sky_material.sun_curve = 0.15
 	var sky := Sky.new()
 	sky.sky_material = sky_material
+	# QUALITY (rather than the default REALTIME) bakes the sky's radiance
+	# cubemap once instead of re-rendering it every frame; the sky here is
+	# static, so REALTIME buys nothing and is a hidden always-on cost. A
+	# smaller radiance size is plenty for a diffuse ambient/reflection source
+	# that never needs to show a sharp mirror sky.
+	sky.process_mode = Sky.PROCESS_MODE_QUALITY
+	sky.radiance_size = Sky.RADIANCE_SIZE_128
 
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_SKY
@@ -311,8 +331,21 @@ func _build_environment() -> void:
 	key.light_color = Color("fff3e0")
 	key.light_energy = 1.4
 	key.shadow_enabled = true
-	key.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-	key.light_angular_distance = 0.6
+	# 2 cascades, not 4: the arena is a 120m-diameter circle of 3m cover
+	# blocks, not a map with long sightlines that need crisp shadows at
+	# range - the outer cascades of a 4-split were pixel-mush regardless.
+	# max_distance trims the far cascade to just past the map radius instead
+	# of the 100m default, so it isn't re-rendering geometry well past the
+	# playable area every frame.
+	key.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	key.directional_shadow_max_distance = 70.0
+	# 0.0, not 0.6: a nonzero angular distance switches Godot onto a
+	# blocker-search (PCSS-style) shadow filter, several times the per-pixel
+	# cost of plain PCF, to buy a widening-penumbra effect that is barely
+	# visible on hard-edged block geometry. Best cost:visual ratio of any
+	# change in this pass - see handoffs/HANDOFF.md's "Performance
+	# discipline" section.
+	key.light_angular_distance = 0.0
 	add_child(key)
 
 	var fill := OmniLight3D.new()
@@ -1811,7 +1844,14 @@ func _sync_nuke_core_presentation(state: Dictionary) -> void:
 		_nuke_core_root.visible = false
 		return
 	_nuke_core_root.visible = true
-	_nuke_core_root.global_position = state.get("core_position", Vector3.ZERO) as Vector3
+	var next_core_position := state.get("core_position", Vector3.ZERO) as Vector3
+	# While carried, this position moves continuously with its carrier every
+	# tick - real motion physics interpolation should smooth, not fight. A
+	# respawn-to-center or an install/cancel reset is a real teleport though,
+	# so only reset interpolation on a jump no continuous carry could produce.
+	if _nuke_core_root.global_position.distance_to(next_core_position) > 4.0:
+		_nuke_core_root.reset_physics_interpolation()
+	_nuke_core_root.global_position = next_core_position
 
 func _sync_launch_pad_presentation(state: Dictionary) -> void:
 	if not _presentation_enabled or arena_map == null:
