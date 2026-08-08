@@ -58,8 +58,10 @@ These are playstyle roles, not hard class locks.
 These were the open questions in the original decision record.
 They are now decided, and the numbers below are the ones the code implements.
 
-**Carrier penalty: movement speed only, no weapon restriction.**
+**Carrier penalty: movement slowdown and authoritative core damage, no weapon restriction.**
 A carrier moves at `Duelist.CORE_CARRY_SPEED_MULTIPLIER` = 0.82 of normal speed and keeps their full loadout.
+Non-vest carriers lose `RiftlineMatch.CORE_CARRY_DAMAGE_PER_SECOND` = 2.5 health per second while carrying, while the Runner's nuclear vest makes that class immune to the carry damage.
+The damage is applied by the authoritative match simulation through `Duelist.take_damage()`, so client prediction cannot create duplicate or divergent self-damage.
 Sidearm-only was rejected: it requires surgery on the weapon and loadout system for a mode whose tension already comes from being slow and visible, and taking a player's gun away on a touchscreen reads as a bug rather than a tradeoff.
 
 **Roles are playstyle labels, not enforced loadouts.**
@@ -85,8 +87,11 @@ This is also the deliberate fix for the stalemate tie-break raised in review on 
 In the old code a 0-0 timeout fell through to `winner = nuke_carrier_team`, which resolved to whichever team the variable happened to be initialized with when nobody had ever carried the core.
 An unbounded sudden death removes the accidental default entirely rather than papering over it with a coin flip.
 
-**Respawn delay is 3.0 seconds.**
-The old deathmatch value of 1.1 seconds made cancelling a launch nearly free, because defenders and attackers both returned to the fight faster than a 3-second cancel hold could be punished.
+**Respawn delay is a flat 6.0 seconds.**
+Human actors remain eliminated after the minimum until an explicit respawn request succeeds, while bots request respawn at the same authoritative boundary.
+The same timer applies in normal play and sudden death, regardless of score deficit, objective ownership, carrier status, or the number of dead teammates.
+The dead carrier's timer is independent of the dropped core's 15-second return timer.
+The older 3.0-second framing value and the current main branch's 5.0-second implementation were both rejected because the six-second rule gives the launch and cancel loop a legible, shared absence window without hidden team-specific assistance.
 
 ## Why this shape
 

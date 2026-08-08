@@ -1573,7 +1573,7 @@ func _add_shield_part(mesh: Mesh, position: Vector3, material: Material, rotatio
 	_fp_shield_root.add_child(instance)
 
 ## Runner class equipment: a chest-worn vest that keeps the class silhouette
-## readable. Core carrying no longer deals damage to any class.
+## readable and grants immunity to authoritative nuclear-core carry damage.
 func _build_nuclear_vest_marker(glow: Material) -> void:
 	_add_body_part(_box(Vector3(0.5, 0.5, 0.46)), Vector3(0.0, 1.05, 0.0), glow)
 
