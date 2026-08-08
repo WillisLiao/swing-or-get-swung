@@ -13,6 +13,65 @@ const NUCLEAR_PBR := preload("res://shaders/nuclear_pbr.gdshader")
 
 static var _cache: Dictionary = {}
 
+static func _material_key(
+	albedo: Color,
+	roughness: float,
+	metallic: float,
+	emission_color: Color,
+	emission_energy: float,
+	clean_path: bool,
+	detail_scale: float,
+	detail_strength: float,
+	normal_strength: float,
+	grime_strength: float,
+	edge_wear: float,
+	ao_strength: float
+) -> String:
+	return "%s|%s|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%s|%.3f" % [
+		"clean" if clean_path else "detailed", albedo.to_html(false), roughness, metallic,
+		detail_scale, detail_strength, normal_strength, grime_strength, edge_wear,
+		ao_strength, emission_color.to_html(false), emission_energy,
+	]
+
+static func _build_material(
+	albedo: Color,
+	roughness: float,
+	metallic: float,
+	emission_color: Color,
+	emission_energy: float,
+	clean_path: bool,
+	detail_scale: float,
+	detail_strength: float,
+	normal_strength: float,
+	grime_strength: float,
+	edge_wear: float,
+	ao_strength: float
+) -> ShaderMaterial:
+	var key := _material_key(
+		albedo, roughness, metallic, emission_color, emission_energy, clean_path,
+		detail_scale, detail_strength, normal_strength, grime_strength, edge_wear,
+		ao_strength,
+	)
+	var cached: Variant = _cache.get(key, null)
+	if cached != null:
+		return cached as ShaderMaterial
+	var material := ShaderMaterial.new()
+	material.shader = NUCLEAR_PBR
+	material.set_shader_parameter("albedo", albedo)
+	material.set_shader_parameter("roughness", roughness)
+	material.set_shader_parameter("metallic", metallic)
+	material.set_shader_parameter("clean_surface", clean_path)
+	material.set_shader_parameter("detail_scale", detail_scale)
+	material.set_shader_parameter("detail_strength", detail_strength)
+	material.set_shader_parameter("normal_strength", normal_strength)
+	material.set_shader_parameter("grime_strength", grime_strength)
+	material.set_shader_parameter("edge_wear", edge_wear)
+	material.set_shader_parameter("ao_strength", ao_strength)
+	material.set_shader_parameter("emission_color", emission_color)
+	material.set_shader_parameter("emission_energy", emission_energy)
+	_cache[key] = material
+	return material
+
 ## Full control. Every preset below funnels through this.
 static func surface(
 	albedo: Color,
@@ -27,29 +86,25 @@ static func surface(
 	emission_color: Color = Color(0.0, 0.0, 0.0, 1.0),
 	emission_energy: float = 0.0
 ) -> ShaderMaterial:
-	var key := "%s|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%s|%.3f" % [
-		albedo.to_html(false), roughness, metallic, detail_scale, detail_strength,
-		normal_strength, grime_strength, edge_wear, ao_strength,
-		emission_color.to_html(false), emission_energy,
-	]
-	var cached: Variant = _cache.get(key, null)
-	if cached != null:
-		return cached as ShaderMaterial
-	var material := ShaderMaterial.new()
-	material.shader = NUCLEAR_PBR
-	material.set_shader_parameter("albedo", albedo)
-	material.set_shader_parameter("roughness", roughness)
-	material.set_shader_parameter("metallic", metallic)
-	material.set_shader_parameter("detail_scale", detail_scale)
-	material.set_shader_parameter("detail_strength", detail_strength)
-	material.set_shader_parameter("normal_strength", normal_strength)
-	material.set_shader_parameter("grime_strength", grime_strength)
-	material.set_shader_parameter("edge_wear", edge_wear)
-	material.set_shader_parameter("ao_strength", ao_strength)
-	material.set_shader_parameter("emission_color", emission_color)
-	material.set_shader_parameter("emission_energy", emission_energy)
-	_cache[key] = material
-	return material
+	return _build_material(
+		albedo, roughness, metallic, emission_color, emission_energy, false,
+		detail_scale, detail_strength, normal_strength, grime_strength, edge_wear,
+		ao_strength,
+	)
+
+## Clean manufactured surface for imported map and character shells.
+## The shader keeps the same PBR response but skips all procedural detail work.
+static func clean_surface(
+	albedo: Color,
+	roughness: float,
+	metallic: float = 0.0,
+	emission_color: Color = Color(0.0, 0.0, 0.0, 1.0),
+	emission_energy: float = 0.0
+) -> ShaderMaterial:
+	return _build_material(
+		albedo, roughness, metallic, emission_color, emission_energy, true,
+		1.6, 0.0, 0.0, 0.0, 0.0, 0.0,
+	)
 
 ## Poured/precast structural concrete. Coarse relief, no metallic response.
 static func concrete(albedo: Color, roughness: float = 0.86) -> ShaderMaterial:

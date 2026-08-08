@@ -20,6 +20,23 @@ This repo is protected on `main` - land changes by branch + PR, not a direct pus
 
 ## Current state (2026-08-08)
 
+**Latest - L3 Concourse V2 visual integration and performance verification:** the shipping presentation now instantiates exactly one `ConcourseV2Visual` wrapper over the frozen 129-solid gameplay collision, and procedural greybox meshes are suppressed whenever the imported GLB wrapper loads successfully.
+`scripts/concourse_v2_visual.gd` binds all eight authoritative mesh prefixes to cached `NuclearMaterials.clean_surface` variants, rejects unknown prefixes, and forces every imported `GeometryInstance3D` to `SHADOW_CASTING_SETTING_OFF` without any per-frame callback.
+`NuclearMaterials.clean_surface` uses the existing `nuclear_pbr` shader with a cache-keyed clean branch that preserves albedo, metallic, roughness, specular, and emission while skipping relief noise, grime, dust, and material AO work.
+The arena now uses bright uniform color ambient as the dominant diffuse source, retains the sky for reflection, and explicitly disables shadows on its directional and omni lights.
+The procedural map path also ignores legacy `casts_shadow` values at runtime and forces every map mesh shadowless.
+The final visual exercise covers the exact wrapper root and asset child, all eight prefixes, 14,020 imported triangles, eight one-surface meshes, cached material reuse, clean-path parameters, no collision/camera/light/environment nodes, no frame callbacks, and shadowless uniform lighting.
+The final map and material exercises plus the headless import check passed, and the full suite contains 18 passing exercise scripts.
+Godot MCP 3.1.2 and Blender MCP both passed their required live gates before investigation, with Blender MCP confirming the eight Concourse mesh prefixes, 14,020 triangles, eight material slots, and no image-texture nodes.
+Live Godot MCP inspection confirmed eight imported runtime mesh children, zero map shadow casters, two world lights with shadows disabled, 4v4 actor count of 8, and route AI states exposing center, maintenance, and overlook lanes.
+Representative live core states were forced through `game_eval` at center, ground carry, upper carry, RED install, and BLUE install, with the visible core remaining present at each authored position.
+Live screenshots were inspected at the base, center approach, maintenance route, overlook deck, and bridge/core approach for bright readable surfaces, clean hard-surface response, and no visible cast shadows.
+The headless full-squad CPU sample remained `frames=120 avg_ms=16.67 min_ms=16.67 max_ms=16.67`; this is CPU-only and does not measure mobile GPU cost.
+Matched windowed MCP monitor samples were stable at 320 draw calls, approximately 26,088-26,170 primitives, 145 FPS, and approximately 0.000088 seconds of physics processing across base, center, and overlook poses.
+The prior L1 record was 308 draw calls, so the integrated visual build is 12 draw calls above that recorded comparison and is not yet a clean renderer-baseline pass.
+No on-device iPhone or iPad thermal, battery, GPU, or long-session frame-pacing verification was performed for L3, and the 320-versus-308 renderer delta needs a follow-up optimization or matched baseline audit before shipping signoff.
+The pre-existing untracked `art/maps/concourse_v2.blend.import` remains untouched, and Godot-generated `.uid` files were allowed to exist for the new scripts.
+
 **Latest - L1 Competitive Concourse V2 gameplay blockout:** the old heuristic Concourse map was replaced with an immutable `RiftlineMapLayout` version 2 contract and explicit collision solids, mirrored RED/BLUE bases, center, maintenance, and overlook route graphs.
 `RiftlineMap` keeps its public arena API, builds collision without meshes when presentation is disabled, loads `res://scenes/concourse_v2_visual.tscn` once when available, and uses a procedural greybox fallback with one logged error while that visual scene is still missing.
 The map has 129 authored collision solids, includes the 40-segment circular shell, frozen central bridge and blocker, symmetric base interiors, maintenance corridors, overlook decks, ramps, upper connectors, launch pads, gates, and spawn pockets.

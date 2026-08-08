@@ -280,9 +280,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		_local_duelist.apply_look(event.relative)
 
 func _build_environment() -> void:
-	# Realistic look: sky-sourced ambient and reflection (so the NuclearMaterials
-	# metal-roughness response reads as metal), ACES tonemapping, soft shadows,
-	# and bloom.  Mobile renderer only, so no SSAO/SSIL/SDFGI/SSR/volumetrics.
+	# Realistic look: uniform color ambient is the dominant diffuse source, while
+	# the static sky remains available for metallic reflection.  This keeps the
+	# arena readable under every route and avoids making sky directionality a
+	# hidden source of dark interiors. Mobile renderer only, so no SSAO/SSIL/
+	# SDFGI/SSR/volumetrics.
 	var sky_material := ProceduralSkyMaterial.new()
 	sky_material.sky_top_color = Color("335678")
 	sky_material.sky_horizon_color = Color("8ba2b8")
@@ -304,8 +306,9 @@ func _build_environment() -> void:
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_SKY
 	environment.sky = sky
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	environment.ambient_light_energy = 1.0
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color("c8d5df")
+	environment.ambient_light_energy = 1.15
 	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	environment.tonemap_mode = Environment.TONE_MAPPER_ACES
 	environment.tonemap_exposure = 1.05
@@ -329,23 +332,8 @@ func _build_environment() -> void:
 	var key := DirectionalLight3D.new()
 	key.rotation_degrees = Vector3(-56, -28, 0)
 	key.light_color = Color("fff3e0")
-	key.light_energy = 1.4
-	key.shadow_enabled = true
-	# 2 cascades, not 4: the arena is a 120m-diameter circle of 3m cover
-	# blocks, not a map with long sightlines that need crisp shadows at
-	# range - the outer cascades of a 4-split were pixel-mush regardless.
-	# max_distance trims the far cascade to just past the map radius instead
-	# of the 100m default, so it isn't re-rendering geometry well past the
-	# playable area every frame.
-	key.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	key.directional_shadow_max_distance = 70.0
-	# 0.0, not 0.6: a nonzero angular distance switches Godot onto a
-	# blocker-search (PCSS-style) shadow filter, several times the per-pixel
-	# cost of plain PCF, to buy a widening-penumbra effect that is barely
-	# visible on hard-edged block geometry. Best cost:visual ratio of any
-	# change in this pass - see handoffs/HANDOFF.md's "Performance
-	# discipline" section.
-	key.light_angular_distance = 0.0
+	key.light_energy = 0.42
+	key.shadow_enabled = false
 	add_child(key)
 
 	var fill := OmniLight3D.new()
@@ -353,6 +341,7 @@ func _build_environment() -> void:
 	fill.light_color = Color("78a9c7")
 	fill.light_energy = 0.4
 	fill.omni_range = 24.0
+	fill.shadow_enabled = false
 	add_child(fill)
 
 func _build_arena() -> void:

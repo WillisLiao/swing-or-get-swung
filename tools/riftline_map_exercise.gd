@@ -25,18 +25,21 @@ func _initialize() -> void:
 	root.add_child(rendered)
 	rendered.configure(RiftlineMap.Id.CONCOURSE, true)
 	assert(_contains_mesh(rendered))
+	var visual_root := _find_named_node(rendered, "ConcourseV2Visual")
+	assert(visual_root != null)
+	assert(visual_root.get_child_count() == 1)
+	assert(_find_named_node(visual_root, "ImportedEnvironment") != null)
+	_assert_shadowless_meshes(rendered)
 	assert(rendered.ambient_motion_count() == 0)
-	for landmark_name in ["RedLaunchPad", "BlueLaunchPad", "CoreMarker", "RedLaunchGate", "BlueLaunchGate"]:
-		var landmark := _find_named_node(rendered, landmark_name)
-		assert(landmark != null, "presentation is missing landmark: %s" % landmark_name)
-		assert(_contains_mesh(landmark), "landmark has no geometry: %s" % landmark_name)
 	assert(rendered.is_spawn_clear(rendered.core_spawn_position()))
 	assert(rendered.is_spawn_clear(rendered.launch_pad_positions()[Duelist.Team.RED]))
 	assert(rendered.is_spawn_clear(rendered.launch_pad_positions()[Duelist.Team.BLUE]))
 	assert(rendered.solid_count() == concourse.solid_count())
 
-	concourse.pulse_objective()
-	assert(concourse.is_processing())
+	# The visual shell has no animated map nodes; objective presentation is
+	# owned by RiftlineArena's match presentation layer.
+	rendered.pulse_objective()
+	assert(not rendered.is_processing())
 
 	print("Nuclear Rush Concourse V2 map exercise: PASS")
 	quit()
@@ -174,3 +177,11 @@ func _find_named_node(node: Node, wanted_name: String) -> Node:
 		if nested != null:
 			return nested
 	return null
+
+func _assert_shadowless_meshes(node: Node) -> void:
+	for child_variant in node.get_children():
+		var child: Node = child_variant
+		if child is MeshInstance3D:
+			var mesh_instance: MeshInstance3D = child as MeshInstance3D
+			assert(mesh_instance.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
+		_assert_shadowless_meshes(child)

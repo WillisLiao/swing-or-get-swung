@@ -43,6 +43,10 @@ uniform float edge_wear : hint_range(0.0, 1.0) = 0.25;
 uniform float ao_strength : hint_range(0.0, 1.0) = 0.50;
 uniform vec4 emission_color : source_color = vec4(0.0, 0.0, 0.0, 1.0);
 uniform float emission_energy : hint_range(0.0, 24.0) = 0.0;
+// Imported map shells use authored geometry for their manufactured detail.
+// Keep this branch before every noise helper call so clean surfaces also cut
+// the fragment cost of the procedural fallback path.
+uniform bool clean_surface = false;
 
 varying vec3 world_position;
 varying vec3 world_normal;
@@ -115,6 +119,16 @@ void vertex() {
 
 void fragment() {
 	vec3 shading_normal = normalize(world_normal);
+	if (clean_surface) {
+		ALBEDO = clamp(albedo.rgb, vec3(0.0), vec3(1.0));
+		METALLIC = clamp(metallic, 0.0, 1.0);
+		ROUGHNESS = clamp(roughness, 0.04, 1.0);
+		SPECULAR = 0.5;
+		NORMAL = normalize((VIEW_MATRIX * vec4(shading_normal, 0.0)).xyz);
+		AO = 1.0;
+		AO_LIGHT_AFFECT = 0.0;
+		EMISSION = emission_color.rgb * emission_energy;
+	} else {
 
 	// Two octaves of the same isotropic field drive height and normal together,
 	// so a proud area shades proud and reads proud.  Sampling through
@@ -187,4 +201,5 @@ void fragment() {
 	AO = clamp(1.0 - recess * ao_strength, 0.0, 1.0);
 	AO_LIGHT_AFFECT = 0.55;
 	EMISSION = emission_color.rgb * emission_energy;
+	}
 }

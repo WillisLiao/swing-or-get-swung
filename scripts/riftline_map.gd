@@ -74,6 +74,8 @@ func configure(next_map_id: Id, presentation_enabled: bool) -> void:
 	_clear_layout()
 	_map_id = next_map_id
 	_presentation_enabled = presentation_enabled
+	if _presentation_enabled and FileAccess.file_exists(VISUAL_SCENE_PATH):
+		_visual_scene_resource = load(VISUAL_SCENE_PATH) as PackedScene
 	_layout = RiftlineMapLayout.build()
 	_load_public_layout_data()
 	_build_route_graphs()
@@ -165,6 +167,7 @@ func _clear_layout() -> void:
 	_tactical_facts.clear()
 	_objective_pulse_remaining = 0.0
 	_objective_pulse_root = null
+	_visual_scene_resource = null
 	_route_data_valid = true
 	_route_error_reported = false
 
@@ -237,18 +240,17 @@ func _validate_solid_record(solid: Dictionary) -> bool:
 	return solid.position is Vector3 and solid.dimensions is Vector3
 
 func _build_presentation() -> void:
-	if not FileAccess.file_exists(VISUAL_SCENE_PATH):
-		if not _visual_missing_reported:
-			push_error("RiftlineMap visual scene is missing: %s; using procedural greybox fallback" % VISUAL_SCENE_PATH)
-			_visual_missing_reported = true
-		_build_procedural_fallback()
-		return
-	_visual_scene_resource = load(VISUAL_SCENE_PATH) as PackedScene
 	if _visual_scene_resource != null:
 		var visual_instance := _visual_scene_resource.instantiate()
 		visual_instance.name = "ConcourseV2Visual"
 		add_child(visual_instance)
 		_objective_pulse_root = visual_instance.get_node_or_null("CoreMarker") as Node3D
+		return
+	if not FileAccess.file_exists(VISUAL_SCENE_PATH):
+		if not _visual_missing_reported:
+			push_error("RiftlineMap visual scene is missing: %s; using procedural greybox fallback" % VISUAL_SCENE_PATH)
+			_visual_missing_reported = true
+		_build_procedural_fallback()
 		return
 	if not _visual_missing_reported:
 		push_error("RiftlineMap visual scene could not be loaded: %s; using procedural greybox fallback" % VISUAL_SCENE_PATH)
@@ -259,8 +261,8 @@ func _build_procedural_fallback() -> void:
 	var core_marker := _landmark_root("CoreMarker")
 	core_marker.position = Vector3(CORE_SPAWN.x, 0.0, CORE_SPAWN.z)
 	_objective_pulse_root = core_marker
-	_add_cylinder_landmark(core_marker, Vector3.ZERO, 2.3, 0.32, NuclearMaterials.concrete(STEEL_DARK, 0.7))
-	_add_cylinder_landmark(core_marker, Vector3(0.0, 0.2, 0.0), 1.45, 0.16, NuclearMaterials.emissive(CORE_ACCENT, 4.5))
+	_add_cylinder_landmark(core_marker, Vector3.ZERO, 2.3, 0.32, NuclearMaterials.clean_surface(STEEL_DARK, 0.7, 0.25))
+	_add_cylinder_landmark(core_marker, Vector3(0.0, 0.2, 0.0), 1.45, 0.16, NuclearMaterials.clean_surface(CORE_ACCENT, 0.34, 0.10, CORE_ACCENT, 4.5))
 	_add_pad_landmark(_launch_pads[Duelist.Team.RED], RED_ACCENT, "RedLaunchPad")
 	_add_pad_landmark(_launch_pads[Duelist.Team.BLUE], BLUE_ACCENT, "BlueLaunchPad")
 	_build_launch_gate(_gates[Duelist.Team.RED], RED_ACCENT, "RedLaunchGate")
@@ -277,7 +279,7 @@ func _add_solid_node(spec: Dictionary) -> void:
 	var shape_name := str(spec.get("shape", "box"))
 	var dimensions: Vector3 = spec.get("dimensions", Vector3.ONE)
 	var rise := float(spec.get("rise", 0.0))
-	if _presentation_enabled:
+	if _presentation_enabled and _visual_scene_resource == null:
 		var mesh_instance := MeshInstance3D.new()
 		mesh_instance.name = "GreyboxMesh"
 		if shape_name == "ramp":
@@ -294,7 +296,10 @@ func _add_solid_node(spec: Dictionary) -> void:
 			box_mesh.size = dimensions
 			mesh_instance.mesh = box_mesh
 		mesh_instance.material_override = _material_for_role(str(spec.get("material_role", "concrete")))
-		mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if bool(spec.get("casts_shadow", true)) else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# V2 keeps casts_shadow in the layout for compatibility, but the shipping
+		# presentation is globally shadowless so no route can hide behind a cast
+		# shadow or pay for a map shadow caster.
+		mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		body.add_child(mesh_instance)
 	var collision := CollisionShape3D.new()
 	if shape_name == "ramp":
@@ -321,30 +326,30 @@ func _add_solid_node(spec: Dictionary) -> void:
 func _material_for_role(role: String) -> ShaderMaterial:
 	match role:
 		"floor":
-			return NuclearMaterials.concrete(CONCRETE_FLOOR, 0.7)
+			return NuclearMaterials.clean_surface(CONCRETE_FLOOR, 0.7)
 		"outer_wall", "concrete", "central_tower", "central_baffle", "central_column", "low_cover", "bridge_floor", "bridge_rail":
-			return NuclearMaterials.concrete(CONCRETE_LIGHT if role == "central_baffle" else CONCRETE_WALL, 0.7)
+			return NuclearMaterials.clean_surface(CONCRETE_LIGHT if role == "central_baffle" else CONCRETE_WALL, 0.7)
 		"red_accent":
-			return NuclearMaterials.painted_metal(RED_ACCENT)
+			return NuclearMaterials.clean_surface(RED_ACCENT, 0.52, 0.25)
 		"blue_accent":
-			return NuclearMaterials.painted_metal(BLUE_ACCENT)
+			return NuclearMaterials.clean_surface(BLUE_ACCENT, 0.52, 0.25)
 		"steel":
-			return NuclearMaterials.metal(STEEL_MID, 0.32)
+			return NuclearMaterials.clean_surface(STEEL_MID, 0.32, 0.92)
 		_:
-			return NuclearMaterials.painted_metal(STEEL_DARK)
+			return NuclearMaterials.clean_surface(STEEL_DARK, 0.52, 0.25)
 
 func _add_pad_landmark(pad_position: Vector3, accent: Color, node_name: String) -> void:
 	var pad := _landmark_root(node_name)
 	pad.position = pad_position
-	_add_cylinder_landmark(pad, Vector3.ZERO, 4.2, 0.14, NuclearMaterials.concrete(STEEL_DARK, 0.7))
-	_add_cylinder_landmark(pad, Vector3(0.0, 0.02, 0.0), 3.4, 0.06, NuclearMaterials.metal(STEEL_MID, 0.32))
-	_add_cylinder_landmark(pad, Vector3(0.0, 0.09, 0.0), 4.1, 0.06, NuclearMaterials.emissive(accent, 3.6))
+	_add_cylinder_landmark(pad, Vector3.ZERO, 4.2, 0.14, NuclearMaterials.clean_surface(STEEL_DARK, 0.7, 0.25))
+	_add_cylinder_landmark(pad, Vector3(0.0, 0.02, 0.0), 3.4, 0.06, NuclearMaterials.clean_surface(STEEL_MID, 0.32, 0.92))
+	_add_cylinder_landmark(pad, Vector3(0.0, 0.09, 0.0), 4.1, 0.06, NuclearMaterials.clean_surface(accent, 0.34, 0.10, accent, 3.6))
 
 func _build_launch_gate(gate_position: Vector3, accent: Color, node_name: String) -> void:
 	var gate := _landmark_root(node_name)
 	gate.position = gate_position
-	var frame_material := NuclearMaterials.metal(STEEL_MID, 0.34)
-	var accent_material := NuclearMaterials.emissive(accent, 2.6)
+	var frame_material := NuclearMaterials.clean_surface(STEEL_MID, 0.34, 0.92)
+	var accent_material := NuclearMaterials.clean_surface(accent, 0.34, 0.10, accent, 2.6)
 	_add_landmark_part(gate, _box_mesh(Vector3(0.16, 3.4, 0.16)), Vector3(-0.72, 1.7, 0.0), frame_material)
 	_add_landmark_part(gate, _box_mesh(Vector3(0.16, 3.4, 0.16)), Vector3(0.72, 1.7, 0.0), frame_material)
 	_add_landmark_part(gate, _box_mesh(Vector3(1.55, 0.1, 0.1)), Vector3(0.0, 3.3, 0.0), accent_material)
