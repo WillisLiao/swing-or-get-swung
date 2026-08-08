@@ -31,9 +31,10 @@ Verification for this session is complete: the Godot MCP 3.1.2 editor connection
 The headless import check passed, all 18 `tools/*_exercise.gd` scripts passed, and the direct 4v4 arena performance sample remained `avg_ms=16.67`, `min_ms=16.67`, `max_ms=16.67` over 120 frames.
 The required serial runner command returned an empty capture again, so the direct Godot binary result is the recorded performance evidence rather than pretending the runner emitted a sample.
 Windowed MCP renderer monitors stayed at 308 draw calls and 145 FPS across samples, with physics process around `0.000041-0.000072` seconds and process around `0.001674-0.001759` seconds.
-The separate visual-scene import and on-device human feel or thermal checks remain outside this map scope.
+The separate visual-scene import remains outside this map scope.
 The uncommitted build was nevertheless exported, signed, installed, launched, and process-verified on the connected iPad Pro 12.9 (5th generation) through `devicectl` as `com.lull.riftline`.
-No human touch or thermal playtest was performed by the agent.
+No human touch or thermal playtest was performed by the agent, but the user subsequently played the completed L1 blockout on iPad and approved it for commit.
+Detailed temperature, battery, and long-session frame-pacing measurements were not separately reported and remain open for the final integrated build.
 The coordinator's later correction excludes all weapon, sniper, HUD, recoil, damage-feedback, and viewmodel requests from L1; none of those files were edited here.
 
 **Agent tooling hard gate:** every implementation, debugging, review, test, or verification task that touches game behavior must prove a live `godot-ai` MCP editor-plugin connection with an actual successful tool call before substantive investigation or any repository write.
