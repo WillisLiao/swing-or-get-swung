@@ -37,6 +37,21 @@ No human touch or thermal playtest was performed by the agent, but the user subs
 Detailed temperature, battery, and long-session frame-pacing measurements were not separately reported and remain open for the final integrated build.
 The coordinator's later correction excludes all weapon, sniper, HUD, recoil, damage-feedback, and viewmodel requests from L1; none of those files were edited here.
 
+**Latest - L2 Optimized Blender environment shell:** Blender MCP authored and exported `art/maps/concourse_v2.blend` and `assets/maps/concourse_v2_environment.glb` without changing gameplay, collision, or the L3 visual integration files.
+The shell preserves the frozen Concourse V2 dimensions and route landmarks while adding merged, non-colliding environmental detail for bases, maintenance, overlook, ramps, connectors, bridge, and the central objective area.
+The final Blender source contains exactly 8 mesh objects, 8 material-role meshes, 14,020 triangles, 8 materials, one material slot and one surface per mesh, applied transforms, no non-mesh objects, no image texture nodes, and no mesh-prefix violations.
+The source bounds are `[-60.1, -60.1, -1.0]` to `[60.1, 60.1, 7.2]`, the exported GLB is 792,452 bytes, and red plus blue identity and indicator roles cover 0.1296% of measured mesh surface area.
+The generated Godot import reports `AABB(position=(-60.1, -1.0, -60.1), size=(120.2, 8.2, 120.2))`.
+The art-only preview is `scenes/concourse_v2_art_preview.tscn`, with one imported environment, one camera, one shadowless key light, one world environment, and no post-processing or extra render camera.
+Godot MCP live inspection found 15 preview nodes, 8 imported mesh children, unit scale, one surface per mesh, `cast_shadow=0` on every imported mesh, and no runtime errors.
+The final preview screenshot showed the complete circular shell and the distinct base, maintenance, overlook, bridge, and central structures after the Blender material readability pass.
+The Godot MCP preview monitor sample reported 286 draw calls, 11,198 primitives, and 0.00005 seconds of physics processing.
+The current live main-scene comparison also reported 286 draw calls, but the preview monitor's MCP FPS and object counts are not treated as device performance evidence.
+The headless import check passed and all 18 `tools/*_exercise.gd` scripts passed.
+The required serial arena performance command returned an empty capture, and the direct Godot binary did not emit a fresh sample before a bounded stop, so no new L2 CPU performance number is claimed.
+Headless validation cannot establish mobile GPU cost, and no human iPad thermal, battery, or long-session frame-pacing check was performed for this isolated art preview.
+L3 still owns the shipping wrapper and material integration in `scripts/concourse_v2_visual.gd` and `scenes/concourse_v2_visual.tscn`, including any final `NuclearMaterials.clean_surface` policy decision.
+
 **Agent tooling hard gate:** every implementation, debugging, review, test, or verification task that touches game behavior must prove a live `godot-ai` MCP editor-plugin connection with an actual successful tool call before substantive investigation or any repository write.
 Godot CLI and headless checks remain complementary validation and are never a fallback for missing MCP.
 Any Blender or 3D-model task likewise requires an actual successful Blender MCP call, and a Blender-authored game asset requires both Blender MCP for source work and Godot MCP for import and live-game verification.

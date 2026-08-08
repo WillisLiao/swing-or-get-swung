@@ -1,0 +1,67 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/maps/concourse_v2_environment.glb" id="1_environment"]
+[ext_resource type="Script" path="res://scripts/cover_v2_preview.gd" id="2_orbit"]
+
+[sub_resource type="Environment" id="Environment_concourse_v2_preview"]
+background_mode = 1
+background_color = Color(0.055, 0.085, 0.12, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.86, 0.9, 0.95, 1)
+ambient_light_energy = 1.28
+reflected_light_source = 0
+tonemap_mode = 2
+
+[node name="ConcourseV2ArtPreview" type="Node3D"]
+script = ExtResource("2_orbit")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_concourse_v2_preview")
+
+[node name="ShadowlessKey" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-48, -28, 0)
+light_color = Color(1, 0.96, 0.9, 1)
+light_energy = 0.42
+shadow_enabled = false
+
+[node name="ImportedEnvironment" parent="." instance=ExtResource("1_environment")]
+
+[node name="BLUE_Identity" parent="ImportedEnvironment" index="0"]
+cast_shadow = 0
+
+[node name="CONCRETE_Shell" parent="ImportedEnvironment" index="1"]
+cast_shadow = 0
+
+[node name="DARK_Systems" parent="ImportedEnvironment" index="2"]
+cast_shadow = 0
+
+[node name="EMISSIVE_BLUE_Indicators" parent="ImportedEnvironment" index="3"]
+cast_shadow = 0
+
+[node name="EMISSIVE_NEUTRAL_Core" parent="ImportedEnvironment" index="4"]
+cast_shadow = 0
+
+[node name="EMISSIVE_RED_Indicators" parent="ImportedEnvironment" index="5"]
+cast_shadow = 0
+
+[node name="RED_Identity" parent="ImportedEnvironment" index="6"]
+cast_shadow = 0
+
+[node name="STEEL_Structure" parent="ImportedEnvironment" index="7"]
+cast_shadow = 0
+
+[node name="CameraRig" type="Node3D" parent="."]
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig"]
+position = Vector3(0, 26, 79)
+current = true
+fov = 58.0
+
+[node name="PreviewLabel" type="Label" parent="."]
+offset_left = 24.0
+offset_top = 20.0
+offset_right = 620.0
+offset_bottom = 58.0
+theme_override_colors/font_color = Color(0.9, 0.95, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "CONCOURSE V2  •  OPTIMIZED ART SHELL  •  HOLD SPACE TO PAUSE ORBIT"
