@@ -8,6 +8,30 @@ Don't repeat that.
 Also read `handoffs/HANDOFF.md` first for current project state, and `WORKFLOW.md` for the git/branch/PR process.
 This file is standards, not status - it doesn't change from session to session the way HANDOFF.md does.
 
+## 0. MCP connection hard gates
+
+**Godot MCP is a hard prerequisite for game development in this repository.**
+Any task that implements, changes, debugs, reviews, tests, or verifies game code, gameplay behavior, scenes, resources, shaders, materials, rendering, UI interaction, audio, input, networking, or imported game assets must establish a working `godot-ai` MCP connection before substantive investigation or any repository write.
+Pure planning, documentation-only edits, and Git or PR administration that do not assess game behavior are exempt.
+
+The prerequisite is satisfied only by an actual successful Godot MCP tool call through the connected editor plugin.
+`codex mcp list`, server health output, a running process, HTTP availability, Godot CLI output, and headless tests do not prove that the editor plugin is connected and do not satisfy the gate.
+If the required Godot MCP tools or editor connection are unavailable, stop and return a blocker.
+Do not continue with Godot CLI, static inspection, screenshots from another path, or a note that live verification was unavailable.
+Godot CLI import checks, exercises, and headless performance samples remain required where relevant, but they complement MCP and never replace it.
+
+For visual or interactive work, successful connection alone is not enough.
+Use Godot MCP for the relevant live editor or game operations, including run and stop control, scene or node inspection, `game_eval`, runtime error inspection, screenshots, and monitor readings as applicable to the task.
+
+**Blender MCP is a hard prerequisite for Blender and 3D-model work.**
+Any task that creates, edits, reviews, repairs, imports, exports, renders, or validates a Blender scene, `.blend` file, 3D model, mesh, armature, material, or Blender-authored game asset must establish a working Blender MCP connection through an actual successful Blender MCP tool call before substantive investigation or any model or repository write.
+Process checks, configuration listings, Blender CLI output, and direct UI availability do not satisfy the gate.
+If Blender MCP is unavailable, stop and return a blocker instead of substituting another Blender control path.
+
+A Blender-authored asset intended for the game requires both gates.
+Use Blender MCP for source-scene and model work, then use Godot MCP to verify import state, materials, scene integration, runtime behavior, and rendered appearance in the game.
+Completion reports must name the successful MCP calls and summarize their results.
+
 ## 1. Performance discipline
 
 **Any change to a system that runs every frame or every physics tick needs its cost reasoned about before you call it done, not just its correctness.**

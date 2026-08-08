@@ -8,6 +8,8 @@ signal view_fov_changed(horizontal_degrees: float)
 
 const CONFIG_PATH := "user://riftline_controls.cfg"
 const RESPONSIVE := preload("res://scripts/riftline_responsive_layout.gd")
+const CONTROLS_SECTION := "controls"
+const CONTROLS_VERSION := 1
 const LAYOUT_SECTION := "hud_layout_v1"
 const FEEDBACK_SECTION := "feedback_v1"
 const VIEW_SECTION := "display"
@@ -262,9 +264,9 @@ var _crouch_touch := -1
 var _prone_touch := -1
 var _switch_touch := -1
 var _interact_touch := -1
-# Optional drag-look: holding the ADS button and dragging that same
-# finger can also steer the camera.  Off by default.
-var ads_button_look := false
+# Holding the ADS button and dragging that same finger steers the camera by
+# default. This keeps two-thumb aiming viable while the left thumb moves.
+var ads_button_look := true
 var _settings_owner_touch := -1
 # Which settings control (if any) a given touch index has captured on press.
 # Drag events are routed only to the captured control for that same index, so
@@ -2434,12 +2436,16 @@ func _load_control_settings() -> void:
 	var config := ConfigFile.new()
 	if config.load(CONFIG_PATH) != OK:
 		return
+	var controls_version := int(config.get_value(CONTROLS_SECTION, "version", 0))
 	camera_sensitivity = _config_float(config, "sensitivity", "camera", camera_sensitivity, 0.3, 1.7)
 	ads_sensitivity = _config_float(config, "sensitivity", "ads", ads_sensitivity, 0.3, 1.7)
 	horizontal_fov = _config_float(config, VIEW_SECTION, "horizontal_fov", Duelist.DEFAULT_HORIZONTAL_FOV, Duelist.MIN_HORIZONTAL_FOV, Duelist.MAX_HORIZONTAL_FOV)
-	gyro_enabled = bool(config.get_value("controls", "gyro", gyro_enabled))
-	_aim_toggle = bool(config.get_value("controls", "aim_toggle", _aim_toggle))
-	ads_button_look = bool(config.get_value("controls", "ads_button_look", ads_button_look))
+	gyro_enabled = bool(config.get_value(CONTROLS_SECTION, "gyro", gyro_enabled))
+	_aim_toggle = bool(config.get_value(CONTROLS_SECTION, "aim_toggle", _aim_toggle))
+	# Builds before controls version 1 saved ADS button look as false by
+	# default. Migrate those installs once so the same thumb that holds ADS can
+	# immediately drag to aim; later explicit OFF choices remain respected.
+	ads_button_look = _ads_button_look_from_config(config)
 	var feedback_preferences := load_feedback_preferences(config, effects_enabled, haptics_enabled)
 	effects_enabled = bool(feedback_preferences.effects_enabled)
 	haptics_enabled = false
@@ -2464,6 +2470,14 @@ func _load_control_settings() -> void:
 		_save_control_settings()
 	elif has_saved_layout and saved_layout_version < LAYOUT_VERSION:
 		_save_control_settings()
+	elif controls_version < CONTROLS_VERSION:
+		_save_control_settings()
+
+func _ads_button_look_from_config(config: ConfigFile) -> bool:
+	var controls_version := int(config.get_value(CONTROLS_SECTION, "version", 0))
+	if controls_version < CONTROLS_VERSION:
+		return true
+	return bool(config.get_value(CONTROLS_SECTION, "ads_button_look", ads_button_look))
 
 func _legacy_default_layout() -> Dictionary:
 	return {
@@ -2507,10 +2521,11 @@ func _save_control_settings() -> void:
 	config.set_value("sensitivity", "ads", ads_sensitivity)
 	config.set_value(VIEW_SECTION, "version", 1)
 	config.set_value(VIEW_SECTION, "horizontal_fov", horizontal_fov)
-	config.set_value("controls", "gyro", gyro_enabled)
-	config.set_value("controls", "aim_toggle", _aim_toggle)
-	config.set_value("controls", "ads_button_look", ads_button_look)
-	config.set_value("controls", "stick_mode", "fixed" if _stick_mode == MobileTouchRouter.StickMode.FIXED else "floating")
+	config.set_value(CONTROLS_SECTION, "version", CONTROLS_VERSION)
+	config.set_value(CONTROLS_SECTION, "gyro", gyro_enabled)
+	config.set_value(CONTROLS_SECTION, "aim_toggle", _aim_toggle)
+	config.set_value(CONTROLS_SECTION, "ads_button_look", ads_button_look)
+	config.set_value(CONTROLS_SECTION, "stick_mode", "fixed" if _stick_mode == MobileTouchRouter.StickMode.FIXED else "floating")
 	save_feedback_preferences(config, effects_enabled, haptics_enabled)
 	config.set_value(LAYOUT_SECTION, "version", LAYOUT_VERSION)
 	for key in MOVABLE_KEYS:

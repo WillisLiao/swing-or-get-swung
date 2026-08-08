@@ -25,7 +25,12 @@ func _initialize() -> void:
 	await _test_clock_expiry_tie_enters_sudden_death(root)
 	await _test_launch_during_sudden_death_finishes_match(root)
 	await _test_manual_respawn_gate(root)
+	await _test_respawn_rule_matrix(root)
+	await _test_carrier_respawn_and_drop_timers(root)
 	await _test_bot_auto_respawn(root)
+	await _test_authoritative_carrier_damage(root)
+	await _test_vest_immunity(root)
+	await _test_low_health_carry_damage_drops_core(root)
 	await _test_death_visual_cleanup(root)
 	await _test_combat_stats(root)
 	print("Nuclear Rush rules exercise: PASS")
@@ -362,6 +367,7 @@ func _test_manual_respawn_gate(root: Node3D) -> void:
 	match_node.register_duelist(red, "respawn_red")
 	match_node.register_duelist(blue_d, "respawn_blue")
 	await _go_live(match_node)
+	assert(is_equal_approx(RiftlineMatch.RESPAWN_MIN_SECONDS, 6.0))
 
 	# Elimination no longer auto-respawns - it starts a minimum-death timer
 	# and the actor stays down until an explicit request clears it.
@@ -396,6 +402,65 @@ func _test_manual_respawn_gate(root: Node3D) -> void:
 	# A second request right after respawning is a no-op (nothing to gate).
 	assert(not match_node.request_respawn("respawn_red"))
 
+func _assert_respawn_boundary(root: Node3D, actor_id: String, sudden: bool, red_score: int, blue_score: int, installed: Duelist.Team) -> void:
+	var match_node := _make_match(root, _default_pads())
+	var red := _make_duelist(root, RED, actor_id, Vector3(-30, 0.1, 0))
+	var blue_d := _make_duelist(root, BLUE, actor_id + "_enemy", Vector3(30, 0.1, 0))
+	match_node.register_duelist(red, actor_id)
+	match_node.register_duelist(blue_d, actor_id + "_enemy")
+	await _go_live(match_node)
+	match_node.scores[RED] = red_score
+	match_node.scores[BLUE] = blue_score
+	match_node.installed_team = installed
+	if sudden:
+		match_node.phase = RiftlineMatch.Phase.SUDDEN_DEATH
+		match_node.sudden_death = true
+
+	red.take_damage(Duelist.HEALTH, blue_d)
+	assert(not match_node.can_respawn(actor_id))
+	match_node._physics_process(5.99)
+	assert(not match_node.can_respawn(actor_id))
+	assert(red.eliminated)
+	match_node._physics_process(0.01)
+	assert(match_node.can_respawn(actor_id))
+	assert(red.eliminated)
+	assert(match_node.request_respawn(actor_id))
+	assert(not red.eliminated)
+
+func _test_respawn_rule_matrix(root: Node3D) -> void:
+	# The same flat gate applies in normal play and sudden death, regardless of
+	# score deficit or which team owns the installed objective.
+	await _assert_respawn_boundary(root, "respawn_flat_live", false, 0, 0, RED)
+	await _assert_respawn_boundary(root, "respawn_deficit_live", false, 0, 3, BLUE)
+	await _assert_respawn_boundary(root, "respawn_sudden", true, 1, 1, BLUE)
+
+func _test_carrier_respawn_and_drop_timers(root: Node3D) -> void:
+	var match_node := _make_match(root, _default_pads())
+	var red := _make_duelist(root, RED, "respawn_drop_red", Vector3.ZERO)
+	var blue_d := _make_duelist(root, BLUE, "respawn_drop_blue", Vector3(60, 0.1, 60))
+	match_node.register_duelist(red, "respawn_drop_red")
+	match_node.register_duelist(blue_d, "respawn_drop_blue")
+	await _go_live(match_node)
+
+	red.position = Vector3.ZERO
+	blue_d.position = Vector3(60, 0.1, 60)
+	match_node._physics_process(0.05)
+	assert(match_node.core_state == RiftlineMatch.CoreState.CARRIED)
+	red.position = Vector3(12, 0.1, -8)
+	match_node._physics_process(0.05)
+	red.eliminated = true
+	match_node._on_defeated(red, blue_d)
+	assert(match_node.core_state == RiftlineMatch.CoreState.DROPPED)
+	assert(is_equal_approx(match_node.drop_return_remaining, RiftlineMatch.CORE_DROP_RETURN_SECONDS))
+
+	match_node._physics_process(6.0)
+	assert(match_node.can_respawn("respawn_drop_red"))
+	assert(red.eliminated)
+	assert(is_equal_approx(match_node.drop_return_remaining, 9.0))
+	assert(match_node.request_respawn("respawn_drop_red"))
+	assert(not red.eliminated)
+	assert(match_node.core_state == RiftlineMatch.CoreState.DROPPED)
+
 func _test_bot_auto_respawn(root: Node3D) -> void:
 	var match_node := _make_match(root, _default_pads())
 	var bot := BotDuelist.new()
@@ -411,11 +476,74 @@ func _test_bot_auto_respawn(root: Node3D) -> void:
 
 	bot.take_damage(Duelist.HEALTH, blue_d)
 	assert(bot.eliminated)
-	match_node._physics_process(RiftlineMatch.RESPAWN_MIN_SECONDS - 0.1)
+	match_node._physics_process(RiftlineMatch.RESPAWN_MIN_SECONDS - 0.01)
 	assert(bot.eliminated)
-	match_node._physics_process(0.2)
+	match_node._physics_process(0.01)
 	assert(not bot.eliminated)
 	assert(not match_node.can_respawn("respawn_bot"))
+
+func _test_authoritative_carrier_damage(root: Node3D) -> void:
+	var match_node := _make_match(root, _default_pads())
+	var carrier := _make_duelist(root, RED, "damage_carrier", Vector3.ZERO)
+	match_node.register_duelist(carrier, "damage_carrier")
+	await _go_live(match_node)
+
+	carrier.position = Vector3.ZERO
+	match_node._physics_process(0.05)
+	assert(match_node.core_state == RiftlineMatch.CoreState.CARRIED)
+	assert(is_equal_approx(RiftlineMatch.CORE_CARRY_DAMAGE_PER_SECOND, 2.5))
+	var health_before: float = carrier.health
+	# This invokes the authoritative match tick, not Duelist prediction.
+	match_node._physics_process(1.0)
+	assert(is_equal_approx(carrier.health, health_before - 2.5))
+	assert(not carrier.eliminated)
+	assert(is_equal_approx(carrier.movement_speed_multiplier(), Duelist.CORE_CARRY_SPEED_MULTIPLIER))
+
+func _test_vest_immunity(root: Node3D) -> void:
+	var match_node := _make_match(root, _default_pads())
+	var runner := _make_duelist(root, RED, "vest_carrier", Vector3.ZERO)
+	runner.configure_loadout(Duelist.PlayerClass.RUNNER)
+	match_node.register_duelist(runner, "vest_carrier")
+	await _go_live(match_node)
+
+	runner.position = Vector3.ZERO
+	match_node._physics_process(0.05)
+	assert(match_node.core_state == RiftlineMatch.CoreState.CARRIED)
+	assert(runner.has_nuclear_vest)
+	var health_before: float = runner.health
+	match_node._physics_process(1.0)
+	assert(is_equal_approx(runner.health, health_before))
+	assert(not runner.eliminated)
+
+func _test_low_health_carry_damage_drops_core(root: Node3D) -> void:
+	var pads := _default_pads()
+	var match_node := _make_match(root, pads)
+	var carrier := _make_duelist(root, RED, "damage_death_carrier", Vector3.ZERO)
+	match_node.register_duelist(carrier, "damage_death_carrier")
+	await _go_live(match_node)
+
+	carrier.position = Vector3.ZERO
+	match_node._physics_process(0.05)
+	assert(match_node.core_state == RiftlineMatch.CoreState.CARRIED)
+	carrier.position = pads[RED]
+	match_node.set_interact("damage_death_carrier", true)
+	carrier.health = 1.0
+	match_node._physics_process(1.0)
+
+	assert(carrier.eliminated)
+	assert(not carrier.is_carrying_core())
+	assert(match_node.core_state == RiftlineMatch.CoreState.DROPPED)
+	assert(is_zero_approx(match_node.install_progress))
+	assert(is_equal_approx(match_node.drop_return_remaining, RiftlineMatch.CORE_DROP_RETURN_SECONDS))
+	assert(not match_node.can_respawn("damage_death_carrier"))
+	match_node._physics_process(5.99)
+	assert(not match_node.can_respawn("damage_death_carrier"))
+	match_node._physics_process(0.01)
+	assert(match_node.can_respawn("damage_death_carrier"))
+	assert(is_equal_approx(match_node.drop_return_remaining, 9.0))
+	assert(match_node.request_respawn("damage_death_carrier"))
+	assert(not carrier.eliminated)
+	assert(match_node.core_state == RiftlineMatch.CoreState.DROPPED)
 
 func _test_death_visual_cleanup(root: Node3D) -> void:
 	var duelist := Duelist.new()
