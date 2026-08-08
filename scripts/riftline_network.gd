@@ -24,8 +24,10 @@ const PROJECT_ID := "riftline-lan"
 ## v12: manual respawn + class picker - new "respawn"/"class_id"/
 ## "primary_weapon" input fields (the death screen and pre-game class panel
 ## ride these to the host the same way every other combat input does).
+## v13: Nuclear Rush respawn minimum changed to six seconds and authoritative
+## non-vest carrier damage restored. No wire fields changed.
 ## Mismatched builds must refuse to pair rather than silently desync.
-const PROTOCOL_VERSION := 12
+const PROTOCOL_VERSION := 13
 const MODE_LABEL := "nuclear-rush"
 const MAP_LABEL := "concourse"
 const APP_HOST_REMOTE_SLOTS := 7

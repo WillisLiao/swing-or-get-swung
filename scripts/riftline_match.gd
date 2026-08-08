@@ -24,11 +24,12 @@ const OPENING_HOLD_SECONDS := 2.5
 # instant/auto respawn, reaching this minimum does not respawn them by
 # itself - it only unlocks the respawn action (see can_respawn/
 # request_respawn), giving the death screen's class picker somewhere to sit.
-const RESPAWN_MIN_SECONDS := 5.0
+const RESPAWN_MIN_SECONDS := 6.0
 const SAFE_SPAWN_RADIUS := 9.0
 const MATCH_SECONDS := 600.0
 const POINTS_TO_WIN := 3
 const CORE_PICKUP_RADIUS := 2.0
+const CORE_CARRY_DAMAGE_PER_SECOND := 2.5
 const CORE_INSTALL_RADIUS := 3.0
 const CORE_INSTALL_SECONDS := 2.5
 const LAUNCH_COUNTDOWN_SECONDS := 25.0
@@ -182,8 +183,11 @@ func _physics_process(delta: float) -> void:
 	if phase == Phase.LIVE:
 		match_remaining = maxf(0.0, match_remaining - delta)
 	if phase == Phase.LIVE or phase == Phase.SUDDEN_DEATH:
-		_tick_core(delta)
 		_tick_respawn_timers(delta)
+		# Advance existing death timers before core simulation. If carry damage
+		# eliminates a carrier below, that new timer must start at the defeat
+		# event rather than receiving credit for this same physics interval.
+		_tick_core(delta)
 		if phase == Phase.LIVE and match_remaining <= 0.0:
 			_on_clock_expired()
 
@@ -294,6 +298,12 @@ func _tick_carried(delta: float) -> bool:
 		return true
 	var d := carrier as Duelist
 	core_position = d.global_position
+	if not d.has_nuclear_vest:
+		d.take_damage(CORE_CARRY_DAMAGE_PER_SECOND * delta, null)
+		# Duelist.take_damage() emits defeated synchronously. That signal drops
+		# the core, so do not continue into installation logic after the drop.
+		if core_state != CoreState.CARRIED:
+			return true
 	if not launch_pads.has(core_carrier_team):
 		if install_progress != 0.0:
 			install_progress = 0.0
