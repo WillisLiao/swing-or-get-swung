@@ -51,6 +51,12 @@ most of that.
 
 ## 4. Using Claude Code / Codex as collaborators
 
+**Read `AGENTS.md` at the repo root first, every session.** It has the
+project's standards for performance discipline, clean code, and a real
+`project.godot` editor bug that will silently eat a settings change if
+you don't know to route around it. It's written for any AI coding
+agent, not just one tool.
+
 Both of you can use your own subscriptions independently - there's no
 special integration needed beyond normal git:
 

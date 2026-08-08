@@ -166,6 +166,8 @@ Do not reach for them.
 
 ## Performance discipline
 
+**See `AGENTS.md` at the repo root for the full, current standing rules on this (performance measurement, clean-code discipline, and the `project.godot` editor bug) - it's the canonical reference for any agent working on this repo, kept in sync with what's below.**
+
 The fourteenth session shipped a real regression (see the fifteenth-session note above and `devlogs/2026-08-08.md`) because four sessions in a row verified correctness only, never speed, despite the Mobile-renderer-at-120Hz constraint above already being a hard limit.
 The user's standing instruction, as of the fifteenth session: **any session that adds or changes a system that runs every frame or every physics tick (a new camera/viewport, a per-actor loop, a physics query, a shader pass) must sample frame time before calling itself done, not just confirm it renders correctly.**
 Use `_arena_perf_sample`/`--arena-perf-sample` (`scripts/riftline_arena.gd`) headlessly for a fast CPU-only relative check, and note in the session's devlog entry that headless mode never exercises the GPU - anything render/shader-cost-shaped (a second camera pass, a new material, more draw calls) needs either a windowed MCP run with `monitors_get`, or better, an actual on-device sample, since this project's own regression surfaced on-device and not in the editor. "It compiles and the exercises pass" is necessary but is no longer sufficient for anything with a per-frame or per-tick cost - say so explicitly in the devlog if a session skips this, don't let it go unstated the way the twelfth-fourteenth sessions did.
