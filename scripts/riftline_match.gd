@@ -14,6 +14,7 @@ signal match_finished(winner: Duelist.Team)
 signal objective_changed(state: Dictionary)
 signal objective_event(event_type: String, state: Dictionary)
 signal respawn_started(victim: Duelist)
+signal combat_stats_changed(state: Dictionary)
 
 enum Phase { OPENING, LIVE, SUDDEN_DEATH, FINISHED }
 enum GameMode { NUCLEAR_RUSH }
@@ -68,6 +69,7 @@ var _started := false
 var _winner: Duelist.Team = Duelist.Team.RED
 var _last_replica_tick := -1
 var _interact_held: Dictionary = {}
+var _combat_stats: Dictionary = {}
 
 func configure(pads: Dictionary, core_spawn_position: Vector3, presentation_enabled: bool) -> void:
 	launch_pads = pads.duplicate()
@@ -82,6 +84,7 @@ func register_duelist(duelist: Duelist, actor_id: String) -> void:
 	if not is_instance_valid(duelist) or actor_id.is_empty():
 		return
 	duelist.set_actor_id(actor_id)
+	_ensure_combat_stats(actor_id)
 	if duelist in rosters[duelist.team]:
 		_duelists_by_id[actor_id] = duelist
 		return
@@ -130,6 +133,7 @@ func authoritative_state() -> Dictionary:
 		"red_score": int(scores[Duelist.Team.RED]),
 		"blue_score": int(scores[Duelist.Team.BLUE]),
 		"objective": objective_state(),
+		"combat_stats": combat_stats_state(),
 	}
 
 func apply_replica_state(snapshot: Dictionary) -> void:
@@ -151,6 +155,9 @@ func apply_replica_state(snapshot: Dictionary) -> void:
 	scores[Duelist.Team.BLUE] = next_blue
 	var objective: Dictionary = snapshot.get("objective", {})
 	_apply_objective_presentation(objective)
+	var incoming_stats: Variant = snapshot.get("combat_stats", null)
+	if incoming_stats is Dictionary:
+		_apply_replica_combat_stats(incoming_stats as Dictionary)
 	if phase_changed_locally:
 		_set_phase(phase)
 	if score_changed_locally:
@@ -170,6 +177,25 @@ func objective_state() -> Dictionary:
 		"match_remaining": match_remaining,
 		"sudden_death": sudden_death,
 	}
+
+func combat_stats_for(actor_id: String) -> Dictionary:
+	var row_value: Variant = _combat_stats.get(actor_id, {})
+	if not row_value is Dictionary:
+		return {"kills": 0, "deaths": 0}
+	var row := row_value as Dictionary
+	return {
+		"kills": maxi(0, int(row.get("kills", 0))),
+		"deaths": maxi(0, int(row.get("deaths", 0))),
+	}
+
+func combat_stats_state() -> Dictionary:
+	var snapshot: Dictionary = {}
+	for actor_id_value: Variant in _combat_stats.keys():
+		var actor_id := str(actor_id_value)
+		if actor_id.is_empty():
+			continue
+		snapshot[actor_id] = combat_stats_for(actor_id)
+	return snapshot
 
 func _physics_process(delta: float) -> void:
 	if not _started:
@@ -209,6 +235,7 @@ func _start_match() -> void:
 	match_remaining = MATCH_SECONDS
 	sudden_death = false
 	_cancel_respawns()
+	_reset_combat_stats()
 	_reset_duelists_to_spawns()
 	_reset_core()
 	_set_phase(Phase.OPENING)
@@ -238,9 +265,50 @@ func _reset_duelists_to_spawns() -> void:
 func _on_defeated(victim: Duelist, killer: Duelist) -> void:
 	if not is_live() or not _is_registered(victim):
 		return
+	_record_defeat(victim, killer)
 	if victim.actor_id == core_carrier_id and core_state == CoreState.CARRIED:
 		_drop_core(victim.global_position)
 	_begin_death(victim)
+
+func _ensure_combat_stats(actor_id: String) -> void:
+	if actor_id.is_empty() or _combat_stats.has(actor_id):
+		return
+	_combat_stats[actor_id] = {"kills": 0, "deaths": 0}
+
+func _reset_combat_stats() -> void:
+	_combat_stats.clear()
+	for actor_id_value: Variant in _duelists_by_id.keys():
+		_ensure_combat_stats(str(actor_id_value))
+	combat_stats_changed.emit(combat_stats_state())
+
+func _record_defeat(victim: Duelist, killer: Duelist) -> void:
+	_ensure_combat_stats(victim.actor_id)
+	var victim_row: Dictionary = combat_stats_for(victim.actor_id)
+	victim_row["deaths"] = int(victim_row.get("deaths", 0)) + 1
+	_combat_stats[victim.actor_id] = victim_row
+	if killer != null and is_instance_valid(killer) and _is_registered(killer) and killer != victim and killer.team != victim.team:
+		_ensure_combat_stats(killer.actor_id)
+		var killer_row: Dictionary = combat_stats_for(killer.actor_id)
+		killer_row["kills"] = int(killer_row.get("kills", 0)) + 1
+		_combat_stats[killer.actor_id] = killer_row
+	combat_stats_changed.emit(combat_stats_state())
+
+func _apply_replica_combat_stats(incoming: Dictionary) -> void:
+	var next_stats: Dictionary = {}
+	for actor_id_value: Variant in incoming.keys():
+		var actor_id := str(actor_id_value)
+		var row_value: Variant = incoming.get(actor_id_value, {})
+		if actor_id.is_empty() or not row_value is Dictionary:
+			continue
+		var row := row_value as Dictionary
+		next_stats[actor_id] = {
+			"kills": maxi(0, int(row.get("kills", 0))),
+			"deaths": maxi(0, int(row.get("deaths", 0))),
+		}
+	if next_stats == _combat_stats:
+		return
+	_combat_stats = next_stats
+	combat_stats_changed.emit(combat_stats_state())
 
 func _tick_core(delta: float) -> void:
 	var changed := false

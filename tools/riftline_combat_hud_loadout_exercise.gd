@@ -23,6 +23,13 @@ func _initialize() -> void:
 	assert(hud._loadout_slots.size() == 2)
 	hud.show_ammo(0, 0, 0.0)
 	assert(hud.reload_remaining == 0.0)
+	hud.set_combat_stats(7, 3)
+	assert(hud._local_kills == 7)
+	assert(hud._local_deaths == 3)
+	# Replicated values are sanitized before the HUD draws them.
+	hud.set_combat_stats(-4, -9)
+	assert(hud._local_kills == 0)
+	assert(hud._local_deaths == 0)
 	assert(not hud._settings_open)
 	hud.free()
 	print("Riftline combat HUD loadout exercise: PASS")

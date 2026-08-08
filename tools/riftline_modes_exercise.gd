@@ -27,6 +27,7 @@ func _initialize() -> void:
 	await _test_manual_respawn_gate(root)
 	await _test_bot_auto_respawn(root)
 	await _test_death_visual_cleanup(root)
+	await _test_combat_stats(root)
 	print("Nuclear Rush rules exercise: PASS")
 	quit()
 
@@ -122,6 +123,50 @@ func _test_carrier_death_drops_core(root: Node3D) -> void:
 	match_node._physics_process(0.05)
 	assert(match_node.core_state == RiftlineMatch.CoreState.CARRIED)
 	assert(match_node.core_carrier_team == BLUE)
+
+func _test_combat_stats(root: Node3D) -> void:
+	var match_node := _make_match(root, _default_pads())
+	var red := _make_duelist(root, RED, "stats_red", Vector3(-30, 0.1, 0))
+	var blue_d := _make_duelist(root, BLUE, "stats_blue", Vector3(30, 0.1, 0))
+	match_node.register_duelist(red, "stats_red")
+	match_node.register_duelist(blue_d, "stats_blue")
+	await _go_live(match_node)
+
+	blue_d.eliminated = true
+	match_node._on_defeated(blue_d, red)
+	var red_stats: Dictionary = match_node.combat_stats_for("stats_red")
+	var blue_stats: Dictionary = match_node.combat_stats_for("stats_blue")
+	assert(int(red_stats.get("kills", -1)) == 1)
+	assert(int(red_stats.get("deaths", -1)) == 0)
+	assert(int(blue_stats.get("kills", -1)) == 0)
+	assert(int(blue_stats.get("deaths", -1)) == 1)
+
+	# Respawning preserves the current match totals.
+	match_node._respawn_elapsed["stats_blue"] = RiftlineMatch.RESPAWN_MIN_SECONDS
+	assert(match_node.request_respawn("stats_blue"))
+	blue_stats = match_node.combat_stats_for("stats_blue")
+	assert(int(blue_stats.get("deaths", -1)) == 1)
+
+	# A death without a valid opposing killer still counts as a death, but
+	# must not fabricate a kill for anyone.
+	red.eliminated = true
+	match_node._on_defeated(red, null)
+	red_stats = match_node.combat_stats_for("stats_red")
+	assert(int(red_stats.get("kills", -1)) == 1)
+	assert(int(red_stats.get("deaths", -1)) == 1)
+
+	# LAN replicas receive the same authoritative totals in the match snapshot.
+	var replica := _make_match(root, _default_pads())
+	var snapshot: Dictionary = match_node.authoritative_state()
+	snapshot["tick"] = 7
+	replica.apply_replica_state(snapshot)
+	assert(replica.combat_stats_for("stats_red") == {"kills": 1, "deaths": 1})
+	assert(replica.combat_stats_for("stats_blue") == {"kills": 0, "deaths": 1})
+
+	# A rematch is a new scoreboard.
+	match_node._start_match()
+	assert(match_node.combat_stats_for("stats_red") == {"kills": 0, "deaths": 0})
+	assert(match_node.combat_stats_for("stats_blue") == {"kills": 0, "deaths": 0})
 
 func _test_dropped_core_returns_after_timeout(root: Node3D) -> void:
 	var match_node := _make_match(root, _default_pads())

@@ -391,6 +391,7 @@ func _build_match() -> void:
 
 	_ensure_ballistics()
 	director.score_changed.connect(_on_score_changed)
+	director.combat_stats_changed.connect(_on_combat_stats_changed)
 	director.phase_changed.connect(_on_phase_changed)
 	director.match_finished.connect(_on_match_finished)
 	director.objective_changed.connect(_on_objective_changed)
@@ -475,6 +476,7 @@ func _ensure_actor(record: Dictionary, local_controlled: bool, authoritative_col
 			if local_controlled:
 				_local_duelist = existing
 				_local_actor_id = actor_id
+				_sync_local_combat_stats()
 			return existing
 		_remove_actor(actor_id)
 	var is_bot := not bool(record.get("human", true)) and not _lan_active
@@ -516,6 +518,7 @@ func _ensure_actor(record: Dictionary, local_controlled: bool, authoritative_col
 		duelist.damaged.connect(_on_player_damaged)
 		_local_duelist = duelist
 		_local_actor_id = actor_id
+		_sync_local_combat_stats()
 	if not authority_registry and not local_controlled:
 		_remote_snapshot_buffers[actor_id] = SNAPSHOT_BUFFER.new()
 	return duelist
@@ -538,6 +541,7 @@ func _remove_actor(actor_id: String) -> void:
 	if _local_actor_id == actor_id:
 		_local_actor_id = ""
 		_local_duelist = null
+		_sync_local_combat_stats()
 
 func _actor(actor_id: String) -> Duelist:
 	var candidate: Variant = _authoritative_duelists.get(actor_id, null)
@@ -919,6 +923,9 @@ func _on_score_changed(red: int, blue_score: int) -> void:
 		hud.set_score(red, blue_score)
 	if _lan_host:
 		network.publish_event({"type": "score", "red": red, "blue": blue_score})
+
+func _on_combat_stats_changed(_state: Dictionary) -> void:
+	_sync_local_combat_stats()
 
 func _on_objective_changed(state: Dictionary) -> void:
 	if hud != null:
@@ -1401,6 +1408,7 @@ func _replace_match_for_lan(host: bool) -> void:
 	for point in team_points:
 		director.add_spawn(Duelist.Team.BLUE, point)
 	director.score_changed.connect(_on_score_changed)
+	director.combat_stats_changed.connect(_on_combat_stats_changed)
 	director.phase_changed.connect(_on_phase_changed)
 	director.match_finished.connect(_on_match_finished)
 	director.respawn_started.connect(_on_lan_respawn_started)
@@ -1434,6 +1442,8 @@ func _clear_match_nodes() -> void:
 	_last_sequences.clear()
 	director = null
 	_local_duelist = null
+	if hud != null:
+		hud.set_combat_stats(0, 0)
 
 func _start_host_match() -> void:
 	if _authority_match_started or director == null:
@@ -1744,6 +1754,7 @@ func _on_actor_assigned(actor_id: String, team_value: int) -> void:
 		return
 	_local_actor_id = actor_id
 	_local_team = team_value as Duelist.Team
+	_sync_local_combat_stats()
 	if _lan_active and not _lan_host and not _dedicated_server:
 		_sync_roster_records([{"actor_id": actor_id, "team": team_value, "human": true}])
 
@@ -1757,7 +1768,7 @@ func _authority_roster_ready() -> bool:
 
 func _on_lan_defeat(victim: Duelist, killer: Duelist) -> void:
 	if _lan_host:
-		network.publish_event({"type": "defeat", "victim_id": victim.actor_id, "killer_id": killer.actor_id})
+		network.publish_event({"type": "defeat", "victim_id": victim.actor_id, "killer_id": killer.actor_id if killer != null else ""})
 
 func _on_lan_respawn_started(victim: Duelist) -> void:
 	_clear_presentation_effects()
@@ -1999,6 +2010,15 @@ func _sync_squad_hud() -> void:
 	var squad := _offline_squad_size > 1 or (network != null and network.team_size > 1) or records.size() > 2
 	var hud_team := Duelist.Team.BLUE if _feedback_preview == "hud-blue" else _local_team
 	hud.set_roster_state(records, int(hud_team), squad)
+
+func _sync_local_combat_stats() -> void:
+	if hud == null:
+		return
+	if director == null or _local_actor_id.is_empty():
+		hud.set_combat_stats(0, 0)
+		return
+	var stats: Dictionary = director.combat_stats_for(_local_actor_id)
+	hud.set_combat_stats(int(stats.get("kills", 0)), int(stats.get("deaths", 0)))
 
 func _continuous_input(frame: Dictionary) -> Dictionary:
 	return {
