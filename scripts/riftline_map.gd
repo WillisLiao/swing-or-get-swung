@@ -11,6 +11,7 @@ extends Node3D
 enum Id { CONCOURSE }
 
 const VISUAL_SCENE_PATH := "res://scenes/concourse_v2_visual.tscn"
+const VISUAL_SCENE_RESOURCE: PackedScene = preload("res://scenes/concourse_v2_visual.tscn")
 const CONCOURSE_RADIUS := RiftlineMapLayout.CONCOURSE_RADIUS
 const CORE_SPAWN := RiftlineMapLayout.CORE_SPAWN
 
@@ -74,8 +75,10 @@ func configure(next_map_id: Id, presentation_enabled: bool) -> void:
 	_clear_layout()
 	_map_id = next_map_id
 	_presentation_enabled = presentation_enabled
-	if _presentation_enabled and FileAccess.file_exists(VISUAL_SCENE_PATH):
-		_visual_scene_resource = load(VISUAL_SCENE_PATH) as PackedScene
+	if _presentation_enabled:
+		# Preload the authored shell so the shipping gameplay scene cannot
+		# silently fall back to the old procedural map on a device export.
+		_visual_scene_resource = VISUAL_SCENE_RESOURCE
 	_layout = RiftlineMapLayout.build()
 	_load_public_layout_data()
 	_build_route_graphs()
@@ -244,7 +247,13 @@ func _build_presentation() -> void:
 		var visual_instance := _visual_scene_resource.instantiate()
 		visual_instance.name = "ConcourseV2Visual"
 		add_child(visual_instance)
-		_objective_pulse_root = visual_instance.get_node_or_null("CoreMarker") as Node3D
+		# The authored shell merges the objective's lime plinth and containment
+		# glow into map-wide role meshes, so there is no single node to scale and
+		# _objective_pulse_root stays null - pulse_objective() is deliberately
+		# inert on this path.  The core's own dynamic feedback belongs to the
+		# NukeCore actor in RiftlineArena, not to the static environment.  Only
+		# the procedural greybox fallback below builds a pulseable CoreMarker.
+		_objective_pulse_root = null
 		return
 	if not FileAccess.file_exists(VISUAL_SCENE_PATH):
 		if not _visual_missing_reported:
@@ -306,10 +315,12 @@ func _add_solid_node(spec: Dictionary) -> void:
 		var ramp_shape := ConvexPolygonShape3D.new()
 		var half_x := dimensions.x * 0.5
 		var half_z := dimensions.z * 0.5
+		# The overlook ramps rise along local +X so their high edge meets the
+		# overlook deck at the route nodes authored in RiftlineMapLayout.
 		ramp_shape.points = PackedVector3Array([
-			Vector3(-half_x, 0.0, -half_z), Vector3(half_x, 0.0, -half_z),
-			Vector3(-half_x, 0.0, half_z), Vector3(half_x, 0.0, half_z),
-			Vector3(-half_x, rise, half_z), Vector3(half_x, rise, half_z),
+			Vector3(-half_x, 0.0, -half_z), Vector3(-half_x, 0.0, half_z),
+			Vector3(half_x, 0.0, -half_z), Vector3(half_x, 0.0, half_z),
+			Vector3(half_x, rise, -half_z), Vector3(half_x, rise, half_z),
 		])
 		collision.shape = ramp_shape
 	elif shape_name == "cylinder":
@@ -391,13 +402,13 @@ func _ramp_mesh(dimensions: Vector3, rise: float) -> ArrayMesh:
 	var half_x := dimensions.x * 0.5
 	var half_z := dimensions.z * 0.5
 	var vertices := PackedVector3Array([
-		Vector3(-half_x, 0.0, -half_z), Vector3(half_x, 0.0, -half_z),
-		Vector3(-half_x, 0.0, half_z), Vector3(half_x, 0.0, half_z),
-		Vector3(-half_x, rise, half_z), Vector3(half_x, rise, half_z),
+		Vector3(-half_x, 0.0, -half_z), Vector3(-half_x, 0.0, half_z),
+		Vector3(half_x, 0.0, -half_z), Vector3(half_x, 0.0, half_z),
+		Vector3(half_x, rise, -half_z), Vector3(half_x, rise, half_z),
 	])
 	var indices := PackedInt32Array([
-		0, 2, 1, 0, 1, 5, 0, 5, 4,
-		2, 4, 5, 2, 5, 3, 0, 4, 2, 1, 3, 5,
+		0, 2, 3, 0, 3, 1, 0, 4, 5, 0, 5, 1,
+		2, 4, 5, 2, 5, 3, 0, 2, 4, 1, 3, 5,
 	])
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)

@@ -13,4 +13,3 @@ func _process(delta: float) -> void:
 		return
 	if orbit_enabled:
 		camera_rig.rotation.y += delta * 0.09
-

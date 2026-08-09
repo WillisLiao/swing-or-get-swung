@@ -6,6 +6,7 @@ const PRACTICE_PANEL := preload("res://scripts/riftline_practice_panel.gd")
 const MAIN_MENU := preload("res://scripts/riftline_main_menu.gd")
 const CLASS_PANEL := preload("res://scripts/riftline_class_panel.gd")
 const HIGH_ALERT := preload("res://scripts/riftline_high_alert.gd")
+const NUCLEAR_SKY := preload("res://shaders/nuclear_sky.gdshader")
 const OPENING_HOLD_SECONDS := 2.5
 const DEFAULT_OFFLINE_SQUAD_SIZE := 4
 
@@ -285,14 +286,15 @@ func _build_environment() -> void:
 	# arena readable under every route and avoids making sky directionality a
 	# hidden source of dark interiors. Mobile renderer only, so no SSAO/SSIL/
 	# SDFGI/SSR/volumetrics.
-	var sky_material := ProceduralSkyMaterial.new()
-	sky_material.sky_top_color = Color("335678")
-	sky_material.sky_horizon_color = Color("8ba2b8")
-	sky_material.sky_curve = 0.14
-	sky_material.ground_bottom_color = Color("23262b")
-	sky_material.ground_horizon_color = Color("6b6f74")
-	sky_material.sun_angle_max = 2.0
-	sky_material.sun_curve = 0.15
+	# A real night sky rather than a gradient.  A bare two-colour ramp reads as an
+	# empty void - there is nothing in it to give the eye scale - so the sky is a
+	# small analytic shader carrying stars, one galactic band and a warm lift at
+	# the horizon from the facility's own fixtures.  It stays well below the
+	# brightness of the built surfaces on purpose: a pale sky is what previously
+	# inverted the whole composition, becoming the brightest large region in every
+	# frame so that nothing built could compete with empty space.
+	var sky_material := ShaderMaterial.new()
+	sky_material.shader = NUCLEAR_SKY
 	var sky := Sky.new()
 	sky.sky_material = sky_material
 	# QUALITY (rather than the default REALTIME) bakes the sky's radiance
@@ -307,39 +309,66 @@ func _build_environment() -> void:
 	environment.background_mode = Environment.BG_SKY
 	environment.sky = sky
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("c8d5df")
-	environment.ambient_light_energy = 1.15
+	# Neutral, faintly warm - matching the blueprint's own gunmetal swatches,
+	# whose neutrals measure R >= G > B.  A green ambient made everything olive;
+	# over-correcting to a cool ambient made every surface read cyan.  Both fought
+	# nuclear-lime, which needs a neutral ground to register against.
+	environment.ambient_light_color = Color("b5b2ac")
+	# Tuned against the blueprint's own player-height panels, which sit at a
+	# median luminance around 0.11.  Lower than this and the shadowless shell
+	# loses its recesses entirely; higher and the industrial palette washes out.
+	environment.ambient_light_energy = 1.06
 	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	environment.tonemap_mode = Environment.TONE_MAPPER_ACES
-	environment.tonemap_exposure = 1.05
+	environment.tonemap_exposure = 1.0
 	environment.tonemap_white = 6.0
 	environment.glow_enabled = true
-	environment.glow_hdr_threshold = 1.0
-	environment.glow_intensity = 0.85
-	environment.glow_bloom = 0.12
-	environment.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
+	# The threshold sits between the shell's service-lighting energies and the
+	# objective's, so nuclear-lime is the only surface in the map that blooms.
+	# That is the objective's focal dominance: without it every emissive clips to
+	# the same value and nothing tells the player which light is the one that
+	# matters.  Softlight over already-clipped near-white produced no visible
+	# halo at all, so the blend is additive.
+	environment.glow_hdr_threshold = 0.78
+	environment.glow_intensity = 0.62
+	environment.glow_bloom = 0.05
+	environment.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
 	environment.fog_enabled = true
-	environment.fog_light_color = Color("8ba2b8")
-	environment.fog_density = 0.006
-	environment.fog_depth_begin = 20.0
+	environment.fog_light_color = Color("3a3b38")
+	environment.fog_density = 0.003
+	environment.fog_depth_begin = 16.0
+	# Mostly geometry-only.  At its default the fog colour floods the background
+	# and lifts the empty void to the same value as the facility, leaving the disc
+	# with no silhouette; a small amount gives the horizon aerial perspective
+	# without that.  Starting the falloff nearer the camera is what separates
+	# mid-range from far - the map is 120 m across and everything past the middle
+	# used to sit at one depth.
+	environment.fog_sky_affect = 0.18
 	environment.adjustment_enabled = true
-	environment.adjustment_contrast = 1.06
-	environment.adjustment_saturation = 1.03
+	# Left at neutral deliberately.  A 1.12 contrast on top of ACES at this
+	# exposure pushed everything below roughly 0.054 luminance to negative and
+	# clamped it, which crushed a third of every player-height frame to literal
+	# black.  Contrast belongs in the material ladder and the tonemapper, not in
+	# a post adjustment that has no headroom left to work with.
+	environment.adjustment_contrast = 1.0
+	environment.adjustment_saturation = 1.02
 	var world_environment := WorldEnvironment.new()
 	world_environment.environment = environment
 	add_child(world_environment)
 
 	var key := DirectionalLight3D.new()
 	key.rotation_degrees = Vector3(-56, -28, 0)
-	key.light_color = Color("fff3e0")
-	key.light_energy = 0.42
+	# Neutral white rather than warm daylight: the blueprint reserves warm tone
+	# for amber maintenance fixtures, and a warm key was tinting the whole shell.
+	key.light_color = Color("f0efe9")
+	key.light_energy = 0.50
 	key.shadow_enabled = false
 	add_child(key)
 
 	var fill := OmniLight3D.new()
 	fill.position = Vector3(-10, 5, 4)
-	fill.light_color = Color("78a9c7")
-	fill.light_energy = 0.4
+	fill.light_color = Color("9ea88f")
+	fill.light_energy = 0.22
 	fill.omni_range = 24.0
 	fill.shadow_enabled = false
 	add_child(fill)

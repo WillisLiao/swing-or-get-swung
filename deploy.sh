@@ -45,9 +45,15 @@ xcodebuild -project "$XCODE_PROJECT" -scheme "$SCHEME" \
   DEVELOPMENT_TEAM="$TEAM" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE" \
   build
 
-APP=$(find ~/Library/Developer/Xcode/DerivedData -name "${SCHEME}.app" \
-  -path "*/Build/Products/Debug-iphoneos/*" -not -path "*Index.noindex*" \
-  -newermt "-5 minutes" 2>/dev/null | head -1)
+APP=$(
+  find "$HOME/Library/Developer/Xcode/DerivedData" -type d -path "*/Build/Products/Debug-iphoneos/${SCHEME}.app" \
+    -not -path "*Index.noindex*" -print0 2>/dev/null |
+    while IFS= read -r -d '' candidate; do
+      printf '%s\t%s\n' "$(stat -f '%m' "$candidate")" "$candidate"
+    done |
+    sort -nr |
+    sed -n '1s/^[^	]*	//p'
+)
 
 if [[ -z "$APP" ]]; then
   echo "Could not find the built app bundle." >&2

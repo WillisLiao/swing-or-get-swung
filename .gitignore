@@ -13,3 +13,6 @@ addons/godot_ai/
 # Exports / secrets
 export_credentials.cfg
 *.pck
+
+# Blender backups
+*.blend1

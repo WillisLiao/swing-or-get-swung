@@ -48,6 +48,20 @@ uniform float emission_energy : hint_range(0.0, 24.0) = 0.0;
 // the fragment cost of the procedural fallback path.
 uniform bool clean_surface = false;
 
+// Manufactured surface language for the Concourse shell.  The blueprint asks for
+// panel seams, floor plates, grates, hazard striping and modular breaks, and a
+// flat albedo cannot supply any of that - the authored geometry was invisible
+// against its own background at a 1.06:1 luminance ratio.  These patterns are
+// analytic and world-space, so they cost a handful of ALU on top of the clean
+// branch, add no texture memory, no draw calls and no per-frame work.
+//
+// 0 none, 1 floor plates, 2 wall panels, 3 scratched steel trim, 4 grate/vent,
+// 5 hazard striping, 6 light strip, 7 weathered concrete.
+uniform int surface_pattern : hint_range(0, 7) = 0;
+uniform float pattern_scale : hint_range(0.05, 8.0) = 1.0;
+uniform float pattern_strength : hint_range(0.0, 2.0) = 1.0;
+uniform vec4 pattern_accent : source_color = vec4(0.05, 0.05, 0.06, 1.0);
+
 varying vec3 world_position;
 varying vec3 world_normal;
 
@@ -66,6 +80,17 @@ const float OCTAVE_LO = 0.65;
 const float OCTAVE_HI = 3.10;
 const float WEIGHT_LO = 0.62;
 const float WEIGHT_HI = 0.38;
+
+// Directional shading for the shadowless shell.  Deliberately gentle: this is
+// meant to give hard-surface geometry its form back, not to fake a sun.  Values
+// tuned by eye against the live render - stronger and the map reads as though it
+// has a light source it does not have, weaker and boxes go flat again.
+const float HEMISPHERE_SKY = 1.13;
+const float HEMISPHERE_FLOOR = 0.80;
+// Reaches full strength ~1.8 m up, so it grounds walls without dimming anything
+// at head height.
+const float CONTACT_FALLOFF = 0.55;
+const float CONTACT_DARKEN = 0.74;
 
 float hash13(vec3 p) {
 	p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
@@ -112,6 +137,96 @@ float value_noise_d(vec3 p, out vec3 gradient) {
 		+ k7 * u.x * u.y * u.z;
 }
 
+// Distance, in world units, to the nearest border of a `cell`-sized grid.
+// Symmetric about the cell centre, so a corner test written against this gets
+// all four of a cell's corners for the price of one.
+vec2 cell_edge_distance(vec2 uv, vec2 cell) {
+	vec2 p = fract(uv / cell);
+	return min(p, 1.0 - p) * cell;
+}
+
+// Screen-derivative-aware groove mask, so seams stay crisp up close and fade
+// out rather than alias into shimmer across a 120 m floor.
+float seam_mask(float edge_distance, float half_width, float footprint) {
+	return 1.0 - smoothstep(half_width, half_width + footprint + 0.004, edge_distance);
+}
+
+// Manufactured surface detail for the Concourse shell.
+//   x - albedo value multiplier (per-module variation)
+//   y - roughness delta
+//   z - ambient occlusion
+//   w - how much of `pattern_accent` replaces the base colour
+vec4 manufactured_pattern(vec2 uv, float footprint) {
+	vec4 result = vec4(1.0, 0.0, 1.0, 0.0);
+	if (surface_pattern == 1) {
+		// Floor plates: a large plate grid over a finer service grid, with each
+		// plate carrying its own slight value so the ground stops reading as one
+		// unbroken tone across the whole disc.
+		vec2 major = cell_edge_distance(uv, vec2(4.0));
+		vec2 minor = cell_edge_distance(uv, vec2(1.0));
+		float seam = seam_mask(min(major.x, major.y), 0.026, footprint);
+		float service = seam_mask(min(minor.x, minor.y), 0.012, footprint) * 0.26;
+		float plate = hash13(vec3(floor(uv * 0.25), 3.0));
+		result.x = 1.0 + (plate - 0.5) * 0.20;
+		result.w = max(seam * 0.72, service);
+		result.y = seam * 0.18;
+		result.z = 1.0 - seam * 0.42 - service * 0.18;
+	} else if (surface_pattern == 2) {
+		// Wall panels: modular breaks with a bolt at each panel corner.
+		vec2 cell = vec2(2.6, 1.3);
+		vec2 d = cell_edge_distance(uv, cell);
+		float seam = seam_mask(min(d.x, d.y), 0.042, footprint);
+		float bolt = 1.0 - smoothstep(0.030, 0.038 + footprint, length(d - vec2(0.12)));
+		float panel = hash13(vec3(floor(uv / cell), 11.0));
+		result.x = 1.0 + (panel - 0.5) * 0.17;
+		result.w = max(seam, bolt * 0.75);
+		result.y = seam * 0.14 - bolt * 0.10;
+		result.z = 1.0 - seam * 0.55 - bolt * 0.18;
+	} else if (surface_pattern == 3) {
+		// Scratched steel trim: tight plate breaks plus per-plate polish variation.
+		vec2 cell = vec2(0.62, 0.62);
+		vec2 d = cell_edge_distance(uv, cell);
+		float seam = seam_mask(min(d.x, d.y), 0.014, footprint);
+		float plate = hash13(vec3(floor(uv / cell), 23.0));
+		result.x = 1.0 + (plate - 0.5) * 0.24;
+		result.w = seam * 0.7;
+		result.y = (plate - 0.5) * 0.18 + seam * 0.10;
+		result.z = 1.0 - seam * 0.35;
+	} else if (surface_pattern == 4) {
+		// Drain and vent grating: parallel slots broken by cross ribs.
+		float slot = seam_mask(cell_edge_distance(uv, vec2(0.15, 1000.0)).x, 0.045, footprint);
+		float rib = seam_mask(cell_edge_distance(uv, vec2(1000.0, 0.85)).y, 0.055, footprint);
+		float open = clamp(slot - rib, 0.0, 1.0);
+		result.w = open;
+		result.y = open * 0.20;
+		result.z = 1.0 - open * 0.78;
+	} else if (surface_pattern == 5) {
+		// Hazard striping: 45-degree bands, the blueprint's threshold language.
+		float band = fract((uv.x + uv.y) * 1.85);
+		float edge = min(band, 1.0 - band) * 0.54;
+		float dark = 1.0 - smoothstep(0.13, 0.13 + footprint * 0.6 + 0.006, edge);
+		result.w = step(0.5, band) * (1.0 - dark) + dark * 0.5;
+		result.y = 0.06;
+		result.z = 1.0 - result.w * 0.20;
+	} else if (surface_pattern == 6) {
+		// Emissive strip: lit segments separated by dark housings, so a light bar
+		// reads as a fixture rather than as a painted line.
+		float gap = seam_mask(cell_edge_distance(uv, vec2(0.95, 1000.0)).x, 0.055, footprint);
+		result.w = gap;
+		result.z = 1.0 - gap * 0.5;
+	} else if (surface_pattern == 7) {
+		// Weathered concrete: coarse mottle plus chipped edges.
+		vec3 unused_gradient;
+		float mottle = value_noise_d(vec3(uv * 0.42, 0.0), unused_gradient);
+		float chip = smoothstep(0.78, 0.94, value_noise_d(vec3(uv * 2.4, 5.0), unused_gradient));
+		result.x = 0.90 + mottle * 0.22;
+		result.w = chip * 0.55;
+		result.y = 0.10 + mottle * 0.12;
+		result.z = 1.0 - chip * 0.35;
+	}
+	return result;
+}
+
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
@@ -120,14 +235,61 @@ void vertex() {
 void fragment() {
 	vec3 shading_normal = normalize(world_normal);
 	if (clean_surface) {
-		ALBEDO = clamp(albedo.rgb, vec3(0.0), vec3(1.0));
+		vec3 surface_color = albedo.rgb;
+		float surface_roughness = roughness;
+		float occlusion = 1.0;
+		float emission_mask = 1.0;
+		if (surface_pattern > 0) {
+			// Project world position onto the plane the surface most faces.  A
+			// blended triplanar would cost three pattern evaluations; the
+			// Concourse is built entirely from axis-aligned hard surfaces, so a
+			// hard axis pick puts every projection switch on a real geometric
+			// edge where it cannot be seen.
+			vec3 axis = abs(shading_normal);
+			vec2 pattern_uv = world_position.xz;
+			if (axis.y < axis.x || axis.y < axis.z) {
+				pattern_uv = (axis.x >= axis.z) ? world_position.zy : world_position.xy;
+			}
+			pattern_uv *= pattern_scale;
+			float footprint = max(fwidth(pattern_uv.x), fwidth(pattern_uv.y));
+			vec4 pattern = manufactured_pattern(pattern_uv, footprint);
+			surface_color = mix(surface_color * pattern.x, pattern_accent.rgb,
+				clamp(pattern.w * pattern_strength, 0.0, 1.0));
+			surface_roughness = roughness + pattern.y * pattern_strength;
+			occlusion = mix(1.0, pattern.z, pattern_strength);
+			emission_mask = 1.0 - clamp(pattern.w * pattern_strength, 0.0, 1.0);
+
+			// Standing in for the shadows this map is not allowed to cast.
+			// Under a single uniform ambient every face of every box receives
+			// identical light, so a cube reads as a flat silhouette and the eye
+			// gets no cue for depth or for which surface it is looking at.
+			//
+			// Two analytic terms fix that for a handful of mul/adds - no extra
+			// samples, no lights, no shadow maps, nothing per-frame.  A
+			// hemisphere term treats the sky as brighter than the bounce off the
+			// floor, so up-faces catch light and down-faces fall away.  A contact
+			// term darkens the bottom of vertical surfaces toward the floor line,
+			// which is the grounding a contact shadow would otherwise supply.
+			float hemisphere = shading_normal.y * 0.5 + 0.5;
+			float shade = mix(HEMISPHERE_FLOOR, HEMISPHERE_SKY, hemisphere);
+			float uprightness = 1.0 - clamp(shading_normal.y, 0.0, 1.0);
+			float contact = clamp(world_position.y * CONTACT_FALLOFF, 0.0, 1.0);
+			shade *= mix(1.0, mix(CONTACT_DARKEN, 1.0, contact), uprightness);
+			surface_color *= shade;
+			occlusion *= mix(1.0, mix(0.84, 1.0, contact), uprightness);
+		}
+		ALBEDO = clamp(surface_color, vec3(0.0), vec3(1.0));
 		METALLIC = clamp(metallic, 0.0, 1.0);
-		ROUGHNESS = clamp(roughness, 0.04, 1.0);
+		ROUGHNESS = clamp(surface_roughness, 0.04, 1.0);
 		SPECULAR = 0.5;
 		NORMAL = normalize((VIEW_MATRIX * vec4(shading_normal, 0.0)).xyz);
-		AO = 1.0;
-		AO_LIGHT_AFFECT = 0.0;
-		EMISSION = emission_color.rgb * emission_energy;
+		// The map is shadowless and the mobile renderer has no screen-space AO,
+		// so these seams and recesses are the only contact darkening the shell
+		// ever gets.  Leaving AO at 1.0 is what made 11,752 triangles of
+		// authored panel work invisible against their own background.
+		AO = clamp(occlusion, 0.0, 1.0);
+		AO_LIGHT_AFFECT = 0.7;
+		EMISSION = emission_color.rgb * emission_energy * emission_mask;
 	} else {
 
 	// Two octaves of the same isotropic field drive height and normal together,

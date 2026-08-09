@@ -4,19 +4,78 @@ extends Node3D
 ## Runtime-only visual shell for Concourse V2.
 ##
 ## The imported GLB owns presentation geometry only.  Gameplay collision stays
-## in RiftlineMap, and all imported surfaces are rebound to the shared clean
-## NuclearMaterials cache so the authored hard-surface geometry supplies the
-## detail without paying for the procedural noise path.
+## in RiftlineMap, and the GLB's architecture is authored directly from that same
+## 129-solid contract, so every surface the player can collide with is a surface
+## the player can see.
+##
+## Each imported role binds to one blueprint surface family.  The nine families
+## carry a deliberate luminance ladder: the previous shell painted 11,752
+## triangles of authored panel work at a 1.06:1 ratio against their own
+## background, which is why a fully modelled facility rendered as flat grey.
+## The floor sits below the walls, per the blueprint's own material balance
+## guideline - "keep floors darker than walls for clear player silhouette
+## contrast" - so players read against the ground rather than dissolving into it.
+##
+## Emission energies form a deliberate ladder against the environment's glow
+## threshold.  Nuclear-lime is deliberately two roles, not one: the blueprint's
+## lighting sheet separates OBJECTIVE FOCUS from LANDMARK LIGHTING, and while
+## they shared a role the decorative containment inserts bloomed exactly as hard
+## as the reactor and out-massed it inside its own arena.  CORE_Lime alone
+## crosses the glow threshold, so the objective is the single surface in the map
+## that blooms; ACCENT_Lime sits below it and marks vertical access without
+## competing.  Amber service lighting and white lane lighting stay below it too.
+##
+## None of the roles carries a team identity - the facility is neutral by
+## construction, not by mirroring two faction colours.
 
+const SURFACE_NONE := 0
+const SURFACE_FLOOR_PLATE := 1
+const SURFACE_WALL_PANEL := 2
+const SURFACE_SCRATCHED_STEEL := 3
+const SURFACE_GRATE := 4
+const SURFACE_HAZARD := 5
+const SURFACE_LIGHT_STRIP := 6
+const SURFACE_CONCRETE := 7
+
+## albedo, roughness, metallic, emission_color, emission_energy,
+## surface_pattern, pattern_scale, pattern_strength, pattern_accent
 const ENVIRONMENT_MATERIALS := {
-	"CONCRETE_Shell": [Color("737a80"), 0.78, 0.0, Color("000000"), 0.0],
-	"STEEL_Structure": [Color("667078"), 0.34, 0.92, Color("000000"), 0.0],
-	"DARK_Systems": [Color("2b3339"), 0.54, 0.25, Color("000000"), 0.0],
-	"RED_Identity": [Color("b94238"), 0.48, 0.25, Color("000000"), 0.0],
-	"BLUE_Identity": [Color("3e78b7"), 0.48, 0.25, Color("000000"), 0.0],
-	"EMISSIVE_RED_Indicators": [Color("e05245"), 0.34, 0.10, Color("e05245"), 2.8],
-	"EMISSIVE_BLUE_Indicators": [Color("65b7ff"), 0.34, 0.10, Color("65b7ff"), 2.8],
-	"EMISSIVE_NEUTRAL_Core": [Color("ffd36b"), 0.32, 0.10, Color("ffd36b"), 3.8],
+	"FLOOR_Concourse": [
+		Color("3b3c39"), 0.84, 0.08, Color("000000"), 0.0,
+		SURFACE_FLOOR_PLATE, 1.0, 1.0, Color("2a2a26"),
+	],
+	"STRUCT_Gunmetal": [
+		Color("5b5d58"), 0.66, 0.10, Color("000000"), 0.0,
+		SURFACE_WALL_PANEL, 1.0, 1.0, Color("34352f"),
+	],
+	"SYSTEMS_DarkSteel": [
+		Color("34352f"), 0.58, 0.22, Color("000000"), 0.0,
+		SURFACE_SCRATCHED_STEEL, 1.35, 0.70, Color("232419"),
+	],
+	"GRATE_Vent": [
+		Color("393a34"), 0.70, 0.12, Color("000000"), 0.0,
+		SURFACE_GRATE, 1.0, 1.0, Color("17180f"),
+	],
+	"HAZARD_Stripe": [
+		Color("c8871c"), 0.72, 0.10, Color("000000"), 0.0,
+		SURFACE_HAZARD, 1.0, 1.0, Color("15171a"),
+	],
+	"LIGHT_Amber": [
+		Color("d99a2b"), 0.46, 0.05, Color("ffab33"), 1.05,
+		SURFACE_LIGHT_STRIP, 1.0, 1.0, Color("241a0c"),
+	],
+	"LIGHT_White": [
+		Color("9a9890"), 0.42, 0.05, Color("f2f0e8"), 0.70,
+		SURFACE_LIGHT_STRIP, 1.0, 1.0, Color("1c2226"),
+	],
+	"ACCENT_Lime": [
+		Color("7eae16"), 0.44, 0.04, Color("93c81a"), 0.62,
+		SURFACE_SCRATCHED_STEEL, 0.55, 0.55, Color("46600b"),
+	],
+	"CORE_Lime": [
+		Color("9ad414"), 0.40, 0.04, Color("b6ec1e"), 3.30,
+		SURFACE_SCRATCHED_STEEL, 0.55, 0.55, Color("5c7d0e"),
+	],
 }
 
 var _environment_materials: Dictionary = {}
@@ -30,8 +89,13 @@ func _ready() -> void:
 		var metallic: float = recipe[2]
 		var emission_color: Color = recipe[3]
 		var emission_energy: float = recipe[4]
+		var surface_pattern: int = recipe[5]
+		var pattern_scale: float = recipe[6]
+		var pattern_strength: float = recipe[7]
+		var pattern_accent: Color = recipe[8]
 		_environment_materials[mesh_name] = NuclearMaterials.clean_surface(
 			albedo, roughness, metallic, emission_color, emission_energy,
+			surface_pattern, pattern_scale, pattern_strength, pattern_accent,
 		)
 	_bind_geometry(self)
 

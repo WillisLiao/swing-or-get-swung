@@ -1,16 +1,43 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=7 format=3]
 
-[ext_resource type="PackedScene" path="res://assets/maps/concourse_v2_environment.glb" id="1_environment"]
+[ext_resource type="PackedScene" path="res://scenes/concourse_v2_visual.tscn" id="1_environment"]
 [ext_resource type="Script" path="res://scripts/cover_v2_preview.gd" id="2_orbit"]
+[ext_resource type="Shader" path="res://shaders/nuclear_sky.gdshader" id="3_sky"]
+
+; Kept in step with RiftlineArena._build_environment().  This preview exists to
+; judge the shell's art, so grading it differently from the runtime would show a
+; reviewer an image the game never produces.
+[sub_resource type="ShaderMaterial" id="SkyMaterial_concourse_v2_preview"]
+shader = ExtResource("3_sky")
+
+[sub_resource type="Sky" id="Sky_concourse_v2_preview"]
+sky_material = SubResource("SkyMaterial_concourse_v2_preview")
+process_mode = 1
+radiance_size = 2
 
 [sub_resource type="Environment" id="Environment_concourse_v2_preview"]
-background_mode = 1
-background_color = Color(0.055, 0.085, 0.12, 1)
+background_mode = 2
+sky = SubResource("Sky_concourse_v2_preview")
 ambient_light_source = 3
-ambient_light_color = Color(0.86, 0.9, 0.95, 1)
-ambient_light_energy = 1.28
+ambient_light_color = Color(0.71, 0.698, 0.675, 1)
+ambient_light_energy = 1.06
 reflected_light_source = 0
 tonemap_mode = 2
+tonemap_exposure = 1.0
+tonemap_white = 6.0
+glow_enabled = true
+glow_intensity = 0.62
+glow_bloom = 0.05
+glow_blend_mode = 0
+glow_hdr_threshold = 0.78
+fog_enabled = true
+fog_light_color = Color(0.227, 0.231, 0.22, 1)
+fog_sky_affect = 0.18
+fog_density = 0.003
+fog_depth_begin = 16.0
+adjustment_enabled = true
+adjustment_contrast = 1.0
+adjustment_saturation = 1.02
 
 [node name="ConcourseV2ArtPreview" type="Node3D"]
 script = ExtResource("2_orbit")
@@ -19,36 +46,12 @@ script = ExtResource("2_orbit")
 environment = SubResource("Environment_concourse_v2_preview")
 
 [node name="ShadowlessKey" type="DirectionalLight3D" parent="."]
-rotation_degrees = Vector3(-48, -28, 0)
-light_color = Color(1, 0.96, 0.9, 1)
-light_energy = 0.42
+rotation_degrees = Vector3(-56, -28, 0)
+light_color = Color(0.941, 0.937, 0.914, 1)
+light_energy = 0.5
 shadow_enabled = false
 
-[node name="ImportedEnvironment" parent="." instance=ExtResource("1_environment")]
-
-[node name="BLUE_Identity" parent="ImportedEnvironment" index="0"]
-cast_shadow = 0
-
-[node name="CONCRETE_Shell" parent="ImportedEnvironment" index="1"]
-cast_shadow = 0
-
-[node name="DARK_Systems" parent="ImportedEnvironment" index="2"]
-cast_shadow = 0
-
-[node name="EMISSIVE_BLUE_Indicators" parent="ImportedEnvironment" index="3"]
-cast_shadow = 0
-
-[node name="EMISSIVE_NEUTRAL_Core" parent="ImportedEnvironment" index="4"]
-cast_shadow = 0
-
-[node name="EMISSIVE_RED_Indicators" parent="ImportedEnvironment" index="5"]
-cast_shadow = 0
-
-[node name="RED_Identity" parent="ImportedEnvironment" index="6"]
-cast_shadow = 0
-
-[node name="STEEL_Structure" parent="ImportedEnvironment" index="7"]
-cast_shadow = 0
+[node name="EnvironmentShell" parent="." instance=ExtResource("1_environment")]
 
 [node name="CameraRig" type="Node3D" parent="."]
 
@@ -64,4 +67,4 @@ offset_right = 620.0
 offset_bottom = 58.0
 theme_override_colors/font_color = Color(0.9, 0.95, 1, 1)
 theme_override_font_sizes/font_size = 20
-text = "CONCOURSE V2  •  OPTIMIZED ART SHELL  •  HOLD SPACE TO PAUSE ORBIT"
+text = "CONCOURSE V2  •  NEUTRAL INDUSTRIAL SHELL  •  HOLD SPACE TO PAUSE ORBIT"

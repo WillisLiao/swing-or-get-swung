@@ -140,7 +140,10 @@ static func _add_team_structures(solids: Array[Dictionary], team_sign: float, te
 	add_box.call("OverlookFloor", Vector3(27.0, 2.9, 26.0), Vector3(10.0, 0.6, 28.0), false, "steel")
 	add_box.call("OverlookOuterWall", Vector3(32.0, 5.0, 26.0), Vector3(1.2, 3.6, 28.0))
 	add_box.call("OverlookInnerParapetSouth", Vector3(22.0, 3.85, 20.0), Vector3(1.2, 1.3, 4.0))
-	add_box.call("OverlookInnerParapetNorth", Vector3(22.0, 3.85, 35.0), Vector3(1.2, 1.3, 6.0))
+	# Pulled clear of the northern ramp mouth.  At its original 6m extent centred
+	# on v=35 this parapet reached v=38 and walled off 2.25m of that ramp's 4.5m
+	# exit, so a player cresting the climb hit a 1.3m ledge across half the path.
+	add_box.call("OverlookInnerParapetNorth", Vector3(22.0, 3.85, 32.5), Vector3(1.2, 1.3, 5.0))
 	add_box.call("OverlookBaffleInner", Vector3(27.5, 5.0, 20.0), Vector3(9.0, 3.6, 1.2))
 	add_box.call("OverlookBaffleOuter", Vector3(24.5, 5.0, 30.0), Vector3(5.0, 3.6, 1.2))
 
@@ -191,7 +194,12 @@ static func _lane_path(lane: String) -> Array[Vector3]:
 			return [
 				Vector3(5.0, 0.05, 43.0), Vector3(10.0, 0.1, 20.0),
 				Vector3(13.0, 0.1, 14.0), Vector3(22.0, 3.35, 14.0),
-				Vector3(11.4, 3.6, 0.3), CORE_SPAWN,
+				# On the upper connector's centre line, clear of both the sightline
+				# break at its midpoint and the central bridge rails at its low end.
+				# The previous waypoint sat 0.47m past the deck edge, behind a guard
+				# rail, so anything steering to it pushed into the rail rather than
+				# crossing the connector.
+				Vector3(15.4, 3.55, 4.2), CORE_SPAWN,
 			]
 		_:
 			return [
@@ -317,7 +325,7 @@ static func _build_tactical_facts(red_gate: Vector3, blue_gate: Vector3, red_pad
 		"lane_posts": {
 			"maintenance": [Vector3(-28.0, 0.1, 32.0), Vector3(-28.0, 0.1, 20.0), Vector3(-18.0, 0.1, 8.0)],
 			"center": [Vector3(4.0, 0.1, 25.0), Vector3(3.0, 0.1, 14.0), Vector3(2.0, 0.1, 7.0)],
-			"overlook": [Vector3(13.0, 0.1, 14.0), Vector3(22.0, 3.35, 14.0), Vector3(27.0, 3.35, 26.0), Vector3(11.4, 3.6, 0.3)],
+			"overlook": [Vector3(13.0, 0.1, 14.0), Vector3(22.0, 3.35, 14.0), Vector3(27.0, 3.35, 26.0), Vector3(15.4, 3.55, 4.2)],
 		},
 		"base_entrances": {"red": red_gate, "blue": blue_gate},
 		"bridge_sides": [Vector3(-3.0, 3.35, 2.6), Vector3(3.0, 3.35, -2.6)],
@@ -336,7 +344,7 @@ static func _tactical_route_nodes() -> Array[Dictionary]:
 		{"id": "overlook_red_ramp_top_14", "position": Vector3(22.0, 3.35, 14.0), "kind": "ramp_top"},
 		{"id": "overlook_red_ramp_bottom_38", "position": Vector3(13.0, 0.1, 38.0), "kind": "ramp_bottom"},
 		{"id": "overlook_red_ramp_top_38", "position": Vector3(22.0, 3.35, 38.0), "kind": "ramp_top"},
-		{"id": "upper_connector_red", "position": Vector3(11.4, 3.6, 0.3), "kind": "upper_connector"},
+		{"id": "upper_connector_red", "position": Vector3(15.4, 3.55, 4.2), "kind": "upper_connector"},
 		{"id": "bridge_north_side", "position": Vector3(6.0, 3.35, 0.0), "kind": "bridge_side"},
 		{"id": "bridge_south_side", "position": Vector3(-6.0, 3.35, 0.0), "kind": "bridge_side"},
 	]

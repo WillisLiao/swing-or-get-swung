@@ -25,12 +25,17 @@ static func _material_key(
 	normal_strength: float,
 	grime_strength: float,
 	edge_wear: float,
-	ao_strength: float
+	ao_strength: float,
+	surface_pattern: int,
+	pattern_scale: float,
+	pattern_strength: float,
+	pattern_accent: Color
 ) -> String:
-	return "%s|%s|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%s|%.3f" % [
+	return "%s|%s|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%s|%.3f|%d|%.3f|%.3f|%s" % [
 		"clean" if clean_path else "detailed", albedo.to_html(false), roughness, metallic,
 		detail_scale, detail_strength, normal_strength, grime_strength, edge_wear,
 		ao_strength, emission_color.to_html(false), emission_energy,
+		surface_pattern, pattern_scale, pattern_strength, pattern_accent.to_html(false),
 	]
 
 static func _build_material(
@@ -45,18 +50,26 @@ static func _build_material(
 	normal_strength: float,
 	grime_strength: float,
 	edge_wear: float,
-	ao_strength: float
+	ao_strength: float,
+	surface_pattern: int = 0,
+	pattern_scale: float = 1.0,
+	pattern_strength: float = 1.0,
+	pattern_accent: Color = Color(0.05, 0.05, 0.06, 1.0)
 ) -> ShaderMaterial:
 	var key := _material_key(
 		albedo, roughness, metallic, emission_color, emission_energy, clean_path,
 		detail_scale, detail_strength, normal_strength, grime_strength, edge_wear,
-		ao_strength,
+		ao_strength, surface_pattern, pattern_scale, pattern_strength, pattern_accent,
 	)
 	var cached: Variant = _cache.get(key, null)
 	if cached != null:
 		return cached as ShaderMaterial
 	var material := ShaderMaterial.new()
 	material.shader = NUCLEAR_PBR
+	material.set_shader_parameter("surface_pattern", surface_pattern)
+	material.set_shader_parameter("pattern_scale", pattern_scale)
+	material.set_shader_parameter("pattern_strength", pattern_strength)
+	material.set_shader_parameter("pattern_accent", pattern_accent)
 	material.set_shader_parameter("albedo", albedo)
 	material.set_shader_parameter("roughness", roughness)
 	material.set_shader_parameter("metallic", metallic)
@@ -93,17 +106,28 @@ static func surface(
 	)
 
 ## Clean manufactured surface for imported map and character shells.
-## The shader keeps the same PBR response but skips all procedural detail work.
+## The shader keeps the same PBR response but skips the procedural relief path.
+##
+## `surface_pattern` selects an analytic manufactured pattern - floor plates,
+## wall panels, trim, grating, hazard striping, light housings or concrete - so
+## an imported shell reads as built hard surface rather than as flat colour.
+## Leaving it at 0 preserves the original flat behaviour for characters and
+## weapons, whose detail is genuinely authored in geometry.
 static func clean_surface(
 	albedo: Color,
 	roughness: float,
 	metallic: float = 0.0,
 	emission_color: Color = Color(0.0, 0.0, 0.0, 1.0),
-	emission_energy: float = 0.0
+	emission_energy: float = 0.0,
+	surface_pattern: int = 0,
+	pattern_scale: float = 1.0,
+	pattern_strength: float = 1.0,
+	pattern_accent: Color = Color(0.05, 0.05, 0.06, 1.0)
 ) -> ShaderMaterial:
 	return _build_material(
 		albedo, roughness, metallic, emission_color, emission_energy, true,
 		1.6, 0.0, 0.0, 0.0, 0.0, 0.0,
+		surface_pattern, pattern_scale, pattern_strength, pattern_accent,
 	)
 
 ## Poured/precast structural concrete. Coarse relief, no metallic response.
