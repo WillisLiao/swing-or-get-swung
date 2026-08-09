@@ -80,6 +80,64 @@ func _initialize() -> void:
 	assert(impacts.all(func(fact: Dictionary) -> bool: return str(fact.shooter_id) == "human" and str(fact.target_id) == "bot"))
 	assert(impacts.all(func(fact: Dictionary) -> bool: return fact.has("source_position") and is_equal_approx(float(fact.damage), float(rifle_row.damage_near))))
 
+	# Sniper body zones: head and the central upper torso are full-health
+	# one-shots, while an arm or anything below the abdomen keeps the normal
+	# distance-falloff damage and therefore does not eliminate a full-health
+	# target. The suite above already locks swept collision; these cases feed
+	# exact surface points through the same authority impact/damage path so the
+	# anatomical boundary is deterministic rather than dependent on cone RNG.
+	ballistics.clear()
+	impacts.clear()
+	human.global_position = Vector3.ZERO
+	human.rotation = Vector3.ZERO
+	bot.global_position = Vector3(0.0, 0.0, -10.0)
+	bot.health = Duelist.HEALTH
+	bot.eliminated = false
+	bot.collision_layer = 2
+	ballistics._handle_impact(_sniper_projectile(human, 900), {
+		"collider": bot,
+		"position": bot.to_global(Vector3(0.0, 1.50, 0.0)),
+		"normal": Vector3.FORWARD,
+	})
+	assert(bot.eliminated)
+	assert(str(impacts[-1].get("hit_region", "")) == "head")
+	assert(is_equal_approx(float(impacts[-1].damage), Duelist.HEALTH))
+
+	bot.health = Duelist.HEALTH
+	bot.eliminated = false
+	bot.collision_layer = 2
+	ballistics._handle_impact(_sniper_projectile(human, 901), {
+		"collider": bot,
+		"position": bot.to_global(Vector3(0.0, 1.10, 0.0)),
+		"normal": Vector3.FORWARD,
+	})
+	assert(bot.eliminated)
+	assert(str(impacts[-1].get("hit_region", "")) == "torso")
+	assert(is_equal_approx(float(impacts[-1].damage), Duelist.HEALTH))
+
+	bot.health = Duelist.HEALTH
+	bot.eliminated = false
+	bot.collision_layer = 2
+	ballistics._handle_impact(_sniper_projectile(human, 902), {
+		"collider": bot,
+		"position": bot.to_global(Vector3(0.0, 0.60, 0.0)),
+		"normal": Vector3.FORWARD,
+	})
+	assert(not bot.eliminated)
+	assert(str(impacts[-1].get("hit_region", "")) == "limb")
+	assert(is_equal_approx(bot.health, Duelist.HEALTH - float(RiftWeapons.row(RiftWeapons.SNIPER).damage_near)))
+
+	bot.health = Duelist.HEALTH
+	bot.eliminated = false
+	bot.collision_layer = 2
+	ballistics._handle_impact(_sniper_projectile(human, 903), {
+		"collider": bot,
+		"position": bot.to_global(Vector3(0.38, 1.10, 0.0)),
+		"normal": Vector3.FORWARD,
+	})
+	assert(not bot.eliminated)
+	assert(str(impacts[-1].get("hit_region", "")) == "limb")
+
 	# Accepted hip-fire follow-ups widen the cone as bloom accumulates. Each
 	# shot's sampled direction is indexed by a monotonic shot_counter (never
 	# reset, so replay determinism holds across a reconcile) inside a disc
@@ -241,6 +299,25 @@ func _make_duelist(root: Node3D, team: Duelist.Team, actor_id: String, position:
 	root.add_child(duelist)
 	duelist.set_match_active(true)
 	return duelist
+
+func _sniper_projectile(shooter: Duelist, projectile_id: int) -> Dictionary:
+	var row: Dictionary = RiftWeapons.row(RiftWeapons.SNIPER)
+	return {
+		"shooter": shooter,
+		"id": projectile_id,
+		"team": int(shooter.team),
+		"weapon": RiftWeapons.SNIPER,
+		"shot_id": projectile_id,
+		"pellet_index": 0,
+		"pellet_count": 1,
+		"shooter_id": shooter.actor_id,
+		"source_position": shooter.authoritative_eye_origin(),
+		"position": shooter.authoritative_eye_origin(),
+		"damage_near": float(row.damage_near),
+		"damage_far": float(row.damage_far),
+		"falloff_start": float(row.falloff_start),
+		"falloff_end": float(row.falloff_end),
+	}
 
 func _make_solid(root: Node3D, position: Vector3, dimensions: Vector3) -> StaticBody3D:
 	var body := StaticBody3D.new()
