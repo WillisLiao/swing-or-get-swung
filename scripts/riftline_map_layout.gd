@@ -7,7 +7,7 @@ extends RefCounted
 ## node construction stay in RiftlineMap so the same authored data can be
 ## exercised without creating a presentation tree.
 
-const VERSION := 2
+const VERSION := 3
 const CONCOURSE_RADIUS := 60.0
 const CORE_SPAWN := Vector3(0.0, 0.72, 0.0)
 
@@ -93,6 +93,11 @@ static func _add_central_structure(solids: Array[Dictionary]) -> void:
 		solids.append(_solid("CoreLowCover_%s" % ("S" if z_sign < 0.0 else "N"), "box", Vector3(0.0, 0.6, z_sign * 3.2), Vector3(3.0, 1.2, 1.2), 0.0, 0.0, "low_cover", true, true))
 
 	# The bridge is walkable on both sides of its full-height sightline break.
+	# Wide mirrored ramps now connect the arena floor directly to each end.  The
+	# old shell read as climbable from the centre but left a 3.2 m vertical step;
+	# a 9 m run keeps this replacement shallow enough for the player controller.
+	solids.append(_solid("CentralBridgeRamp_W", "ramp", Vector3(-16.5, 0.0, 0.0), Vector3(9.0, 0.2, 4.5), 0.0, 3.2, "steel", false, true))
+	solids.append(_solid("CentralBridgeRamp_E", "ramp", Vector3(16.5, 0.0, 0.0), Vector3(9.0, 0.2, 4.5), PI, 3.2, "steel", false, true))
 	solids.append(_solid("CentralBridgeFloor", "box", Vector3(0.0, 2.9, 0.0), Vector3(24.0, 0.6, 4.0), 0.0, 0.0, "bridge_floor", false, true))
 	for z_sign in [-1.0, 1.0]:
 		solids.append(_solid("CentralBridgeRail_%s" % ("S" if z_sign < 0.0 else "N"), "box", Vector3(0.0, 3.55, z_sign * 1.75), Vector3(24.0, 1.3, 0.5), 0.0, 0.0, "bridge_rail", true, true))
@@ -329,6 +334,12 @@ static func _build_tactical_facts(red_gate: Vector3, blue_gate: Vector3, red_pad
 		},
 		"base_entrances": {"red": red_gate, "blue": blue_gate},
 		"bridge_sides": [Vector3(-3.0, 3.35, 2.6), Vector3(3.0, 3.35, -2.6)],
+		"bridge_access": {
+			"west_bottom": Vector3(-21.0, 0.1, 0.0),
+			"west_top": Vector3(-12.0, 3.35, 0.0),
+			"east_bottom": Vector3(21.0, 0.1, 0.0),
+			"east_top": Vector3(12.0, 3.35, 0.0),
+		},
 		"spawn_pockets": {"red": red_spawns, "blue": blue_spawns},
 		"sightline_tests": [
 			{"from": red_gate, "to": CORE_SPAWN, "must_block": true},
@@ -347,6 +358,10 @@ static func _tactical_route_nodes() -> Array[Dictionary]:
 		{"id": "upper_connector_red", "position": Vector3(15.4, 3.55, 4.2), "kind": "upper_connector"},
 		{"id": "bridge_north_side", "position": Vector3(6.0, 3.35, 0.0), "kind": "bridge_side"},
 		{"id": "bridge_south_side", "position": Vector3(-6.0, 3.35, 0.0), "kind": "bridge_side"},
+		{"id": "bridge_west_ramp_bottom", "position": Vector3(-21.0, 0.1, 0.0), "kind": "ramp_bottom"},
+		{"id": "bridge_west_ramp_top", "position": Vector3(-12.0, 3.35, 0.0), "kind": "ramp_top"},
+		{"id": "bridge_east_ramp_bottom", "position": Vector3(21.0, 0.1, 0.0), "kind": "ramp_bottom"},
+		{"id": "bridge_east_ramp_top", "position": Vector3(12.0, 3.35, 0.0), "kind": "ramp_top"},
 	]
 
 static func _target_range(lane: String) -> Vector2:

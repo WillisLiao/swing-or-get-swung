@@ -17,6 +17,7 @@ func _initialize() -> void:
 	assert(concourse.solid_count() == (layout.solids as Array).size())
 	_assert_team_symmetry(concourse)
 	_assert_spawn_clearance(concourse)
+	await _assert_central_bridge_access(concourse)
 	_assert_routes(concourse)
 	_assert_tactical_facts(concourse)
 	_assert_sightlines(concourse)
@@ -56,6 +57,8 @@ func _assert_layout_contract(layout: Dictionary) -> void:
 			assert(solid.has(key), "solid is missing key: %s" % key)
 		assert(solid.position is Vector3)
 		assert(solid.dimensions is Vector3)
+	_assert_bridge_ramp_record(solids, "CentralBridgeRamp_W", Vector3(-16.5, 0.0, 0.0), 0.0)
+	_assert_bridge_ramp_record(solids, "CentralBridgeRamp_E", Vector3(16.5, 0.0, 0.0), PI)
 
 	var graphs: Dictionary = layout.route_graphs
 	for lane in ["auto", "center", "maintenance", "overlook"]:
@@ -66,6 +69,55 @@ func _assert_layout_contract(layout: Dictionary) -> void:
 		assert(nominal_distance >= target_range.x and nominal_distance <= target_range.y)
 		assert(is_equal_approx(nominal_distance, float(graph.rotated_gate_core_distance)))
 		assert(absf(float(graph.authored_path_length) - nominal_distance) < 8.0)
+
+func _assert_bridge_ramp_record(solids: Array, wanted_name: String, wanted_position: Vector3, wanted_rotation: float) -> void:
+	for solid_variant in solids:
+		var solid: Dictionary = solid_variant
+		if str(solid.name) != wanted_name:
+			continue
+		assert(str(solid.shape) == "ramp")
+		assert((solid.position as Vector3).is_equal_approx(wanted_position))
+		assert((solid.dimensions as Vector3).is_equal_approx(Vector3(9.0, 0.2, 4.5)))
+		assert(is_equal_approx(float(solid.rotation_y), wanted_rotation))
+		assert(is_equal_approx(float(solid.rise), 3.2))
+		assert(not bool(solid.route_blocker))
+		return
+	assert(false, "missing central bridge access ramp: %s" % wanted_name)
+
+func _assert_central_bridge_access(map: RiftlineMap) -> void:
+	for side_variant in [-1.0, 1.0]:
+		var side: float = float(side_variant)
+		var body := CharacterBody3D.new()
+		body.name = "BridgeAccessProbe_%s" % ("W" if side < 0.0 else "E")
+		body.floor_snap_length = 0.45
+		body.floor_max_angle = deg_to_rad(46.0)
+		var collision := CollisionShape3D.new()
+		var capsule := CapsuleShape3D.new()
+		capsule.radius = 0.45
+		capsule.height = 1.8
+		collision.shape = capsule
+		body.add_child(collision)
+		map.add_child(body)
+		body.global_position = Vector3(side * 21.5, 1.05, 0.0)
+		await physics_frame
+		var direction: float = -side
+		for _step in 180:
+			body.velocity.x = direction * 5.0
+			body.velocity.z = 0.0
+			if not body.is_on_floor():
+				body.velocity.y -= 18.0 / 60.0
+			else:
+				body.velocity.y = 0.0
+			body.move_and_slide()
+			await physics_frame
+			if body.global_position.x * side < 12.0 and body.global_position.y > 3.8:
+				break
+		assert(body.global_position.x * side < 12.5,
+			"central bridge ramp did not reach the deck from side %s: %s" % [side, body.global_position])
+		assert(body.global_position.y > 3.8,
+			"central bridge ramp left the player below the deck from side %s: %s" % [side, body.global_position])
+		body.queue_free()
+		await physics_frame
 
 func _assert_team_symmetry(map: RiftlineMap) -> void:
 	var gates := map.gate_positions()
@@ -130,6 +182,11 @@ func _assert_tactical_facts(map: RiftlineMap) -> void:
 		var bridge_side: Vector3 = bridge_side_variant
 		assert(map.is_spawn_clear(bridge_side), "bridge side is inside a solid: %s" % bridge_side)
 		assert(_has_authored_route(map, bridge_side, map.core_spawn_position(), &"overlook"))
+	assert(facts.bridge_access.keys().size() == 4)
+	assert((facts.bridge_access.west_bottom as Vector3).is_equal_approx(Vector3(-21.0, 0.1, 0.0)))
+	assert((facts.bridge_access.west_top as Vector3).is_equal_approx(Vector3(-12.0, 3.35, 0.0)))
+	assert((facts.bridge_access.east_bottom as Vector3).is_equal_approx(Vector3(21.0, 0.1, 0.0)))
+	assert((facts.bridge_access.east_top as Vector3).is_equal_approx(Vector3(12.0, 3.35, 0.0)))
 
 func _assert_sightlines(map: RiftlineMap) -> void:
 	var world := map.get_world_3d()

@@ -26,8 +26,10 @@ const PROJECT_ID := "riftline-lan"
 ## ride these to the host the same way every other combat input does).
 ## v13: Nuclear Rush respawn minimum changed to six seconds and authoritative
 ## non-vest carrier damage restored. No wire fields changed.
+## v14: Concourse layout V3 adds authoritative central-bridge ramp collision.
+## No wire fields changed.
 ## Mismatched builds must refuse to pair rather than silently desync.
-const PROTOCOL_VERSION := 13
+const PROTOCOL_VERSION := 14
 const MODE_LABEL := "nuclear-rush"
 const MAP_LABEL := "concourse"
 const APP_HOST_REMOTE_SLOTS := 7

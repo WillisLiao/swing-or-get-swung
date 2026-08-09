@@ -20,6 +20,12 @@ This repo is protected on `main` - land changes by branch + PR, not a direct pus
 
 ## Current state (2026-08-09)
 
+**Latest - central bridge direct-access redesign, ready for PR:** the elevated centre bridge no longer presents a 3.2 m vertical step to players on the arena floor. Concourse layout V3 adds two mirrored 9.0 m by 4.5 m ramps at the west and east ends, rising 3.2 m over the full run (about 19.6 degrees) with no lip at the deck. The Blender shell adds matching gunmetal wedges, bounded amber edge guides and lime landing bars while preserving the nine-role, one-surface-per-role contract and adding no textures, imported meshes, materials, lights or runtime nodes.
+
+The gameplay contract is now 131 solids / 131 static bodies and the shell is 27,656 imported triangles. `RiftlineNetwork.PROTOCOL_VERSION` is 14 so a layout-V3 client cannot silently predict against an older collision map. The authoritative Blender working source is `art/maps/concourse_v2_access_redesign.blend`; the original Blender-5.2-authored `art/maps/concourse_v2.blend` is deliberately preserved because the connected Blender version is 5.1.1 and warned that overwriting the newer file could lose data.
+
+Validation: clean headless import, all 19 exercises pass, both west/east CharacterBody probes reach the deck, and a live main-scene `Actor_host` using normal `move_forward` input climbed from `(-22.0, 0.1, 0.0)` to `(-8.35, 3.20, 0.52)` without jumping. The windowed game capture showed the wide ramp, edge lighting and landing marker aligned with collision. The 4v4 headless CPU sample remains `frames=120 avg_ms=16.67 min_ms=16.67 max_ms=16.67`. This change adds 88 shell triangles but no surface/draw-call role; no iPhone/iPad launch, thermal, battery or touch-feel test was performed for this change.
+
 **Latest - L4 Concourse blueprint visual correction, accepted, on device, not yet merged:** the authored shell is now generated directly from `RiftlineMapLayout`'s 129 collision solids, so visible geometry and collision cannot disagree.
 The previous build had 129 collision bodies with zero visible meshes, because `RiftlineMap` only builds greybox meshes when the GLB fails to load; every collidable surface was an invisible wall.
 `tools/riftline_map_visual_exercise.gd` now fails the build if any gameplay solid has no authored geometry over it.
