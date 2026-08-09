@@ -30,8 +30,10 @@ const PROJECT_ID := "riftline-lan"
 ## No wire fields changed.
 ## v15: Concourse layout V4 removes the diagonal upper connectors and the
 ## full-width central bridge blocker. No wire fields changed.
+## v16: Concourse layout V5 opens player-width doorways through both teams'
+## overlook-deck baffles. No wire fields changed.
 ## Mismatched builds must refuse to pair rather than silently desync.
-const PROTOCOL_VERSION := 15
+const PROTOCOL_VERSION := 16
 const MODE_LABEL := "nuclear-rush"
 const MAP_LABEL := "concourse"
 const APP_HOST_REMOTE_SLOTS := 7

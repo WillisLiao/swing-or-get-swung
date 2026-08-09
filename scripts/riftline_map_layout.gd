@@ -7,7 +7,7 @@ extends RefCounted
 ## node construction stay in RiftlineMap so the same authored data can be
 ## exercised without creating a presentation tree.
 
-const VERSION := 4
+const VERSION := 5
 const CONCOURSE_RADIUS := 60.0
 const CORE_SPAWN := Vector3(0.0, 0.72, 0.0)
 
@@ -151,8 +151,13 @@ static func _add_team_structures(solids: Array[Dictionary], team_sign: float, te
 	# on v=35 this parapet reached v=38 and walled off 2.25m of that ramp's 4.5m
 	# exit, so a player cresting the climb hit a 1.3m ledge across half the path.
 	add_box.call("OverlookInnerParapetNorth", Vector3(22.0, 3.85, 32.5), Vector3(1.2, 1.3, 5.0))
-	add_box.call("OverlookBaffleInner", Vector3(27.5, 5.0, 20.0), Vector3(9.0, 3.6, 1.2))
-	add_box.call("OverlookBaffleOuter", Vector3(24.5, 5.0, 30.0), Vector3(5.0, 3.6, 1.2))
+	# Paired baffle wings preserve elevated cover while leaving a 4 m doorway
+	# through the centre of the deck.  The former full spans left only a nominal
+	# 1 m edge gap; after the inner parapet and a player capsule were accounted
+	# for, both team passages were physically sealed.
+	for passage_z in [20.0, 30.0]:
+		add_box.call("OverlookBaffle%sInner" % passage_z, Vector3(23.5, 5.0, passage_z), Vector3(3.0, 3.6, 1.2))
+		add_box.call("OverlookBaffle%sOuter" % passage_z, Vector3(30.5, 5.0, passage_z), Vector3(3.0, 3.6, 1.2))
 
 	# The two ramps use local +U as their rise direction and end on the local
 	# overlook deck.  The former diagonal upper connector, its rails, and its
