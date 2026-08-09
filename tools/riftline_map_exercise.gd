@@ -18,6 +18,7 @@ func _initialize() -> void:
 	_assert_team_symmetry(concourse)
 	_assert_spawn_clearance(concourse)
 	await _assert_central_bridge_access(concourse)
+	await _assert_central_bridge_crossing(concourse)
 	_assert_routes(concourse)
 	_assert_tactical_facts(concourse)
 	_assert_sightlines(concourse)
@@ -59,6 +60,17 @@ func _assert_layout_contract(layout: Dictionary) -> void:
 		assert(solid.dimensions is Vector3)
 	_assert_bridge_ramp_record(solids, "CentralBridgeRamp_W", Vector3(-16.5, 0.0, 0.0), 0.0)
 	_assert_bridge_ramp_record(solids, "CentralBridgeRamp_E", Vector3(16.5, 0.0, 0.0), PI)
+	_assert_bridge_support_record(solids, "CoreColumn_W", Vector3(-5.0, 1.3, 0.0))
+	_assert_bridge_support_record(solids, "CoreColumn_E", Vector3(5.0, 1.3, 0.0))
+	for solid_variant in solids:
+		var solid: Dictionary = solid_variant
+		var solid_name := str(solid.name)
+		assert(solid_name != "CentralBridgeSightlineBreak",
+			"the old full-width bridge blocker must be removed")
+		assert(not solid_name.contains("UpperConnector"),
+			"the deleted diagonal upper connector must not have collision: %s" % solid_name)
+		assert(not solid_name.contains("UpperSightlineBreak"),
+			"the deleted diagonal upper connector blocker must not survive: %s" % solid_name)
 
 	var graphs: Dictionary = layout.route_graphs
 	for lane in ["auto", "center", "maintenance", "overlook"]:
@@ -83,6 +95,18 @@ func _assert_bridge_ramp_record(solids: Array, wanted_name: String, wanted_posit
 		assert(not bool(solid.route_blocker))
 		return
 	assert(false, "missing central bridge access ramp: %s" % wanted_name)
+
+func _assert_bridge_support_record(solids: Array, wanted_name: String, wanted_position: Vector3) -> void:
+	for solid_variant in solids:
+		var solid: Dictionary = solid_variant
+		if str(solid.name) != wanted_name:
+			continue
+		assert((solid.position as Vector3).is_equal_approx(wanted_position))
+		assert((solid.dimensions as Vector3).is_equal_approx(Vector3(1.4, 2.6, 1.4)))
+		var top: float = (solid.position as Vector3).y + (solid.dimensions as Vector3).y * 0.5
+		assert(top <= 2.6, "bridge support protrudes through the deck: %s" % wanted_name)
+		return
+	assert(false, "missing bridge support: %s" % wanted_name)
 
 func _assert_central_bridge_access(map: RiftlineMap) -> void:
 	for side_variant in [-1.0, 1.0]:
@@ -118,6 +142,38 @@ func _assert_central_bridge_access(map: RiftlineMap) -> void:
 			"central bridge ramp left the player below the deck from side %s: %s" % [side, body.global_position])
 		body.queue_free()
 		await physics_frame
+
+func _assert_central_bridge_crossing(map: RiftlineMap) -> void:
+	var body := CharacterBody3D.new()
+	body.name = "BridgeThroughRouteProbe"
+	body.floor_snap_length = 0.45
+	body.floor_max_angle = deg_to_rad(46.0)
+	var collision := CollisionShape3D.new()
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.45
+	capsule.height = 1.8
+	collision.shape = capsule
+	body.add_child(collision)
+	map.add_child(body)
+	body.global_position = Vector3(-5.0, 4.1, 0.0)
+	await physics_frame
+	for _step in 300:
+		body.velocity.x = 5.0
+		body.velocity.z = 0.0
+		if not body.is_on_floor():
+			body.velocity.y -= 18.0 / 60.0
+		else:
+			body.velocity.y = 0.0
+		body.move_and_slide()
+		await physics_frame
+		if body.global_position.x > 4.5:
+			break
+	assert(body.global_position.x > 4.5,
+		"central bridge still blocks the open through route: %s" % body.global_position)
+	assert(body.global_position.y > 3.8,
+		"central bridge crossing dropped the player below the deck: %s" % body.global_position)
+	body.queue_free()
+	await physics_frame
 
 func _assert_team_symmetry(map: RiftlineMap) -> void:
 	var gates := map.gate_positions()
