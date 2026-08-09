@@ -28,6 +28,10 @@ signal damaged(amount: float, remaining: float, attacker_id: String, source_posi
 
 enum Team { RED, BLUE }
 enum Stance { STAND, CROUCH, PRONE }
+## Authority-side body zones are derived from the same stance-scaled capsule
+## that receives projectile impacts. This keeps the hit test deterministic and
+## adds no extra Area3D nodes or per-frame collision work on mobile.
+enum HitRegion { HEAD, TORSO, LIMB }
 ## Five real-world archetypes. Ordinals line up 1:1 with RiftWeapons' RIFLE/
 ## SMG/SHOTGUN/PISTOL/SNIPER int constants - do not reorder one without the
 ## other. There is no dedicated melee weapon: melee always swings whichever
@@ -39,6 +43,9 @@ enum Weapon { RIFLE, SMG, SHOTGUN, PISTOL, SNIPER }
 enum PlayerClass { FRONTLINE, SNIPER, RUNNER, SHIELD }
 
 const HEALTH := 100.0
+const HEAD_MIN_HEIGHT_RATIO := 0.76
+const TORSO_MIN_HEIGHT_RATIO := 0.45
+const TORSO_HALF_WIDTH_RATIO := 0.68
 const WALK_SPEED := 7.2
 const DEFAULT_HORIZONTAL_FOV := 80.0
 const MIN_HORIZONTAL_FOV := 70.0
@@ -1009,6 +1016,31 @@ func toggle_crouch() -> void:
 
 func toggle_prone() -> void:
 	set_stance(Stance.STAND if stance == Stance.PRONE else Stance.PRONE)
+
+## Classify the surface point returned by the authoritative projectile sweep.
+## Height is normalized against the active standing/crouch/prone capsule, so
+## the same anatomical rule follows every stance. The narrow central band is
+## upper torso; side hits at the same height read as arms, and anything below
+## the abdomen reads as a limb/lower-body hit.
+func hit_region_at(world_position: Vector3) -> HitRegion:
+	var local_hit: Vector3 = to_local(world_position)
+	var body_height: float = _capsule.height if _capsule != null else 1.8
+	var body_radius: float = _capsule.radius if _capsule != null else 0.48
+	var height_ratio: float = clampf(local_hit.y / maxf(body_height, 0.001), 0.0, 1.0)
+	if height_ratio >= HEAD_MIN_HEIGHT_RATIO:
+		return HitRegion.HEAD
+	if height_ratio >= TORSO_MIN_HEIGHT_RATIO and absf(local_hit.x) <= body_radius * TORSO_HALF_WIDTH_RATIO:
+		return HitRegion.TORSO
+	return HitRegion.LIMB
+
+static func hit_region_name(region: int) -> String:
+	match region:
+		HitRegion.HEAD:
+			return "head"
+		HitRegion.TORSO:
+			return "torso"
+		_:
+			return "limb"
 
 func set_combat_pose(aiming: bool, delta: float) -> void:
 	if eliminated:

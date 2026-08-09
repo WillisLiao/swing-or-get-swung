@@ -183,12 +183,16 @@ func _handle_impact(projectile: Dictionary, hit: Dictionary) -> void:
 	var collider: Object = hit.get("collider", null)
 	var hit_duelist := false
 	var target_id := ""
+	var hit_region := ""
 	var source_position: Vector3 = projectile.get("source_position", projectile.get("position", Vector3.ZERO))
 	var impact_position: Vector3 = hit.get("position", projectile.position)
 	var damage := _damage_for_distance(projectile, source_position.distance_to(impact_position))
 	if collider is Duelist and collider != shooter and not collider.eliminated and collider.match_active and collider.team != shooter.team:
 		hit_duelist = true
 		target_id = collider.actor_id
+		var hit_region_id: int = collider.hit_region_at(impact_position)
+		hit_region = Duelist.hit_region_name(hit_region_id)
+		damage = _damage_for_hit_region(projectile, damage, hit_region_id)
 		collider.take_damage(damage, shooter)
 	projectile_impacted.emit({
 		"type": "projectile_impacted",
@@ -201,6 +205,7 @@ func _handle_impact(projectile: Dictionary, hit: Dictionary) -> void:
 		"pellet_count": int(projectile.get("pellet_count", 1)),
 		"shooter_id": str(projectile.get("shooter_id", "")),
 		"target_id": target_id,
+		"hit_region": hit_region,
 		"source_position": source_position,
 		"damage": damage if hit_duelist else 0.0,
 		"position": impact_position,
@@ -208,6 +213,16 @@ func _handle_impact(projectile: Dictionary, hit: Dictionary) -> void:
 		"hit_duelist": hit_duelist,
 		"obstructed": false,
 	})
+
+## The Longview fulfils the deliberate one-shot fantasy only on the head and
+## central upper torso. Arms, legs, and the lower abdomen keep the weapon's
+## existing 90-to-70 distance falloff, so a full-health target survives those
+## less precise hits. Shield blocking remains inside Duelist.take_damage().
+func _damage_for_hit_region(projectile: Dictionary, base_damage: float, hit_region: int) -> float:
+	if int(projectile.get("weapon", RiftWeapons.RIFLE)) == RiftWeapons.SNIPER \
+			and hit_region in [Duelist.HitRegion.HEAD, Duelist.HitRegion.TORSO]:
+		return maxf(base_damage, Duelist.HEALTH)
+	return base_damage
 
 ## Linear falloff from the close-range plate to the floor damage, so a shot
 ## that connects always does meaningful work - it never silently no-ops. Each
