@@ -7,7 +7,7 @@ extends RefCounted
 ## node construction stay in RiftlineMap so the same authored data can be
 ## exercised without creating a presentation tree.
 
-const VERSION := 2
+const VERSION := 5
 const CONCOURSE_RADIUS := 60.0
 const CORE_SPAWN := Vector3(0.0, 0.72, 0.0)
 
@@ -88,15 +88,22 @@ static func _add_central_structure(solids: Array[Dictionary]) -> void:
 	solids.append(_solid("NorthBaffle", "box", Vector3(-3.0, 2.0, 6.0), Vector3(8.0, 4.0, 1.2), 0.0, 0.0, "central_baffle", true, true))
 	solids.append(_solid("SouthBaffle", "box", Vector3(3.0, 2.0, -6.0), Vector3(8.0, 4.0, 1.2), 0.0, 0.0, "central_baffle", true, true))
 	for x_sign in [-1.0, 1.0]:
-		solids.append(_solid("CoreColumn_%s" % ("W" if x_sign < 0.0 else "E"), "box", Vector3(x_sign * 5.0, 2.0, 0.0), Vector3(1.4, 4.0, 1.4), 0.0, 0.0, "central_column", true, true))
+		# Structural support ends at the bridge underside (y=2.6).  The former
+		# 4 m column projected through the deck and left less than one player
+		# width beside each rail, silently blocking the through route.
+		solids.append(_solid("CoreColumn_%s" % ("W" if x_sign < 0.0 else "E"), "box", Vector3(x_sign * 5.0, 1.3, 0.0), Vector3(1.4, 2.6, 1.4), 0.0, 0.0, "central_column", true, true))
 	for z_sign in [-1.0, 1.0]:
 		solids.append(_solid("CoreLowCover_%s" % ("S" if z_sign < 0.0 else "N"), "box", Vector3(0.0, 0.6, z_sign * 3.2), Vector3(3.0, 1.2, 1.2), 0.0, 0.0, "low_cover", true, true))
 
 	# The bridge is walkable on both sides of its full-height sightline break.
+	# Wide mirrored ramps now connect the arena floor directly to each end.  The
+	# old shell read as climbable from the centre but left a 3.2 m vertical step;
+	# a 9 m run keeps this replacement shallow enough for the player controller.
+	solids.append(_solid("CentralBridgeRamp_W", "ramp", Vector3(-16.5, 0.0, 0.0), Vector3(9.0, 0.2, 4.5), 0.0, 3.2, "steel", false, true))
+	solids.append(_solid("CentralBridgeRamp_E", "ramp", Vector3(16.5, 0.0, 0.0), Vector3(9.0, 0.2, 4.5), PI, 3.2, "steel", false, true))
 	solids.append(_solid("CentralBridgeFloor", "box", Vector3(0.0, 2.9, 0.0), Vector3(24.0, 0.6, 4.0), 0.0, 0.0, "bridge_floor", false, true))
 	for z_sign in [-1.0, 1.0]:
 		solids.append(_solid("CentralBridgeRail_%s" % ("S" if z_sign < 0.0 else "N"), "box", Vector3(0.0, 3.55, z_sign * 1.75), Vector3(24.0, 1.3, 0.5), 0.0, 0.0, "bridge_rail", true, true))
-	solids.append(_solid("CentralBridgeSightlineBreak", "box", Vector3(0.0, 5.0, 0.0), Vector3(1.2, 3.6, 4.0), 0.0, 0.0, "bridge_blocker", true, true))
 
 static func _add_team_structures(solids: Array[Dictionary], team_sign: float, team_name: String) -> void:
 	var accent_role := team_name + "_accent"
@@ -144,24 +151,21 @@ static func _add_team_structures(solids: Array[Dictionary], team_sign: float, te
 	# on v=35 this parapet reached v=38 and walled off 2.25m of that ramp's 4.5m
 	# exit, so a player cresting the climb hit a 1.3m ledge across half the path.
 	add_box.call("OverlookInnerParapetNorth", Vector3(22.0, 3.85, 32.5), Vector3(1.2, 1.3, 5.0))
-	add_box.call("OverlookBaffleInner", Vector3(27.5, 5.0, 20.0), Vector3(9.0, 3.6, 1.2))
-	add_box.call("OverlookBaffleOuter", Vector3(24.5, 5.0, 30.0), Vector3(5.0, 3.6, 1.2))
+	# Paired baffle wings preserve elevated cover while leaving a 4 m doorway
+	# through the centre of the deck.  The former full spans left only a nominal
+	# 1 m edge gap; after the inner parapet and a player capsule were accounted
+	# for, both team passages were physically sealed.
+	for passage_z in [20.0, 30.0]:
+		add_box.call("OverlookBaffle%sInner" % passage_z, Vector3(23.5, 5.0, passage_z), Vector3(3.0, 3.6, 1.2))
+		add_box.call("OverlookBaffle%sOuter" % passage_z, Vector3(30.5, 5.0, passage_z), Vector3(3.0, 3.6, 1.2))
 
-	# The two ramps use local +U as their rise direction.  The connector is a
-	# short upper route with rails and a partial full-height sightline break.
+	# The two ramps use local +U as their rise direction and end on the local
+	# overlook deck.  The former diagonal upper connector, its rails, and its
+	# blocker were removed so the new straight central bridge owns the only
+	# through route above the arena floor.
 	for v_value in [14.0, 38.0]:
 		var ramp_position := _team_position(team_sign, Vector3(17.5, 0.0, v_value))
 		solids.append(_solid(team_prefix + "OverlookRamp%s" % v_value, "ramp", ramp_position, Vector3(9.0, 0.2, 4.5), PI if team_sign < 0.0 else 0.0, 3.2, "steel", false, true))
-	var connector_center := Vector3(11.0, 3.2, 3.0)
-	var connector_rotation := atan2(6.0, -22.0)
-	var connector_dimensions := Vector3(22.8, 0.6, 4.5)
-	add_box.call("UpperConnector", connector_center, connector_dimensions, false, "steel")
-	# Replace the axis-aligned placeholder above with a rotated connector record.
-	solids.pop_back()
-	solids.append(_solid(team_prefix + "UpperConnector", "box", _team_position(team_sign, connector_center), connector_dimensions, connector_rotation + (PI if team_sign < 0.0 else 0.0), 0.0, "steel", false, true))
-	for z_offset in [-2.0, 2.0]:
-		solids.append(_solid(team_prefix + "UpperConnectorRail%s" % z_offset, "box", _team_position(team_sign, connector_center + Vector3(0.0, 0.7, z_offset)), Vector3(22.8, 1.3, 0.35), connector_rotation + (PI if team_sign < 0.0 else 0.0), 0.0, "steel", true, true))
-	solids.append(_solid(team_prefix + "UpperSightlineBreak", "box", _team_position(team_sign, connector_center + Vector3(0.0, 1.8, 0.0)), Vector3(1.2, 3.6, 1.6), connector_rotation + (PI if team_sign < 0.0 else 0.0), 0.0, accent_role, true, true))
 
 static func _solid(name: String, shape: String, position: Vector3, dimensions: Vector3, rotation_y: float, rise: float, material_role: String, route_blocker: bool, casts_shadow: bool) -> Dictionary:
 	return {
@@ -192,14 +196,10 @@ static func _lane_path(lane: String) -> Array[Vector3]:
 			]
 		"overlook":
 			return [
-				Vector3(5.0, 0.05, 43.0), Vector3(10.0, 0.1, 20.0),
-				Vector3(13.0, 0.1, 14.0), Vector3(22.0, 3.35, 14.0),
-				# On the upper connector's centre line, clear of both the sightline
-				# break at its midpoint and the central bridge rails at its low end.
-				# The previous waypoint sat 0.47m past the deck edge, behind a guard
-				# rail, so anything steering to it pushed into the rail rather than
-				# crossing the connector.
-				Vector3(15.4, 3.55, 4.2), CORE_SPAWN,
+				Vector3(5.0, 0.05, 43.0), Vector3(12.0, 0.1, 32.0),
+				Vector3(18.0, 0.1, 22.0), Vector3(18.0, 0.1, 10.0),
+				Vector3(18.0, 0.1, 4.0), Vector3(6.0, 0.1, 3.0),
+				CORE_SPAWN,
 			]
 		_:
 			return [
@@ -325,10 +325,16 @@ static func _build_tactical_facts(red_gate: Vector3, blue_gate: Vector3, red_pad
 		"lane_posts": {
 			"maintenance": [Vector3(-28.0, 0.1, 32.0), Vector3(-28.0, 0.1, 20.0), Vector3(-18.0, 0.1, 8.0)],
 			"center": [Vector3(4.0, 0.1, 25.0), Vector3(3.0, 0.1, 14.0), Vector3(2.0, 0.1, 7.0)],
-			"overlook": [Vector3(13.0, 0.1, 14.0), Vector3(22.0, 3.35, 14.0), Vector3(27.0, 3.35, 26.0), Vector3(15.4, 3.55, 4.2)],
+			"overlook": [Vector3(18.0, 0.1, 22.0), Vector3(18.0, 0.1, 10.0), Vector3(18.0, 0.1, 4.0)],
 		},
 		"base_entrances": {"red": red_gate, "blue": blue_gate},
-		"bridge_sides": [Vector3(-3.0, 3.35, 2.6), Vector3(3.0, 3.35, -2.6)],
+		"bridge_sides": [Vector3(-6.0, 3.35, 0.0), Vector3(6.0, 3.35, 0.0)],
+		"bridge_access": {
+			"west_bottom": Vector3(-21.0, 0.1, 0.0),
+			"west_top": Vector3(-12.0, 3.35, 0.0),
+			"east_bottom": Vector3(21.0, 0.1, 0.0),
+			"east_top": Vector3(12.0, 3.35, 0.0),
+		},
 		"spawn_pockets": {"red": red_spawns, "blue": blue_spawns},
 		"sightline_tests": [
 			{"from": red_gate, "to": CORE_SPAWN, "must_block": true},
@@ -344,9 +350,12 @@ static func _tactical_route_nodes() -> Array[Dictionary]:
 		{"id": "overlook_red_ramp_top_14", "position": Vector3(22.0, 3.35, 14.0), "kind": "ramp_top"},
 		{"id": "overlook_red_ramp_bottom_38", "position": Vector3(13.0, 0.1, 38.0), "kind": "ramp_bottom"},
 		{"id": "overlook_red_ramp_top_38", "position": Vector3(22.0, 3.35, 38.0), "kind": "ramp_top"},
-		{"id": "upper_connector_red", "position": Vector3(15.4, 3.55, 4.2), "kind": "upper_connector"},
 		{"id": "bridge_north_side", "position": Vector3(6.0, 3.35, 0.0), "kind": "bridge_side"},
 		{"id": "bridge_south_side", "position": Vector3(-6.0, 3.35, 0.0), "kind": "bridge_side"},
+		{"id": "bridge_west_ramp_bottom", "position": Vector3(-21.0, 0.1, 0.0), "kind": "ramp_bottom"},
+		{"id": "bridge_west_ramp_top", "position": Vector3(-12.0, 3.35, 0.0), "kind": "ramp_top"},
+		{"id": "bridge_east_ramp_bottom", "position": Vector3(21.0, 0.1, 0.0), "kind": "ramp_bottom"},
+		{"id": "bridge_east_ramp_top", "position": Vector3(12.0, 3.35, 0.0), "kind": "ramp_top"},
 	]
 
 static func _target_range(lane: String) -> Vector2:
