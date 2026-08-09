@@ -10,7 +10,7 @@ extends SceneTree
 const EXPECTED_UNIFORMS := [
 	"albedo", "metallic", "roughness", "detail_scale", "detail_strength",
 	"normal_strength", "grime_strength", "edge_wear", "ao_strength",
-	"emission_color", "emission_energy",
+	"emission_color", "emission_energy", "clean_surface",
 ]
 
 func _initialize() -> void:
@@ -58,6 +58,19 @@ func _initialize() -> void:
 	var rougher := NuclearMaterials.concrete(Color("6b6f72"), 0.71)
 	assert(rougher != first)
 	assert(NuclearMaterials.cached_variant_count() == presets.size() + 1)
+
+	# Imported Concourse shells use the clean path: it keeps authored PBR
+	# response but exits before procedural relief, grime, dust, and AO work.
+	var clean := NuclearMaterials.clean_surface(Color("737a80"), 0.78, 0.0)
+	var clean_again := NuclearMaterials.clean_surface(Color("737a80"), 0.78, 0.0)
+	assert(clean == clean_again)
+	assert(bool(clean.get_shader_parameter("clean_surface")))
+	assert(clean.get_shader_parameter("detail_strength") == 0.0)
+	assert(clean.get_shader_parameter("grime_strength") == 0.0)
+	assert(clean.get_shader_parameter("edge_wear") == 0.0)
+	assert(clean.get_shader_parameter("ao_strength") == 0.0)
+	assert(NuclearMaterials.cached_variant_count() == presets.size() + 2)
+	assert(clean != first)
 
 	print("Nuclear materials exercise: PASS")
 	quit()

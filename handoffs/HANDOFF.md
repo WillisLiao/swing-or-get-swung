@@ -18,7 +18,120 @@ This repo is protected on `main` - land changes by branch + PR, not a direct pus
 
 **As of 2026-08-07, `IOSapp` is a direct clone of this repo, at its root - there is no longer a separate `IOSapp/Riftline/` working copy.** That two-tree setup (this repo plus a working copy on a different remote, manually kept "identical" - which it in fact was not; see the sessions below for exactly how they'd diverged) was retired at the user's request specifically because of that silent drift. If you're reading this from `IOSapp` and it still looks like it has a `Riftline/` subfolder or an `X-in-a-bottle` remote, something regressed - it shouldn't.
 
-## Current state (2026-08-08)
+## Current state (2026-08-09)
+
+**Latest - L4 Concourse blueprint visual correction, accepted, on device, not yet merged:** the authored shell is now generated directly from `RiftlineMapLayout`'s 129 collision solids, so visible geometry and collision cannot disagree.
+The previous build had 129 collision bodies with zero visible meshes, because `RiftlineMap` only builds greybox meshes when the GLB fails to load; every collidable surface was an invisible wall.
+`tools/riftline_map_visual_exercise.gd` now fails the build if any gameplay solid has no authored geometry over it.
+
+The second root cause was material: the old shell painted 11,752 of its 18,484 triangles of authored panel work at a **1.06:1** luminance ratio against their own background, and `clean_surface` hard-set `AO = 1.0`, so a fully modelled facility rendered as flat grey.
+`shaders/nuclear_pbr.gdshader` gained an analytic pattern set (floor plates, wall panels with bolts, scratched steel, grate slots, hazard striping, light housings, concrete), restored material AO, and hemisphere plus contact-darkening terms that give geometry its form back without shadows.
+`shaders/nuclear_sky.gdshader` is a new analytic night sky - stars, one galactic band, warm horizon lift, no green.
+
+The shell carries **nine** roles, not eight: the blueprint's lighting sheet separates OBJECTIVE FOCUS lime from LANDMARK LIGHTING lime, and one shared role let decorative inserts out-mass the reactor inside its own arena.
+
+Collision fixes: `OverlookInnerParapetNorth` walled off 2.25m of a 4.5m ramp exit; the `overlook` waypoint sat 0.47m off the connector behind a rail; the outer-wall plinth kerb protruded 0.64m past collision. Solid count stays 129.
+
+**Measurement correction - read this before trusting older numbers.** `editor_manage(monitors_get)` reports the *editor* process, not the running game; hiding the entire map shell does not move its reading. The 320/327/328 draw-call figures recorded in earlier sessions were never measuring the game. Measured inside the running game by toggling shell visibility: **the map shell costs 9 draw calls and 27,568 primitives, and a player-height pose totals 219 draw calls** against the 320 target. The earlier "renderer budget failure" was an artefact.
+
+Validation: headless import clean, all 19 exercises pass, 129 solids / 129 static bodies, shell 9 meshes with 0 shadow casters and 0 colliders, mobile renderer, both lights shadowless, headless CPU `frames=120 avg_ms=16.67 min_ms=16.67 max_ms=16.67`, live traversal to the upper deck on all four ramps.
+Five bounded read-only visual reviews ran (the `frontend-visual-reviewer` at Opus stood in for Sol and Terra, which are not agent types in this harness); the preflight was FAIL on all fourteen criteria and acceptance was withheld four times before returning PASS.
+Deployed, launched and process-verified on the paired iPad. No human visual, thermal, battery or long-session confirmation is claimed, and headless never measures GPU cost.
+
+Open and deliberately not actioned: signage and facility numbering are sparse; accent-lime inserts are solid slabs where the trim sheet shows dashed; the open-topped disc leaves a dark upper frame at player height, which needs a product decision.
+
+**Latest - upper-route and blueprint fidelity correction remains a candidate:** the ramp collision wedge now rises along local +X, matching the route markers and the visible Blender ramps, so the player can traverse from the lower approach to the overlook deck without changing the 129-solid collision contract.
+The final live traversal reached `Vector3(30.92, 3.20, 14.0)` from `Vector3(10.0, 0.04, 14.0)` in the main scene.
+The authored shell now uses neutral gunmetal, dark tactical floor, amber maintenance guidance, and lime objective or vertical-access accents, with no persistent red or blue environment identity.
+The Blender source and GLB include bounded non-colliding ramp edge guides, lime landing posts, a reactor plinth and cage, portal frames, cover caps, and four large `03` bay signs.
+The current GLB contract is exactly 8 role meshes, one surface per role, 18,484 imported triangles, and the expected bounds remain enforced by `tools/riftline_map_visual_exercise.gd`.
+The frozen layout exercise still reports 129 solids.
+All `tools/*_exercise.gd` scripts pass after the latest GLB import and the headless import check passes.
+The headless CPU sample remains `frames=120 avg_ms=16.67 min_ms=16.67 max_ms=16.67`.
+Live Godot MCP reports the mobile renderer, 327 draw calls, 29,234 primitives, 145 FPS, approximately `0.002398` seconds process time, and approximately `0.000048` seconds physics time.
+All eight imported role meshes report `cast_shadow=0`.
+The current live draw-call reading is above the recorded 320-call budget target, so performance signoff is not claimed.
+Sol Medium recommended the material, palette, ramp, lighting, signage, and bounded detail recipe that drove these changes.
+The final Terra High review still returned `FAIL` or `PARTIAL`, with the remaining problems concentrated in player-height corridor identity, cover silhouette variation, base/transit readability, signage visibility, and ramp destination readability.
+There is no reported conflict with frozen collision, routes, scale, shadowless rendering, or mobile constraints.
+L4 remains not accepted, no commit was created, and the latest candidate has now been redeployed to the iPad.
+
+The deployment used the explicit iPad UDID `78C9B3A4-2E79-5827-A287-5F09C7E29ACA` because the script's no-argument device discovery is iPhone-only.
+The corrected export and Xcode build succeeded, the app installed at `file:///private/var/containers/Bundle/Application/E6939E92-573E-4BF6-B386-45BD1D3C60D2/SOGS.app/`, and `xcrun devicectl device process launch` started `com.lull.riftline`.
+`xcrun devicectl device info processes` verified the running `SOGS` binary at PID `2701`.
+This confirms installation and process launch only; no human visual, performance, thermal, or battery confirmation on the iPad is claimed.
+
+**Latest - explicit new-map iOS deployment correction, installed and launched:** on 2026-08-09, `RiftlineMap` was changed to preload `res://scenes/concourse_v2_visual.tscn` for presentation builds so the authored Concourse shell cannot silently fall back to the old procedural map during device startup.
+The deployment script now selects the newest exact `SOGS.app` output by modification time instead of relying on a five-minute filesystem filter and `head -1`.
+The headless import check passed, the Concourse V2 visual exercise passed, and live Godot MCP main-scene inspection found `RiftlineMap/ConcourseV2Visual/ImportedEnvironment` with the authored shell present.
+The corrected iOS export and Xcode build succeeded, producing a 29,123,244-byte `SOGS.pck` with the current map asset scan included.
+The first install attempt failed because the device disconnected immediately after CoreDevice connected, but the corrected package was subsequently installed successfully at `file:///private/var/containers/Bundle/Application/B9ECCB95-AAD6-44F8-9F6D-337F8D96F6B9/SOGS.app/`.
+The app launched successfully as `com.lull.riftline`, and `devicectl device info processes` verified the running binary at PID `2666`.
+The map has not yet received a human visual confirmation on the iPad, and no on-device performance or thermal result is claimed.
+L4 remains not accepted and no commit was created.
+
+**Latest - L4 blueprint-authoritative Concourse visual shell candidate, not accepted:** the user clarified that the visual layout may diverge from the old original map and must follow the supplied blueprint composition, textures, and style language while retaining no persistent red or blue faction coloring.
+The current visual shell is a loadable candidate, not an L4 completion, because the latest read-only Terra review returned `NOT FAITHFUL`.
+The macro layout now reads as a circular facility with eight radial lane plates, a top-down concentric raised ring, repeated cover clusters, four heavy neutral gateways, larger neutral numeral plates, outer modular ribs, and a tall open reactor cage.
+The remaining Terra failures are fixable visual deficiencies in cover silhouette variation, gateway landmark weight, geometric panel/trim/grate/conduit language, amber maintenance hierarchy, and player-height ring readability, not frozen collision or route conflicts.
+The frozen 129-solid gameplay collision and routes were not changed.
+The latest sources are [concourse_v2.blend](/Users/willis/Documents/IOSapp/art/maps/concourse_v2.blend), [concourse_v2_environment.glb](/Users/willis/Documents/IOSapp/assets/maps/concourse_v2_environment.glb), [concourse_v2_visual.gd](/Users/willis/Documents/IOSapp/scripts/concourse_v2_visual.gd), and [L4-BLUEPRINT-EVIDENCE-2026-08-08.md](/Users/willis/Documents/IOSapp/handoffs/L4-BLUEPRINT-EVIDENCE-2026-08-08.md).
+Blender MCP confirms exactly 8 mesh objects, 0 non-mesh objects, one surface per role, and 15,364 triangles.
+The GLB is 834,204 bytes, the imported bounds are `AABB(Vector3(-60.0,-1.0,-60.0), Vector3(120.0,8.2,120.0))`, and the six runtime material variants remain clean, neutral, shadowless, texture-free, and no-grime.
+The latest Godot MCP live capture run is `r22959500-38`, with oblique overview, top-down overview, four cardinal player-height views, center player view, and elevated view recorded in the evidence manifest.
+Fresh headless import passed, all 19 exercise scripts passed, and the CPU sample remained `frames=120 avg_ms=16.67 min_ms=16.67 max_ms=16.67`.
+Live Godot MCP monitors report 328 draw calls and 24,917 primitives at 145 FPS, so the 320 draw-call ceiling remains an unresolved renderer-budget failure.
+No on-device thermal, battery, GPU, or long-session verification was performed.
+Do not commit or report L4 complete until Terra accepts the blueprint fidelity and the draw-call budget is reconciled.
+
+**Latest - L3 Concourse V2 visual integration and performance verification:** the shipping presentation now instantiates exactly one `ConcourseV2Visual` wrapper over the frozen 129-solid gameplay collision, and procedural greybox meshes are suppressed whenever the imported GLB wrapper loads successfully.
+`scripts/concourse_v2_visual.gd` binds all eight authoritative mesh prefixes to cached `NuclearMaterials.clean_surface` variants, rejects unknown prefixes, and forces every imported `GeometryInstance3D` to `SHADOW_CASTING_SETTING_OFF` without any per-frame callback.
+`NuclearMaterials.clean_surface` uses the existing `nuclear_pbr` shader with a cache-keyed clean branch that preserves albedo, metallic, roughness, specular, and emission while skipping relief noise, grime, dust, and material AO work.
+The arena now uses bright uniform color ambient as the dominant diffuse source, retains the sky for reflection, and explicitly disables shadows on its directional and omni lights.
+The procedural map path also ignores legacy `casts_shadow` values at runtime and forces every map mesh shadowless.
+The final visual exercise covers the exact wrapper root and asset child, all eight prefixes, 14,020 imported triangles, eight one-surface meshes, cached material reuse, clean-path parameters, no collision/camera/light/environment nodes, no frame callbacks, and shadowless uniform lighting.
+The final map and material exercises plus the headless import check passed, and the full suite contains 18 passing exercise scripts.
+Godot MCP 3.1.2 and Blender MCP both passed their required live gates before investigation, with Blender MCP confirming the eight Concourse mesh prefixes, 14,020 triangles, eight material slots, and no image-texture nodes.
+Live Godot MCP inspection confirmed eight imported runtime mesh children, zero map shadow casters, two world lights with shadows disabled, 4v4 actor count of 8, and route AI states exposing center, maintenance, and overlook lanes.
+Representative live core states were forced through `game_eval` at center, ground carry, upper carry, RED install, and BLUE install, with the visible core remaining present at each authored position.
+Live screenshots were inspected at the base, center approach, maintenance route, overlook deck, and bridge/core approach for bright readable surfaces, clean hard-surface response, and no visible cast shadows.
+The headless full-squad CPU sample remained `frames=120 avg_ms=16.67 min_ms=16.67 max_ms=16.67`; this is CPU-only and does not measure mobile GPU cost.
+Matched windowed MCP monitor samples were stable at 320 draw calls, approximately 26,088-26,170 primitives, 145 FPS, and approximately 0.000088 seconds of physics processing across base, center, and overlook poses.
+The prior L1 record was 308 draw calls, so the integrated visual build is 12 draw calls above that recorded comparison and is not yet a clean renderer-baseline pass.
+No on-device iPhone or iPad thermal, battery, GPU, or long-session frame-pacing verification was performed for L3, and the 320-versus-308 renderer delta needs a follow-up optimization or matched baseline audit before shipping signoff.
+The pre-existing untracked `art/maps/concourse_v2.blend.import` remains untouched, and Godot-generated `.uid` files were allowed to exist for the new scripts.
+
+**Latest - L1 Competitive Concourse V2 gameplay blockout:** the old heuristic Concourse map was replaced with an immutable `RiftlineMapLayout` version 2 contract and explicit collision solids, mirrored RED/BLUE bases, center, maintenance, and overlook route graphs.
+`RiftlineMap` keeps its public arena API, builds collision without meshes when presentation is disabled, loads `res://scenes/concourse_v2_visual.tscn` once when available, and uses a procedural greybox fallback with one logged error while that visual scene is still missing.
+The map has 129 authored collision solids, includes the 40-segment circular shell, frozen central bridge and blocker, symmetric base interiors, maintenance corridors, overlook decks, ramps, upper connectors, launch pads, gates, and spawn pockets.
+Ambient decorative motion is removed; objective pulsing is the only event-driven processing and is disabled while inactive.
+Bot roles now map Runner to center, Escort to maintenance, Defender to center, and Raider to overlook, with carriers and Escorts preferring the maintenance return route.
+Lane changes invalidate cached bot waypoints, and `ai_state()` exposes the active lane.
+
+Verification for this session is complete: the Godot MCP 3.1.2 editor connection was live for runtime inspection, live screenshots were checked at center, base, east flank, and upper-overlook poses, and live route state reported zero ambient motion and inactive map processing outside a pulse.
+The headless import check passed, all 18 `tools/*_exercise.gd` scripts passed, and the direct 4v4 arena performance sample remained `avg_ms=16.67`, `min_ms=16.67`, `max_ms=16.67` over 120 frames.
+The required serial runner command returned an empty capture again, so the direct Godot binary result is the recorded performance evidence rather than pretending the runner emitted a sample.
+Windowed MCP renderer monitors stayed at 308 draw calls and 145 FPS across samples, with physics process around `0.000041-0.000072` seconds and process around `0.001674-0.001759` seconds.
+The separate visual-scene import remains outside this map scope.
+The uncommitted build was nevertheless exported, signed, installed, launched, and process-verified on the connected iPad Pro 12.9 (5th generation) through `devicectl` as `com.lull.riftline`.
+No human touch or thermal playtest was performed by the agent, but the user subsequently played the completed L1 blockout on iPad and approved it for commit.
+Detailed temperature, battery, and long-session frame-pacing measurements were not separately reported and remain open for the final integrated build.
+The coordinator's later correction excludes all weapon, sniper, HUD, recoil, damage-feedback, and viewmodel requests from L1; none of those files were edited here.
+
+**Latest - L2 Optimized Blender environment shell:** Blender MCP authored and exported `art/maps/concourse_v2.blend` and `assets/maps/concourse_v2_environment.glb` without changing gameplay, collision, or the L3 visual integration files.
+The shell preserves the frozen Concourse V2 dimensions and route landmarks while adding merged, non-colliding environmental detail for bases, maintenance, overlook, ramps, connectors, bridge, and the central objective area.
+The final Blender source contains exactly 8 mesh objects, 8 material-role meshes, 14,020 triangles, 8 materials, one material slot and one surface per mesh, applied transforms, no non-mesh objects, no image texture nodes, and no mesh-prefix violations.
+The source bounds are `[-60.1, -60.1, -1.0]` to `[60.1, 60.1, 7.2]`, the exported GLB is 792,452 bytes, and red plus blue identity and indicator roles cover 0.1296% of measured mesh surface area.
+The generated Godot import reports `AABB(position=(-60.1, -1.0, -60.1), size=(120.2, 8.2, 120.2))`.
+The art-only preview is `scenes/concourse_v2_art_preview.tscn`, with one imported environment, one camera, one shadowless key light, one world environment, and no post-processing or extra render camera.
+Godot MCP live inspection found 15 preview nodes, 8 imported mesh children, unit scale, one surface per mesh, `cast_shadow=0` on every imported mesh, and no runtime errors.
+The final preview screenshot showed the complete circular shell and the distinct base, maintenance, overlook, bridge, and central structures after the Blender material readability pass.
+The Godot MCP preview monitor sample reported 286 draw calls, 11,198 primitives, and 0.00005 seconds of physics processing.
+The current live main-scene comparison also reported 286 draw calls, but the preview monitor's MCP FPS and object counts are not treated as device performance evidence.
+The headless import check passed and all 18 `tools/*_exercise.gd` scripts passed.
+The required serial arena performance command returned an empty capture, and the direct Godot binary did not emit a fresh sample before a bounded stop, so no new L2 CPU performance number is claimed.
+Headless validation cannot establish mobile GPU cost, and no human iPad thermal, battery, or long-session frame-pacing check was performed for this isolated art preview.
+L3 still owns the shipping wrapper and material integration in `scripts/concourse_v2_visual.gd` and `scenes/concourse_v2_visual.tscn`, including any final `NuclearMaterials.clean_surface` policy decision.
 
 **Agent tooling hard gate:** every implementation, debugging, review, test, or verification task that touches game behavior must prove a live `godot-ai` MCP editor-plugin connection with an actual successful tool call before substantive investigation or any repository write.
 Godot CLI and headless checks remain complementary validation and are never a fallback for missing MCP.
