@@ -7,7 +7,7 @@ extends RefCounted
 ## node construction stay in RiftlineMap so the same authored data can be
 ## exercised without creating a presentation tree.
 
-const VERSION := 9
+const VERSION := 10
 const CONCOURSE_RADIUS := 60.0
 const CORE_SPAWN := Vector3(0.0, 0.72, 0.0)
 
@@ -144,22 +144,31 @@ static func _add_team_structures(solids: Array[Dictionary], team_sign: float, te
 	]:
 		add_box.call("MaintenanceCover_%s" % cover.v, Vector3(float(cover.u), 0.6, float(cover.v)), Vector3(1.2, 1.2, 1.2))
 
-	# The overlook is an eight-metre-wide shallow dogleg rather than a broad,
-	# straight twelve-metre deck.  Two slightly rotated spans meet at one small
-	# centre turn, so the route itself breaks the long sightline without the tall
-	# diagonal divider the player rejected.  Both stair landings still meet the
-	# deck at local X=22 with more than a player-width overlap.
-	var overlook_turn := atan2(2.0, 12.0)
-	add_box.call("OverlookFloorSouth", Vector3(27.0, 2.9, 20.0), Vector3(8.0, 0.6, 12.2), false, "steel", overlook_turn)
-	add_box.call("OverlookFloorNorth", Vector3(27.0, 2.9, 32.0), Vector3(8.0, 0.6, 12.2), false, "steel", -overlook_turn)
-	add_box.call("OverlookOuterRailSouth", Vector3(30.778, 3.85, 19.370), Vector3(0.34, 1.3, 13.5), true, "concrete", overlook_turn)
-	add_box.call("OverlookOuterRailNorth", Vector3(30.778, 3.85, 32.630), Vector3(0.34, 1.3, 13.5), true, "concrete", -overlook_turn)
-	add_box.call("OverlookInnerGlassSouth", Vector3(23.469, 4.17, 22.109), Vector3(0.30, 1.9, 9.2), true, "steel", overlook_turn)
-	add_box.call("OverlookInnerGlassNorth", Vector3(23.469, 4.17, 29.891), Vector3(0.30, 1.9, 9.2), true, "steel", -overlook_turn)
-	add_box.call("OverlookEquipmentBox", Vector3(28.4, 3.9, 27.8), Vector3(3.4, 1.4, 1.8))
-	add_box.call("OverlookGateInner", Vector3(23.097, 5.0, 34.433), Vector3(0.8, 3.6, 1.0), true, "concrete", -overlook_turn)
-	add_box.call("OverlookGateOuter", Vector3(29.903, 5.0, 35.567), Vector3(0.8, 3.6, 1.0), true, "concrete", -overlook_turn)
-	add_box.call("OverlookGateHeader", Vector3(26.5, 6.72, 35.0), Vector3(7.7, 0.46, 1.0), false, "steel", -overlook_turn)
+	# The reference overlook is one continuous deck, not two angled slabs.  The
+	# main rectangle meets each ramp only at its near-level final rise, while a
+	# shallow outer extension supplies the small turn from the reference without
+	# creating a floor seam.  The authored Blender shell uses one watertight polygon;
+	# these two coplanar boxes are only its simple gameplay-floor contract.
+	add_box.call("OverlookFloorMain", Vector3(25.825, 2.9, 26.0), Vector3(7.95, 0.6, 28.8), false, "steel")
+	add_box.call("OverlookFloorTurnExtension", Vector3(30.55, 2.9, 26.0), Vector3(1.5, 0.6, 13.0), false, "steel")
+
+	# The open outer rail traces the small template turn.  Adjacent spans overlap
+	# slightly in the Blender mesh so neither players nor bullets can find a gap.
+	var overlook_turn := atan2(1.5, 6.0)
+	add_box.call("OverlookOuterRailSouth", Vector3(29.8, 3.85, 15.55), Vector3(0.34, 1.3, 8.1))
+	add_box.call("OverlookOuterRailTurnSouth", Vector3(30.55, 3.85, 22.5), Vector3(0.34, 1.3, 6.4), true, "concrete", overlook_turn)
+	add_box.call("OverlookOuterRailCenter", Vector3(31.3, 3.85, 26.0), Vector3(0.34, 1.3, 1.2))
+	add_box.call("OverlookOuterRailTurnNorth", Vector3(30.55, 3.85, 29.5), Vector3(0.34, 1.3, 6.4), true, "concrete", -overlook_turn)
+	add_box.call("OverlookOuterRailNorth", Vector3(29.8, 3.85, 36.45), Vector3(0.34, 1.3, 8.1))
+
+	# One straight, level ballistic-glass line faces the nuclear objective.  Both
+	# stair landings remain open, and the equipment box is freestanding with a
+	# player-width route on every side instead of intersecting a wall.
+	add_box.call("OverlookInnerGlass", Vector3(22.05, 4.12, 25.8), Vector3(0.30, 1.84, 16.4), true, "steel")
+	add_box.call("OverlookEquipmentBox", Vector3(26.35, 3.92, 26.2), Vector3(3.3, 1.16, 1.78))
+	add_box.call("OverlookGateInner", Vector3(22.15, 4.82, 35.2), Vector3(0.78, 3.24, 0.82))
+	add_box.call("OverlookGateOuter", Vector3(29.35, 4.82, 35.2), Vector3(0.78, 3.24, 0.82))
+	add_box.call("OverlookGateHeader", Vector3(25.75, 6.28, 35.2), Vector3(7.98, 0.54, 0.82), false, "steel")
 
 	# The two ramps use local +U as their rise direction and end on the local
 	# overlook deck.  The former diagonal upper connector, its rails, and its
