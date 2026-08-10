@@ -7,7 +7,7 @@ extends RefCounted
 ## node construction stay in RiftlineMap so the same authored data can be
 ## exercised without creating a presentation tree.
 
-const VERSION := 6
+const VERSION := 7
 const CONCOURSE_RADIUS := 60.0
 const CORE_SPAWN := Vector3(0.0, 0.72, 0.0)
 
@@ -108,8 +108,9 @@ static func _add_central_structure(solids: Array[Dictionary]) -> void:
 static func _add_team_structures(solids: Array[Dictionary], team_sign: float, team_name: String) -> void:
 	var accent_role := team_name + "_accent"
 	var team_prefix := team_name.capitalize()
-	var add_box := func(name: String, local_position: Vector3, dimensions: Vector3, route_blocker := true, material_role := "concrete") -> void:
-		solids.append(_solid(team_prefix + name, "box", _team_position(team_sign, local_position), dimensions, PI if team_sign < 0.0 else 0.0, 0.0, material_role if material_role != "concrete" else accent_role, route_blocker, true))
+	var add_box := func(name: String, local_position: Vector3, dimensions: Vector3, route_blocker := true, material_role := "concrete", local_rotation_y: float = 0.0) -> void:
+		var team_rotation := local_rotation_y + (PI if team_sign < 0.0 else 0.0)
+		solids.append(_solid(team_prefix + name, "box", _team_position(team_sign, local_position), dimensions, team_rotation, 0.0, material_role if material_role != "concrete" else accent_role, route_blocker, true))
 
 	add_box.call("RearBulkhead", Vector3(0.0, 3.2, 59.0), Vector3(28.0, 6.4, 1.2))
 	add_box.call("BaseRoof", Vector3(0.0, 6.1, 51.0), Vector3(28.0, 0.6, 16.0), false, "steel")
@@ -143,9 +144,13 @@ static func _add_team_structures(solids: Array[Dictionary], team_sign: float, te
 	]:
 		add_box.call("MaintenanceCover_%s" % cover.v, Vector3(float(cover.u), 0.6, float(cover.v)), Vector3(1.2, 1.2, 1.2))
 
-	# Overlook deck and alternating cross-baffles.
+	# The overlook is a broad second-floor combat platform rather than a boxed
+	# corridor.  A low outer rail keeps the long sightline open; staggered cover
+	# forces a shallow slalom while preserving a player-width route between both
+	# stair landings.  The portal at the north end is deliberately wider than a
+	# squad so it reads as a destination without becoming another choke blocker.
 	add_box.call("OverlookFloor", Vector3(27.0, 2.9, 26.0), Vector3(10.0, 0.6, 28.0), false, "steel")
-	add_box.call("OverlookOuterWall", Vector3(32.0, 5.0, 26.0), Vector3(1.2, 3.6, 28.0))
+	add_box.call("OverlookOuterRail", Vector3(31.6, 3.85, 26.0), Vector3(0.8, 1.3, 28.0))
 	add_box.call("OverlookInnerParapetSouth", Vector3(22.0, 3.85, 20.0), Vector3(1.2, 1.3, 4.0))
 	# The north parapet mirrors the 4 m south parapet around the centre cover.
 	# Both now leave the same 1.75 m gap before their nearest ramp edge, so the
@@ -155,13 +160,12 @@ static func _add_team_structures(solids: Array[Dictionary], team_sign: float, te
 	# reaching either stair mouth.  It joins the two existing low parapets at
 	# v=22 and v=30, leaving the full ramp approaches at v=14 and v=38 clear.
 	add_box.call("OverlookCenterCover", Vector3(22.0, 4.1, 26.0), Vector3(1.2, 1.8, 8.0))
-	# Paired baffle wings preserve elevated cover while leaving a 4 m doorway
-	# through the centre of the deck.  The former full spans left only a nominal
-	# 1 m edge gap; after the inner parapet and a player capsule were accounted
-	# for, both team passages were physically sealed.
-	for passage_z in [20.0, 30.0]:
-		add_box.call("OverlookBaffle%sInner" % passage_z, Vector3(23.5, 5.0, passage_z), Vector3(3.0, 3.6, 1.2))
-		add_box.call("OverlookBaffle%sOuter" % passage_z, Vector3(30.5, 5.0, passage_z), Vector3(3.0, 3.6, 1.2))
+	add_box.call("OverlookDivider", Vector3(24.8, 5.0, 22.5), Vector3(5.0, 3.6, 1.0), true, "concrete", deg_to_rad(-12.0))
+	add_box.call("OverlookCoverSouth", Vector3(29.2, 3.9, 27.2), Vector3(3.2, 1.4, 1.4))
+	add_box.call("OverlookCoverNorth", Vector3(25.0, 3.9, 31.4), Vector3(3.2, 1.4, 1.4))
+	add_box.call("OverlookGateInner", Vector3(22.8, 5.0, 35.0), Vector3(1.2, 3.6, 1.2))
+	add_box.call("OverlookGateOuter", Vector3(31.2, 5.0, 35.0), Vector3(1.2, 3.6, 1.2))
+	add_box.call("OverlookGateHeader", Vector3(27.0, 6.65, 35.0), Vector3(9.6, 0.6, 1.2), false, "steel")
 
 	# The two ramps use local +U as their rise direction and end on the local
 	# overlook deck.  The former diagonal upper connector, its rails, and its

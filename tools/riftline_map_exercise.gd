@@ -63,7 +63,7 @@ func _assert_layout_contract(layout: Dictionary) -> void:
 	_assert_bridge_ramp_record(solids, "CentralBridgeRamp_E", Vector3(16.5, 0.0, 0.0), PI)
 	_assert_bridge_support_record(solids, "CoreColumn_W", Vector3(-5.0, 1.3, 0.0))
 	_assert_bridge_support_record(solids, "CoreColumn_E", Vector3(5.0, 1.3, 0.0))
-	_assert_overlook_doorway_records(solids)
+	_assert_overlook_reference_platform_records(solids)
 	_assert_overlook_inner_parapet_symmetry(solids)
 	_assert_overlook_center_cover_records(solids)
 	for solid_variant in solids:
@@ -112,26 +112,40 @@ func _assert_bridge_support_record(solids: Array, wanted_name: String, wanted_po
 		return
 	assert(false, "missing bridge support: %s" % wanted_name)
 
-func _assert_overlook_doorway_records(solids: Array) -> void:
-	for team_name in ["Red", "Blue"]:
-		for passage_z in [20.0, 30.0]:
-			for side_name in ["Inner", "Outer"]:
-				var wanted_name := "%sOverlookBaffle%s%s" % [team_name, passage_z, side_name]
-				var found := false
-				for solid_variant in solids:
-					var solid: Dictionary = solid_variant
-					if str(solid.name) != wanted_name:
-						continue
-					found = true
-					assert((solid.dimensions as Vector3).is_equal_approx(Vector3(3.0, 3.6, 1.2)))
-					break
-				assert(found, "missing overlook doorway wing: %s" % wanted_name)
+func _assert_overlook_reference_platform_records(solids: Array) -> void:
+	var expected: Array[Dictionary] = [
+		{"name": "OverlookOuterRail", "position": Vector3(31.6, 3.85, 26.0), "dimensions": Vector3(0.8, 1.3, 28.0), "rotation": 0.0},
+		{"name": "OverlookDivider", "position": Vector3(24.8, 5.0, 22.5), "dimensions": Vector3(5.0, 3.6, 1.0), "rotation": deg_to_rad(-12.0)},
+		{"name": "OverlookCoverSouth", "position": Vector3(29.2, 3.9, 27.2), "dimensions": Vector3(3.2, 1.4, 1.4), "rotation": 0.0},
+		{"name": "OverlookCoverNorth", "position": Vector3(25.0, 3.9, 31.4), "dimensions": Vector3(3.2, 1.4, 1.4), "rotation": 0.0},
+		{"name": "OverlookGateInner", "position": Vector3(22.8, 5.0, 35.0), "dimensions": Vector3(1.2, 3.6, 1.2), "rotation": 0.0},
+		{"name": "OverlookGateOuter", "position": Vector3(31.2, 5.0, 35.0), "dimensions": Vector3(1.2, 3.6, 1.2), "rotation": 0.0},
+		{"name": "OverlookGateHeader", "position": Vector3(27.0, 6.65, 35.0), "dimensions": Vector3(9.6, 0.6, 1.2), "rotation": 0.0},
+	]
+	for team_sign_variant in [-1.0, 1.0]:
+		var team_sign: float = float(team_sign_variant)
+		var team_name := "Blue" if team_sign < 0.0 else "Red"
+		for record_variant in expected:
+			var record: Dictionary = record_variant
+			var wanted_name := team_name + str(record.name)
+			var found := false
+			for solid_variant in solids:
+				var solid: Dictionary = solid_variant
+				if str(solid.name) != wanted_name:
+					continue
+				found = true
+				var local_position: Vector3 = record.position
+				assert((solid.position as Vector3).is_equal_approx(Vector3(team_sign * local_position.x, local_position.y, team_sign * local_position.z)))
+				assert((solid.dimensions as Vector3).is_equal_approx(record.dimensions as Vector3))
+				var expected_rotation: float = float(record.rotation) + (PI if team_sign < 0.0 else 0.0)
+				assert(is_equal_approx(float(solid.rotation_y), expected_rotation))
+				break
+			assert(found, "missing reference-style overlook piece: %s" % wanted_name)
 	for solid_variant in solids:
 		var solid: Dictionary = solid_variant
-		assert(str(solid.name) not in [
-			"RedOverlookBaffleInner", "RedOverlookBaffleOuter",
-			"BlueOverlookBaffleInner", "BlueOverlookBaffleOuter",
-		], "legacy full-span overlook baffle survived: %s" % solid.name)
+		var solid_name := str(solid.name)
+		assert(not solid_name.contains("OverlookBaffle"), "old boxed-corridor baffle survived: %s" % solid_name)
+		assert(not solid_name.ends_with("OverlookOuterWall"), "old full-height outer wall survived: %s" % solid_name)
 
 func _assert_overlook_center_cover_records(solids: Array) -> void:
 	for team_sign_variant in [-1.0, 1.0]:
@@ -262,14 +276,25 @@ func _assert_overlook_access_and_passage(map: RiftlineMap) -> void:
 		map.add_child(passage_probe)
 		passage_probe.global_position = Vector3(team_sign * 27.5, 4.1, team_sign * 14.0)
 		await physics_frame
-		for _step in 420:
-			passage_probe.velocity.x = 0.0
-			passage_probe.velocity.z = team_sign * 5.0
-			_apply_probe_gravity(passage_probe)
-			passage_probe.move_and_slide()
-			await physics_frame
-			if passage_probe.global_position.z * team_sign > 36.0:
-				break
+		var local_waypoints: Array[Vector2] = [
+			Vector2(29.3, 24.5), Vector2(25.4, 25.0), Vector2(25.4, 29.2),
+			Vector2(29.0, 29.7), Vector2(29.0, 36.5),
+		]
+		for waypoint in local_waypoints:
+			var world_target := Vector3(team_sign * waypoint.x, 4.1, team_sign * waypoint.y)
+			for _step in 240:
+				var offset := world_target - passage_probe.global_position
+				offset.y = 0.0
+				if offset.length() < 0.35:
+					break
+				var direction := offset.normalized()
+				passage_probe.velocity.x = direction.x * 5.0
+				passage_probe.velocity.z = direction.z * 5.0
+				_apply_probe_gravity(passage_probe)
+				passage_probe.move_and_slide()
+				await physics_frame
+			assert(Vector2(passage_probe.global_position.x, passage_probe.global_position.z).distance_to(Vector2(world_target.x, world_target.z)) < 0.8,
+				"overlook slalom waypoint is blocked: %s -> %s" % [passage_probe.global_position, world_target])
 		assert(passage_probe.global_position.z * team_sign > 36.0,
 			"overlook passage between the two stairs is blocked: %s" % passage_probe.global_position)
 		assert(passage_probe.global_position.y > 3.8,

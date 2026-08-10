@@ -34,8 +34,10 @@ const PROJECT_ID := "riftline-lan"
 ## overlook-deck baffles. No wire fields changed.
 ## v17: Concourse layout V6 adds mirrored centre-facing overlook cover and
 ## makes both inner parapets exactly symmetric. No wire fields changed.
+## v18: Concourse layout V7 opens the overlook into a broad second-floor
+## platform with staggered cover and a wide portal. No wire fields changed.
 ## Mismatched builds must refuse to pair rather than silently desync.
-const PROTOCOL_VERSION := 17
+const PROTOCOL_VERSION := 18
 const MODE_LABEL := "nuclear-rush"
 const MAP_LABEL := "concourse"
 const APP_HOST_REMOTE_SLOTS := 7
