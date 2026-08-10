@@ -64,8 +64,6 @@ func _assert_layout_contract(layout: Dictionary) -> void:
 	_assert_bridge_support_record(solids, "CoreColumn_W", Vector3(-5.0, 1.3, 0.0))
 	_assert_bridge_support_record(solids, "CoreColumn_E", Vector3(5.0, 1.3, 0.0))
 	_assert_overlook_reference_platform_records(solids)
-	_assert_overlook_inner_parapet_symmetry(solids)
-	_assert_overlook_center_cover_records(solids)
 	for solid_variant in solids:
 		var solid: Dictionary = solid_variant
 		var solid_name := str(solid.name)
@@ -114,13 +112,14 @@ func _assert_bridge_support_record(solids: Array, wanted_name: String, wanted_po
 
 func _assert_overlook_reference_platform_records(solids: Array) -> void:
 	var expected: Array[Dictionary] = [
-		{"name": "OverlookOuterRail", "position": Vector3(31.6, 3.85, 26.0), "dimensions": Vector3(0.8, 1.3, 28.0), "rotation": 0.0},
-		{"name": "OverlookDivider", "position": Vector3(24.8, 5.0, 22.5), "dimensions": Vector3(5.0, 3.6, 1.0), "rotation": deg_to_rad(-12.0)},
-		{"name": "OverlookCoverSouth", "position": Vector3(29.2, 3.9, 27.2), "dimensions": Vector3(3.2, 1.4, 1.4), "rotation": 0.0},
-		{"name": "OverlookCoverNorth", "position": Vector3(25.0, 3.9, 31.4), "dimensions": Vector3(3.2, 1.4, 1.4), "rotation": 0.0},
-		{"name": "OverlookGateInner", "position": Vector3(22.8, 5.0, 35.0), "dimensions": Vector3(1.2, 3.6, 1.2), "rotation": 0.0},
-		{"name": "OverlookGateOuter", "position": Vector3(31.2, 5.0, 35.0), "dimensions": Vector3(1.2, 3.6, 1.2), "rotation": 0.0},
-		{"name": "OverlookGateHeader", "position": Vector3(27.0, 6.65, 35.0), "dimensions": Vector3(9.6, 0.6, 1.2), "rotation": 0.0},
+		{"name": "OverlookFloor", "position": Vector3(28.0, 2.9, 26.0), "dimensions": Vector3(12.0, 0.6, 28.0), "rotation": 0.0},
+		{"name": "OverlookOuterRail", "position": Vector3(33.78, 3.85, 26.0), "dimensions": Vector3(0.34, 1.3, 28.0), "rotation": 0.0},
+		{"name": "OverlookInnerGlass", "position": Vector3(22.16, 4.17, 26.05), "dimensions": Vector3(0.30, 1.9, 15.7), "rotation": 0.0},
+		{"name": "OverlookDivider", "position": Vector3(25.35, 5.0, 21.2), "dimensions": Vector3(7.2, 3.6, 0.9), "rotation": deg_to_rad(-18.0)},
+		{"name": "OverlookEquipmentBox", "position": Vector3(28.15, 3.9, 27.55), "dimensions": Vector3(4.5, 1.4, 1.8), "rotation": 0.0},
+		{"name": "OverlookGateInner", "position": Vector3(22.75, 5.0, 35.15), "dimensions": Vector3(0.9, 3.6, 1.25), "rotation": 0.0},
+		{"name": "OverlookGateOuter", "position": Vector3(33.15, 5.0, 35.15), "dimensions": Vector3(0.9, 3.6, 1.25), "rotation": 0.0},
+		{"name": "OverlookGateHeader", "position": Vector3(27.95, 6.72, 35.15), "dimensions": Vector3(11.3, 0.46, 1.25), "rotation": 0.0},
 	]
 	for team_sign_variant in [-1.0, 1.0]:
 		var team_sign: float = float(team_sign_variant)
@@ -146,40 +145,8 @@ func _assert_overlook_reference_platform_records(solids: Array) -> void:
 		var solid_name := str(solid.name)
 		assert(not solid_name.contains("OverlookBaffle"), "old boxed-corridor baffle survived: %s" % solid_name)
 		assert(not solid_name.ends_with("OverlookOuterWall"), "old full-height outer wall survived: %s" % solid_name)
-
-func _assert_overlook_center_cover_records(solids: Array) -> void:
-	for team_sign_variant in [-1.0, 1.0]:
-		var team_sign: float = float(team_sign_variant)
-		var team_name := "Blue" if team_sign < 0.0 else "Red"
-		var wanted_name := "%sOverlookCenterCover" % team_name
-		var found := false
-		for solid_variant in solids:
-			var solid: Dictionary = solid_variant
-			if str(solid.name) != wanted_name:
-				continue
-			found = true
-			assert((solid.position as Vector3).is_equal_approx(Vector3(team_sign * 22.0, 4.1, team_sign * 26.0)))
-			assert((solid.dimensions as Vector3).is_equal_approx(Vector3(1.2, 1.8, 8.0)))
-			break
-		assert(found, "missing centre-facing overlook cover: %s" % wanted_name)
-
-func _assert_overlook_inner_parapet_symmetry(solids: Array) -> void:
-	for team_sign_variant in [-1.0, 1.0]:
-		var team_sign: float = float(team_sign_variant)
-		var team_name := "Blue" if team_sign < 0.0 else "Red"
-		for side_variant in [{"name": "South", "z": 20.0}, {"name": "North", "z": 32.0}]:
-			var side: Dictionary = side_variant
-			var wanted_name := "%sOverlookInnerParapet%s" % [team_name, str(side.name)]
-			var found := false
-			for solid_variant in solids:
-				var solid: Dictionary = solid_variant
-				if str(solid.name) != wanted_name:
-					continue
-				found = true
-				assert((solid.position as Vector3).is_equal_approx(Vector3(team_sign * 22.0, 3.85, team_sign * float(side.z))))
-				assert((solid.dimensions as Vector3).is_equal_approx(Vector3(1.2, 1.3, 4.0)))
-				break
-			assert(found, "missing symmetric overlook parapet: %s" % wanted_name)
+		assert(not solid_name.contains("OverlookCoverSouth") and not solid_name.contains("OverlookCoverNorth"),
+			"duplicate overlook cover survived: %s" % solid_name)
 
 func _assert_central_bridge_access(map: RiftlineMap) -> void:
 	for side_variant in [-1.0, 1.0]:
@@ -277,8 +244,7 @@ func _assert_overlook_access_and_passage(map: RiftlineMap) -> void:
 		passage_probe.global_position = Vector3(team_sign * 27.5, 4.1, team_sign * 14.0)
 		await physics_frame
 		var local_waypoints: Array[Vector2] = [
-			Vector2(29.3, 24.5), Vector2(25.4, 25.0), Vector2(25.4, 29.2),
-			Vector2(29.0, 29.7), Vector2(29.0, 36.5),
+			Vector2(31.4, 23.8), Vector2(31.4, 30.0), Vector2(31.4, 36.5),
 		]
 		for waypoint in local_waypoints:
 			var world_target := Vector3(team_sign * waypoint.x, 4.1, team_sign * waypoint.y)

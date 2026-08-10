@@ -7,7 +7,7 @@ extends RefCounted
 ## node construction stay in RiftlineMap so the same authored data can be
 ## exercised without creating a presentation tree.
 
-const VERSION := 7
+const VERSION := 8
 const CONCOURSE_RADIUS := 60.0
 const CORE_SPAWN := Vector3(0.0, 0.72, 0.0)
 
@@ -144,28 +144,22 @@ static func _add_team_structures(solids: Array[Dictionary], team_sign: float, te
 	]:
 		add_box.call("MaintenanceCover_%s" % cover.v, Vector3(float(cover.u), 0.6, float(cover.v)), Vector3(1.2, 1.2, 1.2))
 
-	# The overlook is a broad second-floor combat platform rather than a boxed
-	# corridor.  A low outer rail keeps the long sightline open; staggered cover
-	# forces a shallow slalom while preserving a player-width route between both
-	# stair landings.  The portal at the north end is deliberately wider than a
-	# squad so it reads as a destination without becoming another choke blocker.
-	add_box.call("OverlookFloor", Vector3(27.0, 2.9, 26.0), Vector3(10.0, 0.6, 28.0), false, "steel")
-	add_box.call("OverlookOuterRail", Vector3(31.6, 3.85, 26.0), Vector3(0.8, 1.3, 28.0))
-	add_box.call("OverlookInnerParapetSouth", Vector3(22.0, 3.85, 20.0), Vector3(1.2, 1.3, 4.0))
-	# The north parapet mirrors the 4 m south parapet around the centre cover.
-	# Both now leave the same 1.75 m gap before their nearest ramp edge, so the
-	# two stair approaches look and play identically.
-	add_box.call("OverlookInnerParapetNorth", Vector3(22.0, 3.85, 32.0), Vector3(1.2, 1.3, 4.0))
-	# A player-height centre-facing wall closes the exposed middle edge without
-	# reaching either stair mouth.  It joins the two existing low parapets at
-	# v=22 and v=30, leaving the full ramp approaches at v=14 and v=38 clear.
-	add_box.call("OverlookCenterCover", Vector3(22.0, 4.1, 26.0), Vector3(1.2, 1.8, 8.0))
-	add_box.call("OverlookDivider", Vector3(24.8, 5.0, 22.5), Vector3(5.0, 3.6, 1.0), true, "concrete", deg_to_rad(-12.0))
-	add_box.call("OverlookCoverSouth", Vector3(29.2, 3.9, 27.2), Vector3(3.2, 1.4, 1.4))
-	add_box.call("OverlookCoverNorth", Vector3(25.0, 3.9, 31.4), Vector3(3.2, 1.4, 1.4))
-	add_box.call("OverlookGateInner", Vector3(22.8, 5.0, 35.0), Vector3(1.2, 3.6, 1.2))
-	add_box.call("OverlookGateOuter", Vector3(31.2, 5.0, 35.0), Vector3(1.2, 3.6, 1.2))
-	add_box.call("OverlookGateHeader", Vector3(27.0, 6.65, 35.0), Vector3(9.6, 0.6, 1.2), false, "steel")
+	# The overlook follows the approved second-floor screenshot: one broad
+	# elevated firefight deck, a core-facing ballistic-glass wall, one tall
+	# divider, one waist-high equipment box and a wide framed return portal.
+	# The glass is one continuous collision span between the stair mouths, while
+	# the authored shell divides it into transparent panes and metal frames.
+	# Its inner edge begins exactly at local X=22, the ramp's high edge.  Moving
+	# that collision edge even half a metre down the slope creates a vertical lip
+	# before the ramp reaches deck height and stops a player capsule.
+	add_box.call("OverlookFloor", Vector3(28.0, 2.9, 26.0), Vector3(12.0, 0.6, 28.0), false, "steel")
+	add_box.call("OverlookOuterRail", Vector3(33.78, 3.85, 26.0), Vector3(0.34, 1.3, 28.0))
+	add_box.call("OverlookInnerGlass", Vector3(22.16, 4.17, 26.05), Vector3(0.30, 1.9, 15.7), true, "steel")
+	add_box.call("OverlookDivider", Vector3(25.35, 5.0, 21.2), Vector3(7.2, 3.6, 0.9), true, "concrete", deg_to_rad(-18.0))
+	add_box.call("OverlookEquipmentBox", Vector3(28.15, 3.9, 27.55), Vector3(4.5, 1.4, 1.8))
+	add_box.call("OverlookGateInner", Vector3(22.75, 5.0, 35.15), Vector3(0.9, 3.6, 1.25))
+	add_box.call("OverlookGateOuter", Vector3(33.15, 5.0, 35.15), Vector3(0.9, 3.6, 1.25))
+	add_box.call("OverlookGateHeader", Vector3(27.95, 6.72, 35.15), Vector3(11.3, 0.46, 1.25), false, "steel")
 
 	# The two ramps use local +U as their rise direction and end on the local
 	# overlook deck.  The former diagonal upper connector, its rails, and its

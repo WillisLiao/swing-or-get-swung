@@ -36,8 +36,11 @@ const PROJECT_ID := "riftline-lan"
 ## makes both inner parapets exactly symmetric. No wire fields changed.
 ## v18: Concourse layout V7 opens the overlook into a broad second-floor
 ## platform with staggered cover and a wide portal. No wire fields changed.
+## v19: Concourse layout V8 matches the approved overlook screenshot with a
+## core-facing ballistic-glass wall and one central equipment box. No wire
+## fields changed.
 ## Mismatched builds must refuse to pair rather than silently desync.
-const PROTOCOL_VERSION := 18
+const PROTOCOL_VERSION := 19
 const MODE_LABEL := "nuclear-rush"
 const MAP_LABEL := "concourse"
 const APP_HOST_REMOTE_SLOTS := 7

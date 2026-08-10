@@ -4,11 +4,12 @@ extends Node3D
 ## Runtime-only visual shell for Concourse V2.
 ##
 ## The imported GLB owns presentation geometry only.  Gameplay collision stays
-## in RiftlineMap, and the GLB's architecture is authored directly from that same
-## 129-solid contract, so every surface the player can collide with is a surface
+## in RiftlineMap, and the GLB's architecture is authored directly from the same
+## gameplay-solid contract, so every surface the player can collide with is a surface
 ## the player can see.
 ##
-## Each imported role binds to one blueprint surface family.  The nine families
+## Each imported role binds to one blueprint surface family.  The nine opaque
+## families plus one ballistic-glass family
 ## carry a deliberate luminance ladder: the previous shell painted 11,752
 ## triangles of authored panel work at a 1.06:1 ratio against their own
 ## background, which is why a fully modelled facility rendered as flat grey.
@@ -36,6 +37,7 @@ const SURFACE_GRATE := 4
 const SURFACE_HAZARD := 5
 const SURFACE_LIGHT_STRIP := 6
 const SURFACE_CONCRETE := 7
+const GLASS_ROLE := "GLASS_Ballistic"
 
 ## albedo, roughness, metallic, emission_color, emission_energy,
 ## surface_pattern, pattern_scale, pattern_strength, pattern_accent
@@ -79,6 +81,7 @@ const ENVIRONMENT_MATERIALS := {
 }
 
 var _environment_materials: Dictionary = {}
+static var _cached_ballistic_glass: StandardMaterial3D
 
 func _ready() -> void:
 	for mesh_name_variant in ENVIRONMENT_MATERIALS.keys():
@@ -97,7 +100,21 @@ func _ready() -> void:
 			albedo, roughness, metallic, emission_color, emission_energy,
 			surface_pattern, pattern_scale, pattern_strength, pattern_accent,
 		)
+	_environment_materials[GLASS_ROLE] = _ballistic_glass_material()
 	_bind_geometry(self)
+
+func _ballistic_glass_material() -> StandardMaterial3D:
+	if _cached_ballistic_glass != null:
+		return _cached_ballistic_glass
+	var glass := StandardMaterial3D.new()
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.albedo_color = Color(0.38, 0.72, 0.76, 0.26)
+	glass.metallic = 0.05
+	glass.roughness = 0.18
+	glass.cull_mode = BaseMaterial3D.CULL_DISABLED
+	glass.disable_receive_shadows = true
+	_cached_ballistic_glass = glass
+	return _cached_ballistic_glass
 
 func _bind_geometry(node: Node) -> void:
 	for child_variant in node.get_children():
@@ -111,5 +128,5 @@ func _bind_geometry(node: Node) -> void:
 				if material_variant == null:
 					push_error("ConcourseV2Visual unknown imported mesh prefix: %s" % mesh_instance.name)
 				else:
-					mesh_instance.material_override = material_variant as ShaderMaterial
+					mesh_instance.material_override = material_variant as Material
 		_bind_geometry(child)
