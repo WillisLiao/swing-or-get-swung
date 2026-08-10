@@ -17,7 +17,7 @@ const EXPECTED_MESHES := [
 	"HAZARD_Stripe", "LIGHT_Amber", "LIGHT_White", "CORE_Lime", "ACCENT_Lime",
 	"GLASS_Ballistic",
 ]
-const EXPECTED_TRIANGLES := 24480
+const EXPECTED_TRIANGLES := 24888
 const EXPECTED_BOUNDS := AABB(Vector3(-60.499, -1.0, -60.499), Vector3(120.998, 8.23, 120.998))
 const EXPECTED_MATERIAL_VARIANTS := 9
 # Every authored box contributes its eight corners to the solid it covers; the

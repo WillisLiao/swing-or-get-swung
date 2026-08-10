@@ -39,8 +39,10 @@ const PROJECT_ID := "riftline-lan"
 ## v19: Concourse layout V8 matches the approved overlook screenshot with a
 ## core-facing ballistic-glass wall and one central equipment box. No wire
 ## fields changed.
+## v20: Concourse layout V9 narrows each overlook into a shallow dogleg and
+## removes the rejected tall diagonal divider. No wire fields changed.
 ## Mismatched builds must refuse to pair rather than silently desync.
-const PROTOCOL_VERSION := 19
+const PROTOCOL_VERSION := 20
 const MODE_LABEL := "nuclear-rush"
 const MAP_LABEL := "concourse"
 const APP_HOST_REMOTE_SLOTS := 7

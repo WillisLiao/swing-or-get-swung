@@ -111,15 +111,18 @@ func _assert_bridge_support_record(solids: Array, wanted_name: String, wanted_po
 	assert(false, "missing bridge support: %s" % wanted_name)
 
 func _assert_overlook_reference_platform_records(solids: Array) -> void:
+	var overlook_turn := atan2(2.0, 12.0)
 	var expected: Array[Dictionary] = [
-		{"name": "OverlookFloor", "position": Vector3(28.0, 2.9, 26.0), "dimensions": Vector3(12.0, 0.6, 28.0), "rotation": 0.0},
-		{"name": "OverlookOuterRail", "position": Vector3(33.78, 3.85, 26.0), "dimensions": Vector3(0.34, 1.3, 28.0), "rotation": 0.0},
-		{"name": "OverlookInnerGlass", "position": Vector3(22.16, 4.17, 26.05), "dimensions": Vector3(0.30, 1.9, 15.7), "rotation": 0.0},
-		{"name": "OverlookDivider", "position": Vector3(25.35, 5.0, 21.2), "dimensions": Vector3(7.2, 3.6, 0.9), "rotation": deg_to_rad(-18.0)},
-		{"name": "OverlookEquipmentBox", "position": Vector3(28.15, 3.9, 27.55), "dimensions": Vector3(4.5, 1.4, 1.8), "rotation": 0.0},
-		{"name": "OverlookGateInner", "position": Vector3(22.75, 5.0, 35.15), "dimensions": Vector3(0.9, 3.6, 1.25), "rotation": 0.0},
-		{"name": "OverlookGateOuter", "position": Vector3(33.15, 5.0, 35.15), "dimensions": Vector3(0.9, 3.6, 1.25), "rotation": 0.0},
-		{"name": "OverlookGateHeader", "position": Vector3(27.95, 6.72, 35.15), "dimensions": Vector3(11.3, 0.46, 1.25), "rotation": 0.0},
+		{"name": "OverlookFloorSouth", "position": Vector3(27.0, 2.9, 20.0), "dimensions": Vector3(8.0, 0.6, 12.2), "rotation": overlook_turn},
+		{"name": "OverlookFloorNorth", "position": Vector3(27.0, 2.9, 32.0), "dimensions": Vector3(8.0, 0.6, 12.2), "rotation": -overlook_turn},
+		{"name": "OverlookOuterRailSouth", "position": Vector3(30.778, 3.85, 19.370), "dimensions": Vector3(0.34, 1.3, 13.5), "rotation": overlook_turn},
+		{"name": "OverlookOuterRailNorth", "position": Vector3(30.778, 3.85, 32.630), "dimensions": Vector3(0.34, 1.3, 13.5), "rotation": -overlook_turn},
+		{"name": "OverlookInnerGlassSouth", "position": Vector3(23.469, 4.17, 22.109), "dimensions": Vector3(0.30, 1.9, 9.2), "rotation": overlook_turn},
+		{"name": "OverlookInnerGlassNorth", "position": Vector3(23.469, 4.17, 29.891), "dimensions": Vector3(0.30, 1.9, 9.2), "rotation": -overlook_turn},
+		{"name": "OverlookEquipmentBox", "position": Vector3(28.4, 3.9, 27.8), "dimensions": Vector3(3.4, 1.4, 1.8), "rotation": 0.0},
+		{"name": "OverlookGateInner", "position": Vector3(23.097, 5.0, 34.433), "dimensions": Vector3(0.8, 3.6, 1.0), "rotation": -overlook_turn},
+		{"name": "OverlookGateOuter", "position": Vector3(29.903, 5.0, 35.567), "dimensions": Vector3(0.8, 3.6, 1.0), "rotation": -overlook_turn},
+		{"name": "OverlookGateHeader", "position": Vector3(26.5, 6.72, 35.0), "dimensions": Vector3(7.7, 0.46, 1.0), "rotation": -overlook_turn},
 	]
 	for team_sign_variant in [-1.0, 1.0]:
 		var team_sign: float = float(team_sign_variant)
@@ -147,6 +150,8 @@ func _assert_overlook_reference_platform_records(solids: Array) -> void:
 		assert(not solid_name.ends_with("OverlookOuterWall"), "old full-height outer wall survived: %s" % solid_name)
 		assert(not solid_name.contains("OverlookCoverSouth") and not solid_name.contains("OverlookCoverNorth"),
 			"duplicate overlook cover survived: %s" % solid_name)
+		assert(not solid_name.contains("OverlookDivider"),
+			"rejected diagonal overlook divider survived: %s" % solid_name)
 
 func _assert_central_bridge_access(map: RiftlineMap) -> void:
 	for side_variant in [-1.0, 1.0]:
@@ -241,10 +246,11 @@ func _assert_overlook_access_and_passage(map: RiftlineMap) -> void:
 
 		var passage_probe := _make_player_probe("OverlookPassageProbe_%s" % team_sign)
 		map.add_child(passage_probe)
-		passage_probe.global_position = Vector3(team_sign * 27.5, 4.1, team_sign * 14.0)
+		passage_probe.global_position = Vector3(team_sign * 26.0, 4.1, team_sign * 14.0)
 		await physics_frame
 		var local_waypoints: Array[Vector2] = [
-			Vector2(31.4, 23.8), Vector2(31.4, 30.0), Vector2(31.4, 36.5),
+			Vector2(27.0, 20.0), Vector2(28.0, 26.0), Vector2(25.2, 28.0),
+			Vector2(27.0, 32.0), Vector2(26.0, 38.0),
 		]
 		for waypoint in local_waypoints:
 			var world_target := Vector3(team_sign * waypoint.x, 4.1, team_sign * waypoint.y)
