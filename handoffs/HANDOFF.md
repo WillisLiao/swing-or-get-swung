@@ -18,7 +18,13 @@ This repo is protected on `main` - land changes by branch + PR, not a direct pus
 
 **As of 2026-08-07, `IOSapp` is a direct clone of this repo, at its root - there is no longer a separate `IOSapp/Riftline/` working copy.** That two-tree setup (this repo plus a working copy on a different remote, manually kept "identical" - which it in fact was not; see the sessions below for exactly how they'd diverged) was retired at the user's request specifically because of that silent drift. If you're reading this from `IOSapp` and it still looks like it has a `Riftline/` subfolder or an `X-in-a-bottle` remote, something regressed - it shouldn't.
 
-## Current state (2026-08-09)
+## Current state (2026-08-10)
+
+**Latest - symmetric centre-facing overlook cover:** Concourse layout V6 adds one player-height wall to the centre-facing edge of each team's elevated overlook. Each wall is 1.2 m thick, 1.8 m high and 8.0 m long at team-local `(22, 4.1, 26)`, joining the existing low parapets without extending into either stair mouth. The previously unequal north inner parapet is now an exact 4.0 m mirror of the south parapet; both sides leave the same 1.75 m clear gap before the nearest stair edge. RED and BLUE remain rotational mirrors of one another.
+
+The gameplay contract is now 128 solids / 128 static bodies and `RiftlineNetwork.PROTOCOL_VERSION` is 17. The authoritative Blender source and exported GLB carry the same mirrored cover and trim within the existing nine material-role meshes; no texture, imported mesh, material role, light or runtime node was added. The shell is 25,992 triangles. Recoverable Blender backups are `/tmp/concourse_v2_access_before_center_cover.blend` and `/tmp/concourse_v2_access_before_parapet_symmetry.blend`.
+
+Validation: clean Godot reimport; all 19 exercise scripts pass; live Godot MCP confirmed both named centre-cover nodes and all four matching inner parapets at their authored transforms. Blender MCP confirmed the corrected source at 25,992 triangles and visually verified matching left/right geometry. The 4v4 headless CPU sample printed `frames=120 avg_ms=16.67 min_ms=16.67 max_ms=16.67`; the watchdog later stopped the non-exiting game process, so this remains CPU-only evidence rather than a device performance result. No iPhone/iPad launch, deployment, human touch, thermal or battery test was performed.
 
 **Latest - open bridge and overlook passages, ready on PR #24:** Concourse layout V5 retains the mirrored floor-to-central-bridge ramps and the fully open straight bridge from V4, and now corrects both teams' elevated overlook passages. Each former full-span cross-baffle is split into two 3 m cover wings with a clear 4 m doorway between them. The cover and industrial panel/light language remain, but a player capsule can walk directly between both stair landings. The Blender source and exported GLB carry the same openings, so no visible wall disagrees with collision.
 

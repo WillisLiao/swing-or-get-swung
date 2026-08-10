@@ -32,8 +32,10 @@ const PROJECT_ID := "riftline-lan"
 ## full-width central bridge blocker. No wire fields changed.
 ## v16: Concourse layout V5 opens player-width doorways through both teams'
 ## overlook-deck baffles. No wire fields changed.
+## v17: Concourse layout V6 adds mirrored centre-facing overlook cover and
+## makes both inner parapets exactly symmetric. No wire fields changed.
 ## Mismatched builds must refuse to pair rather than silently desync.
-const PROTOCOL_VERSION := 16
+const PROTOCOL_VERSION := 17
 const MODE_LABEL := "nuclear-rush"
 const MAP_LABEL := "concourse"
 const APP_HOST_REMOTE_SLOTS := 7

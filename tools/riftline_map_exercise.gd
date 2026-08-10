@@ -64,6 +64,8 @@ func _assert_layout_contract(layout: Dictionary) -> void:
 	_assert_bridge_support_record(solids, "CoreColumn_W", Vector3(-5.0, 1.3, 0.0))
 	_assert_bridge_support_record(solids, "CoreColumn_E", Vector3(5.0, 1.3, 0.0))
 	_assert_overlook_doorway_records(solids)
+	_assert_overlook_inner_parapet_symmetry(solids)
+	_assert_overlook_center_cover_records(solids)
 	for solid_variant in solids:
 		var solid: Dictionary = solid_variant
 		var solid_name := str(solid.name)
@@ -130,6 +132,40 @@ func _assert_overlook_doorway_records(solids: Array) -> void:
 			"RedOverlookBaffleInner", "RedOverlookBaffleOuter",
 			"BlueOverlookBaffleInner", "BlueOverlookBaffleOuter",
 		], "legacy full-span overlook baffle survived: %s" % solid.name)
+
+func _assert_overlook_center_cover_records(solids: Array) -> void:
+	for team_sign_variant in [-1.0, 1.0]:
+		var team_sign: float = float(team_sign_variant)
+		var team_name := "Blue" if team_sign < 0.0 else "Red"
+		var wanted_name := "%sOverlookCenterCover" % team_name
+		var found := false
+		for solid_variant in solids:
+			var solid: Dictionary = solid_variant
+			if str(solid.name) != wanted_name:
+				continue
+			found = true
+			assert((solid.position as Vector3).is_equal_approx(Vector3(team_sign * 22.0, 4.1, team_sign * 26.0)))
+			assert((solid.dimensions as Vector3).is_equal_approx(Vector3(1.2, 1.8, 8.0)))
+			break
+		assert(found, "missing centre-facing overlook cover: %s" % wanted_name)
+
+func _assert_overlook_inner_parapet_symmetry(solids: Array) -> void:
+	for team_sign_variant in [-1.0, 1.0]:
+		var team_sign: float = float(team_sign_variant)
+		var team_name := "Blue" if team_sign < 0.0 else "Red"
+		for side_variant in [{"name": "South", "z": 20.0}, {"name": "North", "z": 32.0}]:
+			var side: Dictionary = side_variant
+			var wanted_name := "%sOverlookInnerParapet%s" % [team_name, str(side.name)]
+			var found := false
+			for solid_variant in solids:
+				var solid: Dictionary = solid_variant
+				if str(solid.name) != wanted_name:
+					continue
+				found = true
+				assert((solid.position as Vector3).is_equal_approx(Vector3(team_sign * 22.0, 3.85, team_sign * float(side.z))))
+				assert((solid.dimensions as Vector3).is_equal_approx(Vector3(1.2, 1.3, 4.0)))
+				break
+			assert(found, "missing symmetric overlook parapet: %s" % wanted_name)
 
 func _assert_central_bridge_access(map: RiftlineMap) -> void:
 	for side_variant in [-1.0, 1.0]:

@@ -7,7 +7,7 @@ extends RefCounted
 ## node construction stay in RiftlineMap so the same authored data can be
 ## exercised without creating a presentation tree.
 
-const VERSION := 5
+const VERSION := 6
 const CONCOURSE_RADIUS := 60.0
 const CORE_SPAWN := Vector3(0.0, 0.72, 0.0)
 
@@ -147,10 +147,14 @@ static func _add_team_structures(solids: Array[Dictionary], team_sign: float, te
 	add_box.call("OverlookFloor", Vector3(27.0, 2.9, 26.0), Vector3(10.0, 0.6, 28.0), false, "steel")
 	add_box.call("OverlookOuterWall", Vector3(32.0, 5.0, 26.0), Vector3(1.2, 3.6, 28.0))
 	add_box.call("OverlookInnerParapetSouth", Vector3(22.0, 3.85, 20.0), Vector3(1.2, 1.3, 4.0))
-	# Pulled clear of the northern ramp mouth.  At its original 6m extent centred
-	# on v=35 this parapet reached v=38 and walled off 2.25m of that ramp's 4.5m
-	# exit, so a player cresting the climb hit a 1.3m ledge across half the path.
-	add_box.call("OverlookInnerParapetNorth", Vector3(22.0, 3.85, 32.5), Vector3(1.2, 1.3, 5.0))
+	# The north parapet mirrors the 4 m south parapet around the centre cover.
+	# Both now leave the same 1.75 m gap before their nearest ramp edge, so the
+	# two stair approaches look and play identically.
+	add_box.call("OverlookInnerParapetNorth", Vector3(22.0, 3.85, 32.0), Vector3(1.2, 1.3, 4.0))
+	# A player-height centre-facing wall closes the exposed middle edge without
+	# reaching either stair mouth.  It joins the two existing low parapets at
+	# v=22 and v=30, leaving the full ramp approaches at v=14 and v=38 clear.
+	add_box.call("OverlookCenterCover", Vector3(22.0, 4.1, 26.0), Vector3(1.2, 1.8, 8.0))
 	# Paired baffle wings preserve elevated cover while leaving a 4 m doorway
 	# through the centre of the deck.  The former full spans left only a nominal
 	# 1 m edge gap; after the inner parapet and a player capsule were accounted
