@@ -17,6 +17,9 @@ func _initialize() -> void:
 	assert(concourse.solid_count() == (layout.solids as Array).size())
 	_assert_team_symmetry(concourse)
 	_assert_spawn_clearance(concourse)
+	await _assert_central_bridge_access(concourse)
+	await _assert_central_bridge_crossing(concourse)
+	await _assert_overlook_access_and_passage(concourse)
 	_assert_routes(concourse)
 	_assert_tactical_facts(concourse)
 	_assert_sightlines(concourse)
@@ -56,6 +59,20 @@ func _assert_layout_contract(layout: Dictionary) -> void:
 			assert(solid.has(key), "solid is missing key: %s" % key)
 		assert(solid.position is Vector3)
 		assert(solid.dimensions is Vector3)
+	_assert_bridge_ramp_record(solids, "CentralBridgeRamp_W", Vector3(-16.5, 0.0, 0.0), 0.0)
+	_assert_bridge_ramp_record(solids, "CentralBridgeRamp_E", Vector3(16.5, 0.0, 0.0), PI)
+	_assert_bridge_support_record(solids, "CoreColumn_W", Vector3(-5.0, 1.3, 0.0))
+	_assert_bridge_support_record(solids, "CoreColumn_E", Vector3(5.0, 1.3, 0.0))
+	_assert_overlook_reference_platform_records(solids)
+	for solid_variant in solids:
+		var solid: Dictionary = solid_variant
+		var solid_name := str(solid.name)
+		assert(solid_name != "CentralBridgeSightlineBreak",
+			"the old full-width bridge blocker must be removed")
+		assert(not solid_name.contains("UpperConnector"),
+			"the deleted diagonal upper connector must not have collision: %s" % solid_name)
+		assert(not solid_name.contains("UpperSightlineBreak"),
+			"the deleted diagonal upper connector blocker must not survive: %s" % solid_name)
 
 	var graphs: Dictionary = layout.route_graphs
 	for lane in ["auto", "center", "maintenance", "overlook"]:
@@ -66,6 +83,222 @@ func _assert_layout_contract(layout: Dictionary) -> void:
 		assert(nominal_distance >= target_range.x and nominal_distance <= target_range.y)
 		assert(is_equal_approx(nominal_distance, float(graph.rotated_gate_core_distance)))
 		assert(absf(float(graph.authored_path_length) - nominal_distance) < 8.0)
+
+func _assert_bridge_ramp_record(solids: Array, wanted_name: String, wanted_position: Vector3, wanted_rotation: float) -> void:
+	for solid_variant in solids:
+		var solid: Dictionary = solid_variant
+		if str(solid.name) != wanted_name:
+			continue
+		assert(str(solid.shape) == "ramp")
+		assert((solid.position as Vector3).is_equal_approx(wanted_position))
+		assert((solid.dimensions as Vector3).is_equal_approx(Vector3(9.0, 0.2, 4.5)))
+		assert(is_equal_approx(float(solid.rotation_y), wanted_rotation))
+		assert(is_equal_approx(float(solid.rise), 3.2))
+		assert(not bool(solid.route_blocker))
+		return
+	assert(false, "missing central bridge access ramp: %s" % wanted_name)
+
+func _assert_bridge_support_record(solids: Array, wanted_name: String, wanted_position: Vector3) -> void:
+	for solid_variant in solids:
+		var solid: Dictionary = solid_variant
+		if str(solid.name) != wanted_name:
+			continue
+		assert((solid.position as Vector3).is_equal_approx(wanted_position))
+		assert((solid.dimensions as Vector3).is_equal_approx(Vector3(1.4, 2.6, 1.4)))
+		var top: float = (solid.position as Vector3).y + (solid.dimensions as Vector3).y * 0.5
+		assert(top <= 2.6, "bridge support protrudes through the deck: %s" % wanted_name)
+		return
+	assert(false, "missing bridge support: %s" % wanted_name)
+
+func _assert_overlook_reference_platform_records(solids: Array) -> void:
+	var overlook_turn := atan2(1.5, 6.0)
+	var expected: Array[Dictionary] = [
+		{"name": "OverlookFloorMain", "position": Vector3(25.825, 2.9, 26.0), "dimensions": Vector3(7.95, 0.6, 28.8), "rotation": 0.0},
+		{"name": "OverlookFloorTurnExtension", "position": Vector3(30.55, 2.9, 26.0), "dimensions": Vector3(1.5, 0.6, 13.0), "rotation": 0.0},
+		{"name": "OverlookOuterRailSouth", "position": Vector3(29.8, 3.85, 15.55), "dimensions": Vector3(0.34, 1.3, 8.1), "rotation": 0.0},
+		{"name": "OverlookOuterRailTurnSouth", "position": Vector3(30.55, 3.85, 22.5), "dimensions": Vector3(0.34, 1.3, 6.4), "rotation": overlook_turn},
+		{"name": "OverlookOuterRailCenter", "position": Vector3(31.3, 3.85, 26.0), "dimensions": Vector3(0.34, 1.3, 1.2), "rotation": 0.0},
+		{"name": "OverlookOuterRailTurnNorth", "position": Vector3(30.55, 3.85, 29.5), "dimensions": Vector3(0.34, 1.3, 6.4), "rotation": -overlook_turn},
+		{"name": "OverlookOuterRailNorth", "position": Vector3(29.8, 3.85, 36.45), "dimensions": Vector3(0.34, 1.3, 8.1), "rotation": 0.0},
+		{"name": "OverlookInnerGlass", "position": Vector3(22.05, 4.12, 25.8), "dimensions": Vector3(0.30, 1.84, 16.4), "rotation": 0.0},
+		{"name": "OverlookEquipmentBox", "position": Vector3(26.35, 3.92, 26.2), "dimensions": Vector3(3.3, 1.16, 1.78), "rotation": 0.0},
+		{"name": "OverlookGateInner", "position": Vector3(22.15, 4.82, 35.2), "dimensions": Vector3(0.78, 3.24, 0.82), "rotation": 0.0},
+		{"name": "OverlookGateOuter", "position": Vector3(29.35, 4.82, 35.2), "dimensions": Vector3(0.78, 3.24, 0.82), "rotation": 0.0},
+	]
+	for team_sign_variant in [-1.0, 1.0]:
+		var team_sign: float = float(team_sign_variant)
+		var team_name := "Blue" if team_sign < 0.0 else "Red"
+		for record_variant in expected:
+			var record: Dictionary = record_variant
+			var wanted_name := team_name + str(record.name)
+			var found := false
+			for solid_variant in solids:
+				var solid: Dictionary = solid_variant
+				if str(solid.name) != wanted_name:
+					continue
+				found = true
+				var local_position: Vector3 = record.position
+				assert((solid.position as Vector3).is_equal_approx(Vector3(team_sign * local_position.x, local_position.y, team_sign * local_position.z)))
+				assert((solid.dimensions as Vector3).is_equal_approx(record.dimensions as Vector3))
+				var expected_rotation: float = float(record.rotation) + (PI if team_sign < 0.0 else 0.0)
+				assert(is_equal_approx(float(solid.rotation_y), expected_rotation))
+				break
+			assert(found, "missing reference-style overlook piece: %s" % wanted_name)
+	for solid_variant in solids:
+		var solid: Dictionary = solid_variant
+		var solid_name := str(solid.name)
+		assert(not solid_name.contains("OverlookBaffle"), "old boxed-corridor baffle survived: %s" % solid_name)
+		assert(not solid_name.ends_with("OverlookOuterWall"), "old full-height outer wall survived: %s" % solid_name)
+		assert(not solid_name.contains("OverlookCoverSouth") and not solid_name.contains("OverlookCoverNorth"),
+			"duplicate overlook cover survived: %s" % solid_name)
+		assert(not solid_name.contains("OverlookDivider"),
+			"rejected diagonal overlook divider survived: %s" % solid_name)
+		assert(not solid_name.contains("OverlookGateHeader"),
+			"rejected overhead gate wall survived: %s" % solid_name)
+
+func _assert_central_bridge_access(map: RiftlineMap) -> void:
+	for side_variant in [-1.0, 1.0]:
+		var side: float = float(side_variant)
+		var body := CharacterBody3D.new()
+		body.name = "BridgeAccessProbe_%s" % ("W" if side < 0.0 else "E")
+		body.floor_snap_length = 0.45
+		body.floor_max_angle = deg_to_rad(46.0)
+		var collision := CollisionShape3D.new()
+		var capsule := CapsuleShape3D.new()
+		capsule.radius = 0.45
+		capsule.height = 1.8
+		collision.shape = capsule
+		body.add_child(collision)
+		map.add_child(body)
+		body.global_position = Vector3(side * 21.5, 1.05, 0.0)
+		await physics_frame
+		var direction: float = -side
+		for _step in 180:
+			body.velocity.x = direction * 5.0
+			body.velocity.z = 0.0
+			if not body.is_on_floor():
+				body.velocity.y -= 18.0 / 60.0
+			else:
+				body.velocity.y = 0.0
+			body.move_and_slide()
+			await physics_frame
+			if body.global_position.x * side < 12.0 and body.global_position.y > 3.8:
+				break
+		assert(body.global_position.x * side < 12.5,
+			"central bridge ramp did not reach the deck from side %s: %s" % [side, body.global_position])
+		assert(body.global_position.y > 3.8,
+			"central bridge ramp left the player below the deck from side %s: %s" % [side, body.global_position])
+		body.queue_free()
+		await physics_frame
+
+func _assert_central_bridge_crossing(map: RiftlineMap) -> void:
+	var body := CharacterBody3D.new()
+	body.name = "BridgeThroughRouteProbe"
+	body.floor_snap_length = 0.45
+	body.floor_max_angle = deg_to_rad(46.0)
+	var collision := CollisionShape3D.new()
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.45
+	capsule.height = 1.8
+	collision.shape = capsule
+	body.add_child(collision)
+	map.add_child(body)
+	body.global_position = Vector3(-5.0, 4.1, 0.0)
+	await physics_frame
+	for _step in 300:
+		body.velocity.x = 5.0
+		body.velocity.z = 0.0
+		if not body.is_on_floor():
+			body.velocity.y -= 18.0 / 60.0
+		else:
+			body.velocity.y = 0.0
+		body.move_and_slide()
+		await physics_frame
+		if body.global_position.x > 4.5:
+			break
+	assert(body.global_position.x > 4.5,
+		"central bridge still blocks the open through route: %s" % body.global_position)
+	assert(body.global_position.y > 3.8,
+		"central bridge crossing dropped the player below the deck: %s" % body.global_position)
+	body.queue_free()
+	await physics_frame
+
+func _assert_overlook_access_and_passage(map: RiftlineMap) -> void:
+	for team_sign_variant in [-1.0, 1.0]:
+		var team_sign: float = float(team_sign_variant)
+		for local_z_variant in [14.0, 38.0]:
+			var local_z: float = float(local_z_variant)
+			var ramp_probe := _make_player_probe("OverlookRampProbe_%s_%s" % [team_sign, local_z])
+			map.add_child(ramp_probe)
+			ramp_probe.global_position = Vector3(team_sign * 12.5, 1.05, team_sign * local_z)
+			await physics_frame
+			for _step in 240:
+				ramp_probe.velocity.x = team_sign * 5.0
+				ramp_probe.velocity.z = 0.0
+				_apply_probe_gravity(ramp_probe)
+				ramp_probe.move_and_slide()
+				await physics_frame
+				if ramp_probe.global_position.x * team_sign > 22.5 and ramp_probe.global_position.y > 3.8:
+					break
+			assert(ramp_probe.global_position.x * team_sign > 22.4,
+				"overlook stair did not reach its upper landing: %s" % ramp_probe.global_position)
+			assert(ramp_probe.global_position.y > 3.8,
+				"overlook stair left the player below its upper landing: %s" % ramp_probe.global_position)
+			ramp_probe.queue_free()
+			await physics_frame
+
+		var passage_probe := _make_player_probe("OverlookPassageProbe_%s" % team_sign)
+		map.add_child(passage_probe)
+		# Start on the arena floor and physically climb the first stair.  The V9
+		# regression teleported this probe onto the deck and therefore could not
+		# catch a visually disconnected stair landing.
+		passage_probe.global_position = Vector3(team_sign * 12.5, 1.05, team_sign * 14.0)
+		await physics_frame
+		var local_waypoints: Array[Vector2] = [
+			Vector2(22.8, 14.0), Vector2(25.5, 18.0), Vector2(28.5, 22.5),
+			Vector2(29.2, 27.0), Vector2(28.3, 31.5), Vector2(25.2, 35.0),
+			Vector2(22.8, 38.0),
+		]
+		for waypoint in local_waypoints:
+			var world_target := Vector3(team_sign * waypoint.x, 4.1, team_sign * waypoint.y)
+			for _step in 240:
+				var offset := world_target - passage_probe.global_position
+				offset.y = 0.0
+				if offset.length() < 0.35:
+					break
+				var direction := offset.normalized()
+				passage_probe.velocity.x = direction.x * 5.0
+				passage_probe.velocity.z = direction.z * 5.0
+				_apply_probe_gravity(passage_probe)
+				passage_probe.move_and_slide()
+				await physics_frame
+			assert(Vector2(passage_probe.global_position.x, passage_probe.global_position.z).distance_to(Vector2(world_target.x, world_target.z)) < 0.8,
+				"overlook slalom waypoint is blocked: %s -> %s" % [passage_probe.global_position, world_target])
+		assert(passage_probe.global_position.z * team_sign > 36.0,
+			"overlook passage between the two stairs is blocked: %s" % passage_probe.global_position)
+		assert(passage_probe.global_position.y > 3.8,
+			"overlook passage dropped the player below the deck: %s" % passage_probe.global_position)
+		passage_probe.queue_free()
+		await physics_frame
+
+func _make_player_probe(probe_name: String) -> CharacterBody3D:
+	var body := CharacterBody3D.new()
+	body.name = probe_name
+	body.floor_snap_length = 0.45
+	body.floor_max_angle = deg_to_rad(46.0)
+	var collision := CollisionShape3D.new()
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.45
+	capsule.height = 1.8
+	collision.shape = capsule
+	body.add_child(collision)
+	return body
+
+func _apply_probe_gravity(body: CharacterBody3D) -> void:
+	if not body.is_on_floor():
+		body.velocity.y -= 18.0 / 60.0
+	else:
+		body.velocity.y = 0.0
 
 func _assert_team_symmetry(map: RiftlineMap) -> void:
 	var gates := map.gate_positions()
@@ -130,6 +363,11 @@ func _assert_tactical_facts(map: RiftlineMap) -> void:
 		var bridge_side: Vector3 = bridge_side_variant
 		assert(map.is_spawn_clear(bridge_side), "bridge side is inside a solid: %s" % bridge_side)
 		assert(_has_authored_route(map, bridge_side, map.core_spawn_position(), &"overlook"))
+	assert(facts.bridge_access.keys().size() == 4)
+	assert((facts.bridge_access.west_bottom as Vector3).is_equal_approx(Vector3(-21.0, 0.1, 0.0)))
+	assert((facts.bridge_access.west_top as Vector3).is_equal_approx(Vector3(-12.0, 3.35, 0.0)))
+	assert((facts.bridge_access.east_bottom as Vector3).is_equal_approx(Vector3(21.0, 0.1, 0.0)))
+	assert((facts.bridge_access.east_top as Vector3).is_equal_approx(Vector3(12.0, 3.35, 0.0)))
 
 func _assert_sightlines(map: RiftlineMap) -> void:
 	var world := map.get_world_3d()

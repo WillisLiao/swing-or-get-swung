@@ -2,7 +2,7 @@ extends SceneTree
 
 ## Locks the Concourse V2 environment shell contract.
 ##
-## The shell carries nine roles rather than eight: the blueprint's lighting sheet
+## The shell carries nine opaque roles plus one ballistic-glass role: the blueprint's lighting sheet
 ## separates OBJECTIVE FOCUS lime from LANDMARK LIGHTING lime, and one shared role
 ## collapsed the two so decorative containment inserts bloomed as hard as the
 ## reactor.  The eight-role organisation could not support that distinction.
@@ -15,12 +15,13 @@ extends SceneTree
 const EXPECTED_MESHES := [
 	"FLOOR_Concourse", "STRUCT_Gunmetal", "SYSTEMS_DarkSteel", "GRATE_Vent",
 	"HAZARD_Stripe", "LIGHT_Amber", "LIGHT_White", "CORE_Lime", "ACCENT_Lime",
+	"GLASS_Ballistic",
 ]
-const EXPECTED_TRIANGLES := 27568
-const EXPECTED_BOUNDS := AABB(Vector3(-60.499, -1.0, -60.499), Vector3(120.998, 9.69, 120.998))
+const EXPECTED_TRIANGLES := 30680
+const EXPECTED_BOUNDS := AABB(Vector3(-60.499, -1.0, -60.499), Vector3(120.998, 8.23, 120.998))
 const EXPECTED_MATERIAL_VARIANTS := 9
 # Every authored box contributes its eight corners to the solid it covers; the
-# four ramp wedges contribute three vertices inside the thin collision slab.
+# six ramp wedges contribute three vertices inside the thin collision slab.
 const MINIMUM_COVERAGE_VERTICES := 3
 
 func _initialize() -> void:
@@ -47,6 +48,12 @@ func _initialize() -> void:
 	for mesh_name_variant in EXPECTED_MESHES:
 		var mesh_name: String = mesh_name_variant
 		var mesh_instance: MeshInstance3D = first_meshes[mesh_name]
+		if mesh_name == "GLASS_Ballistic":
+			var glass: StandardMaterial3D = mesh_instance.material_override as StandardMaterial3D
+			assert(glass != null, "missing ballistic-glass material override")
+			_assert_ballistic_glass(glass)
+			first_materials[mesh_name] = glass
+			continue
 		var material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
 		assert(material != null, "missing clean material override: %s" % mesh_name)
 		assert(bool(material.get_shader_parameter("clean_surface")))
@@ -67,7 +74,7 @@ func _initialize() -> void:
 	assert(NuclearMaterials.cached_variant_count() == cached_count)
 	for mesh_name_variant in EXPECTED_MESHES:
 		var mesh_name: String = mesh_name_variant
-		var second_material: ShaderMaterial = (second_meshes[mesh_name] as MeshInstance3D).material_override as ShaderMaterial
+		var second_material: Material = (second_meshes[mesh_name] as MeshInstance3D).material_override
 		assert(second_material == first_materials[mesh_name], "environment material was not reused: %s" % mesh_name)
 	_assert_shadowless_environment()
 
@@ -185,6 +192,8 @@ func _assert_surface_language(materials: Dictionary) -> void:
 	var patterns: Dictionary = {}
 	for mesh_name_variant in EXPECTED_MESHES:
 		var mesh_name: String = mesh_name_variant
+		if mesh_name == "GLASS_Ballistic":
+			continue
 		var material: ShaderMaterial = materials[mesh_name]
 		var pattern := int(material.get_shader_parameter("surface_pattern"))
 		assert(pattern > 0, "shell role has no surface pattern: %s" % mesh_name)
@@ -200,6 +209,8 @@ func _assert_no_faction_identity(materials: Dictionary) -> void:
 		var mesh_name: String = mesh_name_variant
 		assert(not mesh_name.contains("RED") and not mesh_name.contains("BLUE"),
 			"shell role carries a team name: %s" % mesh_name)
+		if mesh_name == "GLASS_Ballistic":
+			continue
 		var material: ShaderMaterial = materials[mesh_name]
 		for parameter in ["albedo", "emission_color", "pattern_accent"]:
 			var color: Color = material.get_shader_parameter(parameter)
@@ -215,6 +226,13 @@ func _assert_no_faction_identity(materials: Dictionary) -> void:
 			assert(not team_red and not team_blue,
 				"shell %s.%s reads as a team colour: %s (hue %.3f)"
 					% [mesh_name, parameter, color.to_html(false), hue])
+
+func _assert_ballistic_glass(glass: StandardMaterial3D) -> void:
+	assert(glass.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA)
+	assert(glass.albedo_color.a > 0.20 and glass.albedo_color.a < 0.35)
+	assert(glass.albedo_color.b > glass.albedo_color.r)
+	assert(glass.cull_mode == BaseMaterial3D.CULL_DISABLED)
+	assert(glass.disable_receive_shadows)
 
 func _assert_scene_has_no_gameplay_nodes(root: Node) -> void:
 	for child_variant in root.get_children():
