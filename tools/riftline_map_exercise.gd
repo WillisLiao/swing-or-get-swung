@@ -124,7 +124,6 @@ func _assert_overlook_reference_platform_records(solids: Array) -> void:
 		{"name": "OverlookEquipmentBox", "position": Vector3(26.35, 3.92, 26.2), "dimensions": Vector3(3.3, 1.16, 1.78), "rotation": 0.0},
 		{"name": "OverlookGateInner", "position": Vector3(22.15, 4.82, 35.2), "dimensions": Vector3(0.78, 3.24, 0.82), "rotation": 0.0},
 		{"name": "OverlookGateOuter", "position": Vector3(29.35, 4.82, 35.2), "dimensions": Vector3(0.78, 3.24, 0.82), "rotation": 0.0},
-		{"name": "OverlookGateHeader", "position": Vector3(25.75, 6.28, 35.2), "dimensions": Vector3(7.98, 0.54, 0.82), "rotation": 0.0},
 	]
 	for team_sign_variant in [-1.0, 1.0]:
 		var team_sign: float = float(team_sign_variant)
@@ -154,6 +153,8 @@ func _assert_overlook_reference_platform_records(solids: Array) -> void:
 			"duplicate overlook cover survived: %s" % solid_name)
 		assert(not solid_name.contains("OverlookDivider"),
 			"rejected diagonal overlook divider survived: %s" % solid_name)
+		assert(not solid_name.contains("OverlookGateHeader"),
+			"rejected overhead gate wall survived: %s" % solid_name)
 
 func _assert_central_bridge_access(map: RiftlineMap) -> void:
 	for side_variant in [-1.0, 1.0]:

@@ -44,8 +44,10 @@ const PROJECT_ID := "riftline-lan"
 ## v21: Concourse layout V10 replaces the broken two-slab overlook with one
 ## continuous template deck, straight glass, grounded portal and clear cover.
 ## No wire fields changed.
+## v22: Concourse layout V11 removes the rejected overhead overlook gate wall
+## from both authored geometry and collision. No wire fields changed.
 ## Mismatched builds must refuse to pair rather than silently desync.
-const PROTOCOL_VERSION := 21
+const PROTOCOL_VERSION := 22
 const MODE_LABEL := "nuclear-rush"
 const MAP_LABEL := "concourse"
 const APP_HOST_REMOTE_SLOTS := 7

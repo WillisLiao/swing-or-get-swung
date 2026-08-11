@@ -7,7 +7,7 @@ extends RefCounted
 ## node construction stay in RiftlineMap so the same authored data can be
 ## exercised without creating a presentation tree.
 
-const VERSION := 10
+const VERSION := 11
 const CONCOURSE_RADIUS := 60.0
 const CORE_SPAWN := Vector3(0.0, 0.72, 0.0)
 
@@ -168,7 +168,9 @@ static func _add_team_structures(solids: Array[Dictionary], team_sign: float, te
 	add_box.call("OverlookEquipmentBox", Vector3(26.35, 3.92, 26.2), Vector3(3.3, 1.16, 1.78))
 	add_box.call("OverlookGateInner", Vector3(22.15, 4.82, 35.2), Vector3(0.78, 3.24, 0.82))
 	add_box.call("OverlookGateOuter", Vector3(29.35, 4.82, 35.2), Vector3(0.78, 3.24, 0.82))
-	add_box.call("OverlookGateHeader", Vector3(25.75, 6.28, 35.2), Vector3(7.98, 0.54, 0.82), false, "steel")
+	# The supplied reference is authoritative except for its overhead gate wall.
+	# Keep the two grounded side pylons, but leave the opening clear visually and
+	# physically so shots cannot hit an invisible header.
 
 	# The two ramps use local +U as their rise direction and end on the local
 	# overlook deck.  The former diagonal upper connector, its rails, and its
